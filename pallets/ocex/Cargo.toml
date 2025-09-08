@@ -1,0 +1,79 @@
+[package]
+name = "pallet-ocex-lmp"
+version = "6.0.0"
+authors = ["Gautham J <gautham@polkadex.trade>"]
+edition = "2021"
+license = "GNU GPL v3"
+homepage = "https://polkadex.trade"
+repository = "https://github.com/Polkadex-Substrate/Polkadex/"
+description = "FRAME Onchain Settlement and Liquidity Mining pallet"
+readme = "README.md"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+log = { workspace = true, default-features = false }
+parity-scale-codec = { workspace = true, default-features = false }
+scale-info = { workspace = true, default-features = false, features = ["derive"] }
+frame-support = { default-features = false, workspace = true }
+frame-system = { default-features = false, workspace = true }
+sp-runtime = { default-features = false, workspace = true }
+sp-std = { workspace = true, default-features = false }
+polkadex-primitives = { workspace = true, default-features = false }
+orderbook-primitives = { path = "../../primitives/orderbook", default-features = false }
+rust_decimal = { workspace = true, features = ["scale-codec", "maths-nopanic"], default-features = false }
+pallet-timestamp = { workspace = true, default-features = false }
+frame-benchmarking = { workspace = true, default-features = false, optional = true }
+sp-core = { workspace = true, default-features = false }
+sp-io = { workspace = true, default-features = false }
+sp-application-crypto = { workspace = true }
+serde = { workspace = true, default-features = false, features = ["derive"] }
+serde_json = { workspace = true, default-features = false, features = ["alloc"] }
+hash-db = { workspace = true, default-features = false }
+trie-db = { workspace = true, default-features = false }
+sp-trie = { workspace = true, default-features = false }
+num-traits = { version = "0.2.17", default-features = false }
+
+[dev-dependencies]
+pallet-assets = { workspace = true, features = ["std"] }
+pallet-balances = { workspace = true, features = ["std"] }
+sp-application-crypto = { workspace = true }
+sp-keystore = { workspace = true }
+pallet-lmp = { path = "../liquidity-mining", default-features = false }
+lazy_static = "1.4.0"
+sequential-test = "0.2.4"
+hex = "0.4.3"
+
+[features]
+default = ["std"]
+std = [
+  "log/std",
+  "serde_json/std",
+  "serde/std",
+  "sp-application-crypto/std",
+  "orderbook-primitives/std",
+  "parity-scale-codec/std",
+  "scale-info/std",
+  "frame-support/std",
+  "frame-system/std",
+  "sp-runtime/std",
+  "sp-std/std",
+  "sp-io/std",
+  "sp-trie/std",
+  "hash-db/std",
+  "trie-db/std",
+  "polkadex-primitives/std",
+  "frame-benchmarking?/std",
+  "rust_decimal/std",
+  "pallet-timestamp/std",
+  "sp-core/std",
+  "pallet-lmp/std",
+]
+runtime-benchmarks = [
+  "sp-runtime/runtime-benchmarks",
+  "frame-benchmarking/runtime-benchmarks",
+  "frame-support/runtime-benchmarks",
+  "frame-system/runtime-benchmarks",
+]
+try-runtime = ["frame-support/try-runtime"]

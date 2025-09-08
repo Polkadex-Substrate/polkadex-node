@@ -1,0 +1,67 @@
+[package]
+name = "thea"
+version = "5.3.0"
+edition = "2021"
+
+[dependencies]
+log = { workspace = true, default-features = false }
+parity-scale-codec = { workspace = true, default-features = false }
+serde = { workspace = true, default-features = false, features = ["derive"] }
+serde_json = { workspace = true, default-features = false, features = ["alloc"] }
+scale-info = { workspace = true, default-features = false, features = ["derive"] }
+frame-support = { default-features = false, workspace = true }
+frame-system = { default-features = false, workspace = true }
+sp-runtime = { default-features = false, workspace = true }
+sp-std = { workspace = true, default-features = false }
+polkadex-primitives = { workspace = true, default-features = false }
+pallet-timestamp = { workspace = true, default-features = false }
+pallet-balances = { workspace = true, default-features = false }
+frame-benchmarking = { workspace = true, default-features = false, optional = true }
+sp-core = { workspace = true, default-features = false, features = ["serde"] }
+thea-primitives = { path = "../../primitives/thea", default-features = false }
+sp-application-crypto = { workspace = true, default-features = false }
+sp-io = { workspace = true, default-features = false }
+hex = { workspace = true, default-features = false, features = ["alloc"] }
+libsecp256k1 = { version = "0.7.1", default-features = false }
+# thea-executor = { path = "../thea-executor", default-features = false }
+
+[dev-dependencies]
+pallet-assets = { workspace = true, features = ["std"] }
+pallet-balances = { workspace = true, features = ["std"] }
+pallet-asset-conversion = { workspace = true, features = ["std"] }
+sp-keystore = { workspace = true }
+env_logger = { workspace = true }
+
+
+[features]
+default = ["std"]
+std = [
+  "hex/std",
+  "log/std",
+  "serde_json/std",
+  "serde/std",
+  "sp-application-crypto/std",
+  "thea-primitives/std",
+  "parity-scale-codec/std",
+  "scale-info/std",
+  "frame-support/std",
+  "frame-system/std",
+  "sp-runtime/std",
+  "sp-std/std",
+  "sp-io/std",
+  "polkadex-primitives/std",
+  "pallet-timestamp/std",
+  "pallet-balances/std",
+  "sp-core/std",
+  "frame-benchmarking?/std",
+  "libsecp256k1/std",
+  # "thea-executor/std",
+]
+runtime-benchmarks = [
+  "pallet-balances/runtime-benchmarks",
+  "sp-runtime/runtime-benchmarks",
+  "frame-benchmarking/runtime-benchmarks",
+  "frame-support/runtime-benchmarks",
+  "frame-system/runtime-benchmarks",
+]
+try-runtime = ["frame-support/try-runtime"]
