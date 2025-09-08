@@ -1,0 +1,177 @@
+name: Continuous Integration
+
+on:
+  pull_request:
+    types: [labeled]
+  push:
+    branches: [Develop, mainnet-release]
+
+env:
+  RUNNER_INSTANCE_TYPE: c5d.4xlarge
+
+jobs:
+  start-runner:
+    name: Start self-hosted EC2 runner
+    # Run the job only if it has proper label or it is triggered by the push to the dev or main branch.
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'A0-PleaseReview') ||
+      contains(github.event_name, 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.start-ec2-runner.outputs.label }}
+      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Start EC2 runner
+        id: start-ec2-runner
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: start
+          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN_REPO }}
+          ec2-image-id: ami-04fffb9b173db7fb2 # Ubuntu 22 with 500 GB volume. Updated on Feb 09 2024.
+          ec2-instance-type: ${{ env.RUNNER_INSTANCE_TYPE }}
+          subnet-id: subnet-a4d326e8
+          security-group-id: sg-078363c0f7b5f0b41
+          iam-role-name: github-runner-role
+          aws-resource-tags: >
+            [
+              {"Key": "Name", "Value": "github-runner"},
+              {"Key": "GitHubRepository", "Value": "${{ github.repository }}"}
+            ]
+  build:
+    name: Build | Run linters | Run tests
+    needs: start-runner
+    runs-on: ${{ needs.start-runner.outputs.label }}
+    steps:
+      - name: Set home environment variable # bug self hosted https://github.com/actions-rs/toolchain/issues/137
+        run: |
+          echo "HOME=/root" >> ${GITHUB_ENV} # bug
+      - name: Install dependencies
+        run: |
+          cat /etc/issue 
+         # apt update   #Included in base AMI
+         # apt install -y clang lldb lld gcc zip protobuf-compiler build-essential curl libssl-dev # Included in base AMI
+      - name: Install latest nightly with wasm target
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+          default: true
+          components: rustfmt, clippy
+      - name: Install .toml files linter
+        run: |
+          curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-linux-x86_64.gz \
+          | gzip -d - | install -m 755 /dev/stdin /usr/local/bin/taplo
+      - name: Checkout to the current branch
+        uses: actions/checkout@v3
+      - name: Cache Rust Dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Check versions info
+        run: |
+          cargo fmt -- --version
+          cargo clippy -V
+      - name: Lint .toml files
+        run: |
+          taplo lint
+          taplo fmt --check
+
+      - name: Build project with "try-runtime" feature
+        run: RUSTFLAGS="-D warnings" cargo build --features try-runtime
+
+      - name: Build mainnet node runtime
+        run: RUSTFLAGS="-D warnings" cargo build -p node-polkadex-runtime
+      - name: Build mainnet node with "runtime-benchmarks" feature
+        run: RUSTFLAGS="-D warnings" cargo build -p polkadex-node --features runtime-benchmarks
+      - name: Test mainnet node pallets weights generation
+        run: ./target/debug/polkadex-node benchmark pallet --pallet "*" --extrinsic "*" --steps 2 --repeat 1
+
+      - name: Build parachain node runtime
+        run: RUSTFLAGS="-D warnings" cargo build -p parachain-polkadex-runtime
+      - name: Build parachain node with "runtime-benchmarks" feature
+        run: RUSTFLAGS="-D warnings" cargo build -p parachain-polkadex-node --features runtime-benchmarks
+      - name: Test parachain node pallets weights generation
+        run: ./target/debug/parachain-polkadex-node benchmark pallet --pallet "*" --extrinsic "*" --steps 2 --repeat 1
+
+      - name: Build in release mode
+        if: contains(github.ref, 'Develop')
+        run: RUSTFLAGS="-D warnings" cargo build --release
+      - name: Build in dev mode
+        if: "!(contains(github.ref, 'Develop'))"
+        run: RUSTFLAGS="-D warnings" cargo build
+
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+      - name: Check Clippy
+        run: cargo clippy -- -D warnings
+      - name: Test Project
+        run: RUSTFLAGS="-D warnings" cargo test --workspace
+      - name: Run Cargo Tarpaulin
+        uses: actions-rs/tarpaulin@v0.1
+        with:
+          version: '0.22.0'
+          args: '--avoid-cfg-tarpaulin --exclude polkadex-node node-polkadex-runtime parachain-polkadex-node parachain-polkadex-runtime --workspace --timeout 180'
+      - name: Upload to codecov.io
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{secrets.CODECOV_TOKEN}}
+          fail_ci_if_error: true
+      - name: Archive code coverage results
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v1
+        with:
+          name: code-coverage-report
+          path: cobertura.xml
+      - name: Zip compiled mainnet node binary
+        if: contains(github.ref, 'Develop')
+        # Zipping is required since billing is based on the raw uploaded size.
+        run: zip -r -j polkadex-node.zip ./target/release/polkadex-node
+      - name: Upload zipped mainnet binary as an artifact
+        if: contains(github.ref, 'Develop')
+        uses: actions/upload-artifact@v3
+        with:
+          name: polkadex-node
+          path: ./polkadex-node.zip
+          if-no-files-found: error
+      - name: Zip compiled parachain node binary
+        if: contains(github.ref, 'Develop')
+        # Zipping is required since billing is based on the raw uploaded size.
+        run: zip -r -j parachain-polkadex-node.zip ./target/release/parachain-polkadex-node
+      - name: Upload zipped parachain binary as an artifact
+        if: contains(github.ref, 'Develop')
+        uses: actions/upload-artifact@v3
+        with:
+          name: parachain-polkadex-node
+          path: ./parachain-polkadex-node.zip
+          if-no-files-found: error
+  stop-runner:
+    name: Stop self-hosted EC2 runner
+    needs:
+      - start-runner
+      - build
+    runs-on: ubuntu-latest
+    if: ${{ always() }} # required to stop the runner even if the error happened in the previous jobs
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Stop EC2 runner
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: stop
+          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN_REPO }}
+          label: ${{ needs.start-runner.outputs.label }}
+          ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}

@@ -1,0 +1,53 @@
+[package]
+name = "orderbook-primitives"
+version = "1.1.0"
+edition = "2021"
+
+[dependencies]
+primitive-types = { version = "0.13.1", default-features = false, features = ["scale-info"] }
+parity-scale-codec = { workspace = true }
+scale-info = { workspace = true }
+sp-api = { workspace = true }
+sp-io = { workspace = true, default-features = false }
+sp-application-crypto = { workspace = true }
+sp-core = { workspace = true }
+frame-support = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+polkadex-primitives = { workspace = true }
+chrono = { version = "0.4.23", optional = true }
+rand = { version = "0.8.5", optional = true }
+serde = { workspace = true, default-features = false }
+serde_with = { version = "3.6.1", features = ["json", "macros"], default-features = false }
+log = { workspace = true, default-features = false }
+serde_json = { workspace = true }
+anyhow = { workspace = true, default-features = false }
+rust_decimal = { git = "https://github.com/Polkadex-Substrate/rust-decimal.git", branch = "master", features = [
+  "scale-codec",
+], default-features = false }
+hex = { workspace = true }
+
+[dev-dependencies]
+serde_json = "1.0.94"
+
+[features]
+default = ["std"]
+std = [
+  "log/std",
+  "primitive-types/std",
+  "chrono",
+  "rand",
+  "serde/std",
+  "serde_with/std",
+  "anyhow/std",
+  "rust_decimal/std",
+  "polkadex-primitives/std",
+  "parity-scale-codec/std",
+  "scale-info/std",
+  "sp-api/std",
+  "sp-application-crypto/std",
+  "sp-core/std",
+  "sp-runtime/std",
+  "sp-std/std",
+  "sp-io/std",
+]

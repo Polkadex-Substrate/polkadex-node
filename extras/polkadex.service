@@ -1,0 +1,15 @@
+[Unit]
+Description=Testnet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+ExecStart=/home/ubuntu/polkadex-node --chain=/home/ubuntu/customSpecRaw.json --name "Battery Included" --validator --telemetry-url 'wss://telemetry.polkadot.io/submit/ 0'
+#For fullnode
+#ExecStart=/home/ubuntu/polkadex-node --chain=/home/ubuntu/customSpecRaw.json --rpc-cors all --name "Full Node" --telemetry-url 'wss://telemetry.polkadot.io/submit/ 0'
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
