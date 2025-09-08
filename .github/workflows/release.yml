@@ -1,0 +1,112 @@
+name: Build and publish release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-publish-release:
+    name: Build Application And Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Cache rust dependencies
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build application
+        run: |
+          ./scripts/init.sh
+          cargo build --release
+          cat extras/customSpecRaw.json > customSpecRaw.json
+
+      - name: Prepare artifact
+        run: |
+          zip PolkadexNodeUbuntu.zip --junk-paths target/release/polkadex-node extras/customSpecRaw.json extras/polkadex.service
+          zip PolkadexParachainNode.zip --junk-paths target/release/parachain-polkadex-node
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            PolkadexNodeUbuntu.zip
+            customSpecRaw.json
+            PolkadexParachainNode.zip
+          name: Release ${{ github.ref_name }}
+          prerelease: false
+          draft: false
+
+      - name: Upload mainnet node artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: PolkadexNodeUbuntu
+          path: ./PolkadexNodeUbuntu.zip
+          if-no-files-found: error
+
+      - name: Upload parachain node artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: PolkadexParachainNode
+          path: ./PolkadexParachainNode.zip
+          if-no-files-found: error
+
+  push-to-docker-registry:
+    name: Push Docker Image To Docker Hub
+    runs-on: ubuntu-latest
+    needs: [ build-and-publish-release ]
+    steps:
+      - name: Log in to the Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Extract metadata (tags, labels) for docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: polkadex/mainnet
+
+      - name: Download artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: PolkadexNodeUbuntu
+
+      - name: Unzip artifact
+        run: unzip PolkadexNodeUbuntu.zip -d ${{ github.workspace }}
+
+      - name: Build and push to Docker Hub
+        uses: docker/build-push-action@v3
+        with:
+          push: true
+          file: ${{ github.workspace }}/.docker/ci/release/Dockerfile
+          context: ${{ github.workspace }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  update-on-finality:
+    name: OnFinality Network Spec Update
+    runs-on: ubuntu-latest
+    needs: [ build-and-publish-release, push-to-docker-registry ]
+    steps:
+      - name: Update image version of the existing network spec
+        uses: OnFinality-io/action-onf-release@v1
+        with:
+          onf-access-key: ${{ secrets.ONF_ACCESS_KEY }}
+          onf-secret-key: ${{ secrets.ONF_SECRET_KEY }}
+          onf-workspace-id: ${{ secrets.ONF_WORKSPACE_ID }}
+          onf-network-key: ${{ secrets.ONF_NETWORK_KEY }}
+          onf-sub-command: image
+          onf-action: add
+          image-version: ${{ github.ref_name }}

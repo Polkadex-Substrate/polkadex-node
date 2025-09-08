@@ -1,0 +1,10 @@
+{
+    "jsonrpc":"2.0",
+    "id":1,
+    "method":"author_insertKey",
+    "params": [
+        "ocex",
+        "***REMOVED***//1//orderbook",
+        "0xee001088034791fa5b6b74b1ce59c09faee3ad6b8018edda1b16048c95611f5a"
+    ]
+}
