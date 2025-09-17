@@ -1,13 +1,13 @@
 [package]
 name = "polkadex-node"
-version = "6.2.0"
-authors = ["Polkadex OÜ <https://polkadex.trade>"]
+version = "7.0.0"
+authors = ["Polkadex OÜ <https://polkadex.ee>"]
 description = "Polkadex main blockchain"
 edition = "2021"
 license = "GNU GPL v3"
 build = "build.rs"
-homepage = "https://polkadex.trade"
-repository = "https://github.com/Polkadex-Substrate/Polkadex/"
+homepage = "https://polkadex.ee"
+repository = "https://github.com/Polkadex-Substrate/polkadex-node"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
