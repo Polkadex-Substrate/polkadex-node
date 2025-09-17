@@ -20,7 +20,7 @@
 //! recovery data.
 
 use jsonrpsee::{
-	core::{async_trait, ClientError as JsonRpseeError, RpcResult},
+	core::{async_trait, /* ClientError as JsonRpseeError, */ RpcResult},
 	proc_macros::rpc,
 	tracing::log,
 	//types::error::{CallError, ErrorObject},
