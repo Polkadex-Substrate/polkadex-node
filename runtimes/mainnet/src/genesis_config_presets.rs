@@ -127,18 +127,7 @@ pub fn kitchensink_genesis(
 		treasury: Default::default(),
 		transaction_payment: Default::default(),
 		democracy: Default::default(),
-		beefy: BeefyConfig {
-			//authorities: beefy_authorities,
-			authorities: initial_authorities
-					.iter()
-					.map(|x| {
-						// Assuming your SessionKeys contain beefy keys
-						x.2.beefy.clone()
-					})
-					.collect::<Vec<BeefyId>>(),
-			..Default::default()
-		},
-		//beefy: Default::default(),
+		beefy: Default::default(),
 		// Custom
 		orderbook_committee: Default::default(),
 		pdex_migration: PDEXMigrationConfig { max_tokens: ERC20_PDEX_SUPPLY, operational: false },
