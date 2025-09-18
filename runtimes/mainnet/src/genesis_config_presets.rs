@@ -23,7 +23,7 @@ use crate::{
 	constants::currency::*, AccountId, AssetsConfig,
 	BabeConfig, Balance, BalancesConfig, ElectionsConfig, NominationPoolsConfig,
 	RuntimeGenesisConfig, SessionConfig, SessionKeys, SocietyConfig, StakingConfig,
-	SudoConfig, TechnicalCommitteeConfig, BABE_GENESIS_EPOCH_CONFIG, PDEXMigrationConfig, BeefyConfig
+	SudoConfig, TechnicalCommitteeConfig, BABE_GENESIS_EPOCH_CONFIG, PDEXMigrationConfig,
 };
 pub use pallet_staking::StakerStatus;
 use frame_support::build_struct_json_patch;
@@ -32,7 +32,6 @@ use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
 use sp_authority_discovery::AuthorityId as AuthorityDiscoveryId;
 use sp_consensus_babe::AuthorityId as BabeId;
 use sp_consensus_beefy::ecdsa_crypto::AuthorityId as BeefyId;
-use sp_consensus_beefy::ecdsa_crypto::Public as BeefyPublicId;
 use sp_consensus_grandpa::AuthorityId as GrandpaId;
 use sp_core::{crypto::get_public_from_string_or_panic, sr25519};
 use sp_genesis_builder::PresetId;
@@ -127,18 +126,7 @@ pub fn kitchensink_genesis(
 		treasury: Default::default(),
 		transaction_payment: Default::default(),
 		democracy: Default::default(),
-		beefy: BeefyConfig {
-			//authorities: beefy_authorities,
-			authorities: initial_authorities
-					.iter()
-					.map(|x| {
-						// Assuming your SessionKeys contain beefy keys
-						x.2.beefy.clone()
-					})
-					.collect::<Vec<BeefyId>>(),
-			..Default::default()
-		},
-		//beefy: Default::default(),
+		beefy: Default::default(),
 		// Custom
 		orderbook_committee: Default::default(),
 		pdex_migration: PDEXMigrationConfig { max_tokens: ERC20_PDEX_SUPPLY, operational: false },

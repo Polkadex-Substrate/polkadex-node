@@ -37,33 +37,26 @@ extern crate alloc;
 //};
 use frame_support::ord_parameter_types;
 use frame_support::derive_impl;
-use frame_support::traits::fungibles;
 use frame_support::traits::fungible;
 //use pallet_xcm::{EnsureXcm, IsVoiceOfBody};
-use xcm::latest::prelude::BodyId;
-//use assets_common;
-use core::marker::PhantomData;
 use sp_runtime::{
     traits::{Convert, MaybeEquivalence},
-    Either,
-    Either::{Left, Right},
     generic::Era
 };
-use xcm::latest::Location;
 use constants::{currency::*, time::*};
 use frame_election_provider_support::{
 	bounds::{ElectionBounds, ElectionBoundsBuilder}, onchain, ElectionDataProvider, SequentialPhragmen,
 };
 use frame_support::{
-	construct_runtime,
+	//construct_runtime,
 	dispatch::{DispatchClass, DispatchInfo},
 	pallet_prelude::RuntimeDebug,
 	parameter_types,
 	traits::{
 		fungible::{HoldConsideration, Inspect}, AsEnsureOriginWithArg, Currency, EitherOfDiverse, EnsureOrigin,
-		EqualPrivilegeOnly, Everything, Get, InstanceFilter, KeyOwnerProofSystem, tokens::fungible::{DecreaseIssuance, IncreaseIssuance},
-		LockIdentifier, Consideration, tokens::fungible::hold::DoneSlash, tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId},
-    	ConstU128, ConstU64, ConstU32, ConstU16, ConstBool, VariantCountOf, tokens::imbalance::{ResolveAssetTo, ResolveTo, OnUnbalanced}, Imbalance, Nothing, InsideBoth,
+		EqualPrivilegeOnly, Get, InstanceFilter, KeyOwnerProofSystem, LockIdentifier, Consideration, tokens::fungible::hold::DoneSlash,
+		tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId}, ConstU128, ConstU64, ConstU32, ConstU16, ConstBool,
+		VariantCountOf, tokens::imbalance::{ResolveAssetTo, ResolveTo, OnUnbalanced}, Imbalance, Nothing, InsideBoth,
 		Contains
 	},
 	weights::{
@@ -88,9 +81,7 @@ use frame_support::pallet_prelude::TypedGet;
 use orderbook_primitives::types::TradingPair;
 #[cfg(any(feature = "std", test))]
 pub use pallet_balances::Call as BalancesCall;
-use pallet_grandpa::{
-	fg_primitives, AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList,
-};
+use pallet_grandpa::{ AuthorityId as GrandpaId };
 use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
 use pallet_session::historical as pallet_session_historical;
 #[cfg(any(feature = "std", test))]
@@ -188,7 +179,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 369,
+    spec_version: 370,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 2,
@@ -2003,28 +1994,6 @@ use polkadex_primitives::POLKADEX_NATIVE_ASSET_ID;
 //}
 
 pub type NativeAndAssets = fungible::UnionOf<Balances, Assets, NativeFromLeft, NativeOrWithId<u32>, AccountId>;
-
-/// Union fungibles implementation for `Assets` and `ForeignAssets`.
-//pub type LocalAndForeignAssets = fungibles::UnionOf<
-//	Assets,
-//	ForeignAssets,
-//	assets_common::local_and_foreign_assets::LocalFromLeft<
-//		assets_common::AssetIdForTrustBackedAssetsConvert<TrustBackedAssetsPalletLocation, xcm::v5::Location>,
-//		parachains_common::AssetIdForTrustBackedAssets,
-//		xcm::v5::Location,
-//	>,
-//	xcm::v5::Location,
-//	AccountId,
-//>;
-
-/// Union fungibles implementation for [`LocalAndForeignAssets`] and `Balances`.
-//pub type NativeAndNonPoolAssets = fungible::UnionOf<
-//	Balances,
-//	LocalAndForeignAssets,
-//	assets_common::local_and_foreign_assets::TargetFromLeft<WestendLocation, xcm::v5::Location>,
-//	xcm::v5::Location,
-//	AccountId,
-//>;
 
 impl pallet_asset_conversion_tx_payment::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
