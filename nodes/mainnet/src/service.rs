@@ -49,14 +49,19 @@ use polkadex_client::ExecutorDispatch;
 use polkadex_primitives::Block;
 
 /// Host functions required for node pokadex runtime and Substrate node.
+/// Added BLS host functions to satisfy runtime import `ext_bls_crypto_ext_bls_generate_pair_version_1`.
 #[cfg(not(feature = "runtime-benchmarks"))]
-pub type HostFunctions =
-	(sp_io::SubstrateHostFunctions, sp_statement_store::runtime_api::HostFunctions);
+pub type HostFunctions = (
+	sp_io::SubstrateHostFunctions,
+	bls_primitives::host_functions::bls_crypto_ext::HostFunctions,
+	sp_statement_store::runtime_api::HostFunctions
+);
 
 /// Host functions required for node polkadex runtime and Substrate node.
 #[cfg(feature = "runtime-benchmarks")]
 pub type HostFunctions = (
 	sp_io::SubstrateHostFunctions,
+	bls_primitives::host_functions::bls_crypto_ext::HostFunctions,
 	sp_statement_store::runtime_api::HostFunctions,
 	frame_benchmarking::benchmarking::HostFunctions,
 );

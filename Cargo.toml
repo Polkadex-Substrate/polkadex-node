@@ -46,7 +46,7 @@ members = [
   "pallets/rewards/rpc",
   "pallets/rewards/rpc/runtime-api",
   # "pallets/thea-council",
-  "pallets/xcm-helper",
+  # "pallets/xcm-helper",
   "misc/load-testing",
   "misc/crowdloan-verifier",
   # "polkadex-xcm-simulator",
@@ -60,14 +60,14 @@ log = { version = "0.4.8", default-features = false }
 staging-node-inspect = { version = "0.28.0", default-features = false }
 array-bytes = { version = "6.2.2", default-features = false }
 docify = { version = "0.2.9" }
-anyhow = { version = "1.0.81", default-features = false }
-smallvec = "1.6.1"
+anyhow = { version = "1.0.99", default-features = false }
+smallvec = "1.15.1"
 # jsonrpsee = "0.16.2"
 jsonrpsee = { version = "0.24.3" }
 jsonrpsee-core = { version = "0.24.3" }
-parking_lot = "0.12.1"
-tokio = "1.32.0"
-hex-literal = { version = "0.3.4" }
+parking_lot = "0.12.4"
+tokio = "1.47.1"
+hex-literal = { version = "1.0.0" }
 blake2-rfc = { version = "0.2.18", default-features = false }
 static_assertions = "1.1.0"
 # assets-common = { version = "0.21.0", default-features = false }
@@ -201,10 +201,10 @@ frame-try-runtime = { version = "0.46.0", default-features = false }
 try-runtime-cli = { version = "0.42.0", default-features = false }
 sp-storage = { version = "22.0.0", default-features = false }
 xcm = { version = "16.2.0", package = "staging-xcm", default-features = false }
-env_logger = { version = "0.10.0" }
+env_logger = { version = "0.11.8" }
 hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
-serde = { version = "1.0.171", default-features = false, features = ["derive"] }
-serde_json = { version = "1.0.102", default-features = false, features = ["alloc"] }
+serde = { version = "1.0.219", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0.143", default-features = false, features = ["alloc"] }
 hash-db = { version = "0.16.0", default-features = false }
 trie-db = { version = "0.30.0", default-features = false }
 #Parachain Dependencies
