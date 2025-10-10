@@ -198,7 +198,7 @@ grandpa-primitives = { version = "16.0.0", default-features = false, package = "
 polkadex-primitives = { path = "primitives/polkadex", default-features = false }
 frame-try-runtime = { version = "0.46.0", default-features = false }
 # try-runtime-cli = { git = "https://github.com/paritytech/polkadot-sdk", branch = "release-polkadot-v1.1.0", default-features = false }
-try-runtime-cli = { version = "0.42.0", default-features = false }
+# try-runtime-cli = { version = "0.42.0", default-features = false }
 sp-storage = { version = "22.0.0", default-features = false }
 xcm = { version = "16.2.0", package = "staging-xcm", default-features = false }
 env_logger = { version = "0.11.8" }

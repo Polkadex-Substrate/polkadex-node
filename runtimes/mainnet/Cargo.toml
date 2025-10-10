@@ -317,6 +317,7 @@ runtime-benchmarks = [
   "pallet-asset-conversion/runtime-benchmarks",
   "pallet-asset-tx-payment/runtime-benchmarks",
   # "pallet-xcm/runtime-benchmarks",
+  "pallet-migrations/try-runtime",
 ]
 
 try-runtime = [
@@ -368,4 +369,6 @@ try-runtime = [
   "pallet-statement/try-runtime",
   "pallet-asset-tx-payment/try-runtime",
   # "pallet-xcm/try-runtime",
+  "pallet-migrations/runtime-benchmarks",
+  "pallet-revive/try-runtime",
 ]

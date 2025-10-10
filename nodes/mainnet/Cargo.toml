@@ -109,7 +109,7 @@ sp-consensus-beefy = { workspace = true, default-features = false }
 sp-transaction-storage-proof = { version = "36.1.0" }
 frame-try-runtime = { version = "0.46.0", optional = true }
 # try-runtime-cli = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "release-polkadot-v1.1.0", optional = true }
-try-runtime-cli = { version = "0.42.0", default-features = false, optional = true }
+# try-runtime-cli = { version = "0.42.0", default-features = false, optional = true }
 mmr-rpc = { workspace = true, default-features = false }
 mmr-gadget = { workspace = true, default-features = false }
 frame-system-rpc-runtime-api = { default-features = false, workspace = true }
@@ -139,4 +139,5 @@ futures = "0.3.31"
 [features]
 default = []
 runtime-benchmarks = ["node-polkadex-runtime/runtime-benchmarks", "frame-benchmarking-cli/runtime-benchmarks"]
-try-runtime = ["node-polkadex-runtime/try-runtime", "try-runtime-cli/try-runtime", "try-runtime-cli"]
+# try-runtime = ["node-polkadex-runtime/try-runtime", "try-runtime-cli/try-runtime", "try-runtime-cli"]
+try-runtime = ["node-polkadex-runtime/try-runtime"]
