@@ -22,9 +22,10 @@ serde_with = { version = "3.6.1", features = ["json", "macros"], default-feature
 log = { workspace = true, default-features = false }
 serde_json = { workspace = true }
 anyhow = { workspace = true, default-features = false }
-rust_decimal = { git = "https://github.com/Polkadex-Substrate/rust-decimal.git", branch = "master", features = [
-  "scale-codec",
-], default-features = false }
+rust_decimal = { default-features = false, workspace = true }
+# rust_decimal = { git = "https://github.com/Polkadex-Substrate/rust-decimal.git", branch = "master", features = [
+#   "scale-codec",
+# ], default-features = false }
 hex = { workspace = true }
 
 [dev-dependencies]
