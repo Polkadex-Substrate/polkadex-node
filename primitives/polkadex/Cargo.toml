@@ -18,10 +18,11 @@ sp-std = { default-features = false, workspace = true }
 sp-runtime = { default-features = false, workspace = true }
 sp-application-crypto = { default-features = false, workspace = true }
 frame-support = { default-features = false, workspace = true }
-rust_decimal = { git = "https://github.com/Polkadex-Substrate/rust-decimal.git", branch = "master", features = [
-  "scale-codec",
-  "serde",
-], default-features = false }
+rust_decimal = { default-features = false, workspace = true }
+# rust_decimal = { git = "https://github.com/Polkadex-Substrate/rust-decimal.git", branch = "master", features = [
+#   "scale-codec",
+#   "serde",
+# ], default-features = false }
 xcm = { workspace = true, default-features = false }
 
 [dev-dependencies]
