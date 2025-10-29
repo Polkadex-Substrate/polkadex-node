@@ -38,7 +38,7 @@ pub struct LMPConfig {
 }
 
 /// One minute LMP Q Score report
-#[derive(Decode, Encode, TypeInfo, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Decode, Encode, TypeInfo, Clone, Debug, DecodeWithMemTracking, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LMPOneMinuteReport<AccountId: Ord> {
 	pub market: TradingPair,
 	pub epoch: u16,
