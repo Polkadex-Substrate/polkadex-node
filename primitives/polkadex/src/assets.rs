@@ -231,7 +231,7 @@ pub trait Resolver<
 /// Enumerated asset on chain
 #[derive(
 	Encode,
-	Decode,
+	//Decode,
 	DecodeWithMemTracking,
 	Copy,
 	Clone,
