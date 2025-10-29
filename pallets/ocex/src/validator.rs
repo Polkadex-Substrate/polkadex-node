@@ -44,7 +44,7 @@ use orderbook_primitives::{
 	ObCheckpointRaw, SnapshotSummary,
 };
 use parity_scale_codec::alloc::string::ToString;
-use parity_scale_codec::{Decode, Encode, DecodeWithMemTracking};
+use parity_scale_codec::{Decode, Encode};
 use polkadex_primitives::{fees::FeeConfig, withdrawal::Withdrawal, AccountId, AssetId};
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
@@ -1005,7 +1005,7 @@ pub fn map_trie_error<T, E>(err: Box<TrieError<T, E>>) -> &'static str {
 }
 
 /// Http Resposne body
-#[derive(Serialize, Deserialize, DecodeWithMemTracking)]
+#[derive(Serialize, Deserialize)]
 pub struct JSONRPCResponse {
 	jsonrpc: serde_json::Value,
 	pub result: Vec<u8>,
