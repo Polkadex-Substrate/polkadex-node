@@ -239,7 +239,15 @@ pub fn session_keys(
 	// Custom
 	orderbook: OrderbookId,
 ) -> SessionKeys {
-	SessionKeys { grandpa, babe, im_online, authority_discovery, mixnet, beefy, orderbook }
+	SessionKeys {
+		grandpa,
+		babe,
+		im_online,
+		authority_discovery,
+		orderbook,
+		mixnet,
+		beefy,
+	}
 }
 
 /// We have this method as there is no straight forward way to convert the
@@ -257,3 +265,4 @@ pub fn session_keys_from_seed(seed: &str) -> SessionKeys {
 		get_public_from_string_or_panic::<OrderbookId>(seed),
 	)
 }
+
