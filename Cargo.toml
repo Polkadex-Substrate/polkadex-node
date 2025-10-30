@@ -73,7 +73,7 @@ static_assertions = "1.1.0"
 # assets-common = { version = "0.21.0", default-features = false }
 # parachains-common = { version = "21.0.0", default-features = false }
 parity-scale-codec = { version = "3.1.5", default-features = false }
-rust_decimal = { git = "https://github.com/Polkadex-Substrate/rust-decimal.git", rev = "3a746614ea02a6c9018fca3a10e9629de3066d4d", features = ["scale-codec", "serde", "maths-nopanic"] }
+rust_decimal = { git = "https://github.com/Polkadex-Substrate/rust-decimal.git", rev = "3a746614ea02a6c9018fca3a10e9629de3066d4d", features = ["scale-codec", "serde", "maths-nopanic"], default-features = false }
 # rust_decimal = { git = "https://github.com/Polkadex-Substrate/rust-decimal.git", branch = "master", features = ["scale-codec", "serde", "maths-nopanic"], default-features = false }
 scale-info = { version = "2.1.2", default-features = false }
 thea-primitives = { path = "primitives/thea", default-features = false }
