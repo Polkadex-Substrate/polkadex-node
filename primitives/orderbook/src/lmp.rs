@@ -30,7 +30,7 @@ use sp_std::vec::Vec;
 
 /// LMP Epoch config
 #[derive(
-	Decode, Encode, TypeInfo, Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default,
+	Decode, Encode, TypeInfo, Copy, Clone, Debug, DecodeWithMemTracking, Eq, PartialEq, Serialize, Deserialize, Default,
 )]
 pub struct LMPConfig {
 	pub epoch: u16,
@@ -38,7 +38,7 @@ pub struct LMPConfig {
 }
 
 /// One minute LMP Q Score report
-#[derive(Decode, Encode, TypeInfo, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Decode, Encode, TypeInfo, Clone, Debug, DecodeWithMemTracking, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LMPOneMinuteReport<AccountId: Ord> {
 	pub market: TradingPair,
 	pub epoch: u16,
@@ -63,6 +63,7 @@ pub struct LMPMarketConfigWrapper {
 #[derive(
 	Decode,
 	Encode,
+	DecodeWithMemTracking,
 	TypeInfo,
 	Clone,
 	Copy,
@@ -100,7 +101,7 @@ pub struct LMPMarketConfig {
 /// LMP Configuration for an epoch
 #[serde_as]
 #[derive(
-	Decode, Encode, TypeInfo, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize,
+	Decode, Encode, TypeInfo, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, DecodeWithMemTracking,
 )]
 pub struct LMPEpochConfig {
 	/// Total rewards given in this epoch for market making

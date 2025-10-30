@@ -16,11 +16,11 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use parity_scale_codec::{Decode, Encode};
+use parity_scale_codec::{Decode, Encode, DecodeWithMemTracking};
 use polkadex_primitives::BlockNumber;
 
 // Accounts storage
-#[derive(Encode, Decode, PartialEq, Debug, Clone, Copy)]
+#[derive(Encode, Decode, PartialEq, Debug, Clone, Copy, DecodeWithMemTracking)]
 pub struct StateInfo {
 	/// Last block processed
 	pub last_block: BlockNumber,
