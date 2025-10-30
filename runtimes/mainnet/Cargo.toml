@@ -21,7 +21,7 @@ scale-info = { workspace = true, default-features = false, features = ["derive"]
 hex-literal = { version = "0.3.1", optional = true }
 static_assertions = { workspace = true }
 log = { workspace = true, default-features = false }
-rust_decimal = { workspace = true, features = ["scale-codec"], default-features = false }
+rust_decimal = { workspace = true }
 #pallets
 #added
 pallet-authorship = { default-features = false, workspace = true }
