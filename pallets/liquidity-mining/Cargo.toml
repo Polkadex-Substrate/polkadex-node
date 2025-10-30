@@ -23,7 +23,7 @@ sp-io = { workspace = true, default-features = false }
 sp-runtime = { workspace = true, default-features = false }
 orderbook-primitives = { path = "../../primitives/orderbook", default-features = false }
 polkadex-primitives = { path = "../../primitives/polkadex", default-features = false }
-rust_decimal = { workspace = true, default-features = false }
+rust_decimal = { workspace = true }
 
 [dev-dependencies]
 pallet-ocex-lmp = { path = "../ocex", default-features = false }
