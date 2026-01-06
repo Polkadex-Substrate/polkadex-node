@@ -21,7 +21,7 @@
 
 use crate::{
 	constants::currency::*, AccountId, AssetsConfig,
-	BabeConfig, Balance, BalancesConfig, ElectionsConfig, NominationPoolsConfig,
+	BabeConfig, Balance, BalancesConfig, ElectionsConfig, /* NominationPoolsConfig, */
 	RuntimeGenesisConfig, SessionConfig, SessionKeys, SocietyConfig, StakingConfig,
 	SudoConfig, TechnicalCommitteeConfig, BABE_GENESIS_EPOCH_CONFIG, PDEXMigrationConfig,
 };
@@ -115,10 +115,10 @@ pub fn kitchensink_genesis(
 			assets: vec![(9, Sr25519Keyring::Alice.to_account_id(), true, 1)],
 			..Default::default()
 		},
-		nomination_pools: NominationPoolsConfig {
-			min_create_bond: 10 * DOLLARS,
-			min_join_bond: 1 * DOLLARS,
-		},
+		//nomination_pools: NominationPoolsConfig {
+		//	min_create_bond: 10 * DOLLARS,
+		//	min_join_bond: 1 * DOLLARS,
+		//},
 		im_online: Default::default(),
 		authority_discovery: Default::default(),
 		grandpa: Default::default(),
