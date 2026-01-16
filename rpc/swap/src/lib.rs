@@ -110,12 +110,12 @@ where
     // Convert AssetId into NativeOrWithId<u32>
     let native_or_id1: Option<NativeOrWithId<u32>> = match asset_id1 {
         AssetId::Asset(id) => Some(NativeOrWithId::WithId(id as u32)),
-        AssetId::Polkadex => None,
+        AssetId::Polkadex => Some(NativeOrWithId::Native),
     };
 
     let native_or_id2: Option<NativeOrWithId<u32>> = match asset_id2 {
         AssetId::Asset(id) => Some(NativeOrWithId::WithId(id as u32)),
-        AssetId::Polkadex => None,
+        AssetId::Polkadex => Some(NativeOrWithId::Native),
     };
 
 		let amount: u128 = amount.parse().map_err(runtime_error_into_rpc_err)?;
@@ -143,12 +143,12 @@ where
     // Convert AssetId into NativeOrWithId<u32>
     let native_or_id1: Option<NativeOrWithId<u32>> = match asset_id1 {
         AssetId::Asset(id) => Some(NativeOrWithId::WithId(id as u32)),
-        AssetId::Polkadex => None,
+        AssetId::Polkadex => Some(NativeOrWithId::Native),
     };
 
     let native_or_id2: Option<NativeOrWithId<u32>> = match asset_id2 {
         AssetId::Asset(id) => Some(NativeOrWithId::WithId(id as u32)),
-        AssetId::Polkadex => None,
+        AssetId::Polkadex => Some(NativeOrWithId::Native),
     };
 
 		let amount: u128 = amount.parse().map_err(runtime_error_into_rpc_err)?;
@@ -175,12 +175,12 @@ where
     // Convert AssetId into NativeOrWithId<u32>
     let native_or_id1: Option<NativeOrWithId<u32>> = match asset_id1 {
         AssetId::Asset(id) => Some(NativeOrWithId::WithId(id as u32)),
-        AssetId::Polkadex => None,
+        AssetId::Polkadex => Some(NativeOrWithId::Native),
     };
 
     let native_or_id2: Option<NativeOrWithId<u32>> = match asset_id2 {
         AssetId::Asset(id) => Some(NativeOrWithId::WithId(id as u32)),
-        AssetId::Polkadex => None,
+        AssetId::Polkadex => Some(NativeOrWithId::Native),
     };
 
 		let runtime_api_result = api
