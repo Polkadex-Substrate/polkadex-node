@@ -1,0 +1,10 @@
+{
+    "jsonrpc":"2.0",
+    "id":1,
+    "method":"author_insertKey",
+    "params": [
+        "mixn",
+        "valve clap veteran panel cousin hover angle annual kick confirm cave deer",
+        "0xe824e934a516b3a51502a7d1148f997c7f3b1eda404dfd1e299ca1657586aa31"
+    ]
+}
