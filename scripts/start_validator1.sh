@@ -18,4 +18,4 @@
 
 ../target/release/polkadex-node --validator --base-path ./bootnode -lthea=trace -lorderbook=trace \
 --rpc-port=9944 --chain=../scripts/customSpecRaw.json \
---node-key=1f64f01767da8258fcb986bd68d6dff93dfcd49d0fc753cea27cf37ce91c3684 --thea-dummy-mode
+--node-key=1f64f01767da8258fcb986bd68d6dff93dfcd49d0fc753cea27cf37ce91c3684 --thea-dummy-modek
