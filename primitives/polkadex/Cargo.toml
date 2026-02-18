@@ -5,7 +5,8 @@ authors = ["Gautham J <Gauthamastro@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-primitive-types = { version = "0.13.1", default-features = false, features = ["scale-info"] }
+# primitive-types = { version = "0.13.1", default-features = false, features = ["scale-info"] }
+primitive-types = { workspace = true }
 anyhow = { workspace = true, default-features = false }
 codec = { package = "parity-scale-codec", version = "3", default-features = false, features = ["derive", "full"] }
 serde = { workspace = true, default-features = false }

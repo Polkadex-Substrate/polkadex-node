@@ -16,6 +16,7 @@ serde_json = { workspace = true, default-features = false }
 array-bytes = { workspace = true, default-features = false }
 # assets-common = { workspace = true, default-features = false }
 # parachains-common = { workspace = true, default-features = false }
+primitive-types = { workspace = true }
 parity-scale-codec = { workspace = true, default-features = false, features = ["max-encoded-len"] }
 scale-info = { workspace = true, default-features = false, features = ["derive"] }
 hex-literal = { version = "0.3.1", optional = true }
@@ -63,7 +64,7 @@ xcm = { workspace = true, default-features = false }
 # pallet-xcm = { workspace = true, default-features = false }
 pallet-revive = { workspace = true, default-features = false }
 pallet-skip-feeless-payment = { workspace = true, default-features = false }
-pallet-nomination-pools = { workspace = true, default-features = false }
+# pallet-nomination-pools = { workspace = true, default-features = false }
 pallet-contracts = { workspace = true, default-features = false }
 pallet-alliance = { workspace = true, default-features = false }
 pallet-delegated-staking = { workspace = true, default-features = false }
@@ -75,7 +76,7 @@ pallet-mmr = { workspace = true, default-features = false }
 pallet-beefy = { workspace = true, default-features = false }
 pallet-beefy-mmr = { workspace = true, default-features = false }
 pallet-mixnet = { workspace = true, default-features = false }
-pallet-nomination-pools-runtime-api = { workspace = true, default-features = false }
+# pallet-nomination-pools-runtime-api = { workspace = true, default-features = false }
 pallet-staking-runtime-api = { workspace = true, default-features = false }
 
 # Assets pallet
@@ -267,7 +268,7 @@ std = [
 	# "pallet-xcm/std",
 	"pallet-revive/std",
 	"pallet-skip-feeless-payment/std",
-	"pallet-nomination-pools/std",
+	# "pallet-nomination-pools/std",
 	"pallet-contracts/std",
 	"pallet-alliance/std",
 	"pallet-delegated-staking/std",
@@ -281,7 +282,7 @@ std = [
 	"sp-consensus-grandpa/std",
 	"pallet-mixnet/std",
 	"sp-mixnet/std",
-	"pallet-nomination-pools-runtime-api/std",
+	# "pallet-nomination-pools-runtime-api/std",
 	"pallet-staking-runtime-api/std",
 	"sp-genesis-builder/std",
 	"sp-consensus-aura/std",
@@ -294,6 +295,8 @@ std = [
 	"pallet-ismp-runtime-api/std",
 	"pallet-hyperbridge/std",
 	"pallet-token-gateway/std",
+	"primitive-types/serde",
+	"primitive-types/std",
 ]
 runtime-benchmarks = [
   #theirs

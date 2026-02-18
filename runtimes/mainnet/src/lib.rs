@@ -95,7 +95,7 @@ use polkadex_primitives::{AssetId, Nonce};
 use rust_decimal::Decimal;
 use sp_api::impl_runtime_apis;
 use sp_authority_discovery::AuthorityId as AuthorityDiscoveryId;
-use sp_core::{crypto::KeyTypeId, OpaqueMetadata, H160, U256, H256};
+use sp_core::{crypto::KeyTypeId, OpaqueMetadata, H160, H256};
 use sp_inherents::{CheckInherentsResult, InherentData};
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -120,7 +120,7 @@ use sp_npos_elections::ExtendedBalance;
 use pallet_revive::{evm::runtime::EthExtra, AddressMapper};
 //pub use pallet_transaction_payment::{FungibleAdapter, Multiplier, TargetedFeeAdjustment};
 pub use pallet_transaction_payment::{CurrencyAdapter, Multiplier, TargetedFeeAdjustment};
-use pallet_nomination_pools::PoolId;
+//use pallet_nomination_pools::PoolId;
 use pallet_tx_pause::RuntimeCallNameOf;
 use sp_consensus_beefy::{
 	ecdsa_crypto::{AuthorityId as BeefyId, Signature as BeefySignature},
@@ -2160,7 +2160,8 @@ impl pallet_assets::Config<Instance2> for Runtime {
 impl pallet_asset_conversion::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Balance = u128;
-    type HigherPrecisionBalance = sp_core::U256;
+    //type HigherPrecisionBalance = primitive_types::U256;
+    type HigherPrecisionBalance = u128;
     type AssetKind = NativeOrWithId<u32>;
     type Assets = NativeAndAssets;
     type PoolId = (Self::AssetKind, Self::AssetKind);
@@ -2286,40 +2287,41 @@ impl pallet_alliance::Config for Runtime {
     type RetirementPeriod = RetirementPeriod;
 }
 
-pub struct BalanceToU256;
-impl Convert<Balance, sp_core::U256> for BalanceToU256 {
-    fn convert(balance: Balance) -> sp_core::U256 {
-        sp_core::U256::from(balance)
-    }
-}
-pub struct U256ToBalance;
-impl Convert<sp_core::U256, Balance> for U256ToBalance {
-    fn convert(n: sp_core::U256) -> Balance {
-        n.try_into().unwrap_or(Balance::max_value())
-    }
-}
+//pub struct BalanceToU256;
+//impl Convert<Balance, primitive_types::U256> for BalanceToU256 {
+//    fn convert(balance: Balance) -> primitive_types::U256 {
+//        primitive_types::U256::from(balance)
+//    }
+//}
+//
+//pub struct U256ToBalance;
+//impl Convert<primitive_types::U256, Balance> for U256ToBalance {
+//    fn convert(n: primitive_types::U256) -> Balance {
+//        n.try_into().unwrap_or(Balance::max_value())
+//    }
+//}
 
-impl pallet_nomination_pools::Config for Runtime {
-    type WeightInfo = ();
-    type RuntimeEvent = RuntimeEvent;
-    type Currency = Balances;
-    type RuntimeFreezeReason = RuntimeFreezeReason;
-    type RewardCounter = FixedU128;
-    type BalanceToU256 = BalanceToU256;
-    type U256ToBalance = U256ToBalance;
-    type StakeAdapter = pallet_nomination_pools::adapter::DelegateStake<Self, Staking, DelegatedStaking>;
-    type PostUnbondingPoolsWindow = PostUnbondPoolsWindow;
-    type MaxMetadataLen = ConstU32<256>;
-    type MaxUnbonding = ConstU32<8>;
-    type PalletId = NominationPoolsPalletId;
-    type MaxPointsToBalance = MaxPointsToBalance;
-    type AdminOrigin = EitherOfDiverse<
-        EnsureRoot<AccountId>,
-        pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 3, 4>,
-    >;
-    type BlockNumberProvider = System;
-    type Filter = Nothing;
-}
+//impl pallet_nomination_pools::Config for Runtime {
+//    type WeightInfo = ();
+//    type RuntimeEvent = RuntimeEvent;
+//    type Currency = Balances;
+//    type RuntimeFreezeReason = RuntimeFreezeReason;
+//    type RewardCounter = FixedU128;
+//    type BalanceToU256 = BalanceToU256;
+//    type U256ToBalance = U256ToBalance;
+//    type StakeAdapter = pallet_nomination_pools::adapter::DelegateStake<Self, Staking, DelegatedStaking>;
+//    type PostUnbondingPoolsWindow = PostUnbondPoolsWindow;
+//    type MaxMetadataLen = ConstU32<256>;
+//    type MaxUnbonding = ConstU32<8>;
+//    type PalletId = NominationPoolsPalletId;
+//    type MaxPointsToBalance = MaxPointsToBalance;
+//    type AdminOrigin = EitherOfDiverse<
+//        EnsureRoot<AccountId>,
+//        pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 3, 4>,
+//    >;
+//    type BlockNumberProvider = System;
+//    type Filter = Nothing;
+//}
 
 impl pallet_delegated_staking::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
@@ -2500,6 +2502,89 @@ mod runtime {
     // #28 was OrmlVesting - REMOVED
 
     #[runtime::pallet_index(29)]
+    pub type Preimage = pallet_preimage::Pallet<Runtime>;
+
+    #[runtime::pallet_index(30)]
+    pub type ChildBounties = pallet_child_bounties::Pallet<Runtime>;
+
+    #[runtime::pallet_index(31)]
+    pub type Assets = pallet_assets::Pallet<Runtime, Instance1>;
+
+    #[runtime::pallet_index(32)]
+    pub type PoolAssets = pallet_assets::Pallet<Runtime, Instance2>;
+
+    #[runtime::pallet_index(34)]
+    pub type AssetConversion = pallet_asset_conversion::Pallet<Runtime>;
+
+    #[runtime::pallet_index(35)]
+    pub type AssetConversionTxPayment = pallet_asset_conversion_tx_payment::Pallet<Runtime>;
+
+    #[runtime::pallet_index(36)]
+    pub type Statement = pallet_statement::Pallet<Runtime>;
+
+    // #[runtime::pallet_index(37)]
+    //pub type AssetTxPayment = pallet_asset_tx_payment::Pallet<Runtime>;
+
+    #[runtime::pallet_index(38)]
+    pub type Revive = pallet_revive::Pallet<Runtime>;
+
+    #[runtime::pallet_index(39)]
+    pub type SkipFeelessPayment = pallet_skip_feeless_payment::Pallet<Runtime>;
+
+    #[runtime::pallet_index(40)]
+    pub type Contracts = pallet_contracts::Pallet<Runtime>;
+
+    #[runtime::pallet_index(41)]
+    pub type Alliance = pallet_alliance::Pallet<Runtime>;
+
+    #[runtime::pallet_index(42)]
+    pub type AllianceMotion = pallet_collective::Pallet<Runtime, Instance3>;
+
+    //#[runtime::pallet_index(43)]
+    //pub type NominationPools = pallet_nomination_pools::Pallet<Runtime>;
+
+    #[runtime::pallet_index(44)]
+    pub type DelegatedStaking = pallet_delegated_staking::Pallet<Runtime>;
+
+    #[runtime::pallet_index(45)]
+    pub type RandomnessCollectiveFlip = pallet_insecure_randomness_collective_flip::Pallet<Runtime>;
+
+    #[runtime::pallet_index(46)]
+    pub type SafeMode = pallet_safe_mode::Pallet<Runtime>;
+
+    #[runtime::pallet_index(47)]
+    pub type TxPause = pallet_tx_pause::Pallet<Runtime>;
+
+    #[runtime::pallet_index(48)]
+    pub type MultiBlockMigrations = pallet_migrations::Pallet<Runtime>;
+
+    #[runtime::pallet_index(49)]
+    pub type Beefy = pallet_beefy::Pallet<Runtime>;
+
+    #[runtime::pallet_index(50)]
+    pub type Mmr = pallet_mmr::Pallet<Runtime>;
+
+    #[runtime::pallet_index(51)]
+    pub type MmrLeaf = pallet_beefy_mmr::Pallet<Runtime>;
+
+    #[runtime::pallet_index(52)]
+    pub type Mixnet = pallet_mixnet::Pallet<Runtime>;
+
+    #[runtime::pallet_index(53)]
+    pub type Society = pallet_society::Pallet<Runtime>;
+
+    // ----- Custom
+
+    #[runtime::pallet_index(54)]
+    pub type OCEX = pallet_ocex_lmp::Pallet<Runtime>;
+
+    #[runtime::pallet_index(55)]
+    pub type CrowdSourceLMP = pallet_lmp::pallet::Pallet<Runtime>;
+
+    #[runtime::pallet_index(56)]
+    pub type Rewards = pallet_rewards::Pallet<Runtime>;
+
+    #[runtime::pallet_index(57)]
     pub type PDEXMigration = pdex_migration::pallet::Pallet<Runtime>;
 
     #[runtime::pallet_index(30)]
@@ -2897,7 +2982,7 @@ type Migrations = (
     migrations::IdentityStorageVersionMigration<Runtime>,
     migrations::ChildBountiesStorageVersionMigration<Runtime>,
     // Existing migrations
-    pallet_nomination_pools::migration::versioned::V6ToV7<Runtime>,
+    //pallet_nomination_pools::migration::versioned::V6ToV7<Runtime>,
     pallet_alliance::migration::Migration<Runtime>,
     pallet_contracts::Migration<Runtime>,
     pallet_identity::migration::versioned::V0ToV1<Runtime, IDENTITY_MIGRATION_KEY_LIMIT>,
@@ -3043,47 +3128,47 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl pallet_nomination_pools_runtime_api::NominationPoolsApi<Block, AccountId, Balance> for Runtime {
-		fn pending_rewards(who: AccountId) -> Balance {
-			NominationPools::api_pending_rewards(who).unwrap_or_default()
-		}
-
-		fn points_to_balance(pool_id: PoolId, points: Balance) -> Balance {
-			NominationPools::api_points_to_balance(pool_id, points)
-		}
-
-		fn balance_to_points(pool_id: PoolId, new_funds: Balance) -> Balance {
-			NominationPools::api_balance_to_points(pool_id, new_funds)
-		}
-
-		fn pool_pending_slash(pool_id: PoolId) -> Balance {
-			NominationPools::api_pool_pending_slash(pool_id)
-		}
-
-		fn member_pending_slash(member: AccountId) -> Balance {
-			NominationPools::api_member_pending_slash(member)
-		}
-
-		fn pool_needs_delegate_migration(pool_id: PoolId) -> bool {
-			NominationPools::api_pool_needs_delegate_migration(pool_id)
-		}
-
-		fn member_needs_delegate_migration(member: AccountId) -> bool {
-			NominationPools::api_member_needs_delegate_migration(member)
-		}
-
-		fn member_total_balance(member: AccountId) -> Balance {
-			NominationPools::api_member_total_balance(member)
-		}
-
-		fn pool_balance(pool_id: PoolId) -> Balance {
-			NominationPools::api_pool_balance(pool_id)
-		}
-
-		fn pool_accounts(pool_id: PoolId) -> (AccountId, AccountId) {
-			NominationPools::api_pool_accounts(pool_id)
-		}
-	}
+	//impl pallet_nomination_pools_runtime_api::NominationPoolsApi<Block, AccountId, Balance> for Runtime {
+	//	fn pending_rewards(who: AccountId) -> Balance {
+	//		NominationPools::api_pending_rewards(who).unwrap_or_default()
+	//	}
+	//
+	//	fn points_to_balance(pool_id: PoolId, points: Balance) -> Balance {
+	//		NominationPools::api_points_to_balance(pool_id, points)
+	//	}
+	//
+	//	fn balance_to_points(pool_id: PoolId, new_funds: Balance) -> Balance {
+	//		NominationPools::api_balance_to_points(pool_id, new_funds)
+	//	}
+	//
+	//	fn pool_pending_slash(pool_id: PoolId) -> Balance {
+	//		NominationPools::api_pool_pending_slash(pool_id)
+	//	}
+	//
+	//	fn member_pending_slash(member: AccountId) -> Balance {
+	//		NominationPools::api_member_pending_slash(member)
+	//	}
+	//
+	//	fn pool_needs_delegate_migration(pool_id: PoolId) -> bool {
+	//		NominationPools::api_pool_needs_delegate_migration(pool_id)
+	//	}
+	//
+	//	fn member_needs_delegate_migration(member: AccountId) -> bool {
+	//		NominationPools::api_member_needs_delegate_migration(member)
+	//	}
+	//
+	//	fn member_total_balance(member: AccountId) -> Balance {
+	//		NominationPools::api_member_total_balance(member)
+	//	}
+	//
+	//	fn pool_balance(pool_id: PoolId) -> Balance {
+	//		NominationPools::api_pool_balance(pool_id)
+	//	}
+	//
+	//	fn pool_accounts(pool_id: PoolId) -> (AccountId, AccountId) {
+	//		NominationPools::api_pool_accounts(pool_id)
+	//	}
+	//}
 
 	impl pallet_staking_runtime_api::StakingApi<Block, Balance, AccountId> for Runtime {
 		fn nominations_quota(balance: Balance) -> u32 {
@@ -3246,170 +3331,170 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl pallet_revive::ReviveApi<Block, AccountId, Balance, Nonce, BlockNumber> for Runtime
-	{
-		fn balance(address: H160) -> U256 {
-			Revive::evm_balance(&address)
-		}
-
-		fn block_gas_limit() -> U256 {
-			Revive::evm_block_gas_limit()
-		}
-
-		fn gas_price() -> U256 {
-			Revive::evm_gas_price()
-		}
-
-		fn nonce(address: H160) -> Nonce {
-			let account = <Runtime as pallet_revive::Config>::AddressMapper::to_account_id(&address);
-			System::account_nonce(account)
-		}
-
-		fn eth_transact(tx: pallet_revive::evm::GenericTransaction) -> Result<pallet_revive::EthTransactInfo<Balance>, pallet_revive::EthTransactError>
-		{
-			let blockweights: BlockWeights = <Runtime as frame_system::Config>::BlockWeights::get();
-			let tx_fee = |pallet_call, mut dispatch_info: DispatchInfo| {
-				let call = RuntimeCall::Revive(pallet_call);
-				dispatch_info.extension_weight = EthExtraImpl::get_eth_extension(0, 0u32.into()).weight(&call);
-				let uxt: UncheckedExtrinsic = sp_runtime::generic::UncheckedExtrinsic::new_bare(call).into();
-
-				pallet_transaction_payment::Pallet::<Runtime>::compute_fee(
-					uxt.encoded_size() as u32,
-					&dispatch_info,
-					0u32.into(),
-				)
-			};
-
-			Revive::bare_eth_transact(tx, blockweights.max_block, tx_fee)
-		}
-
-		fn call(
-			origin: AccountId,
-			dest: H160,
-			value: Balance,
-			gas_limit: Option<Weight>,
-			storage_deposit_limit: Option<Balance>,
-			input_data: Vec<u8>,
-		) -> pallet_revive::ContractResult<pallet_revive::ExecReturnValue, Balance> {
-			Revive::bare_call(
-				RuntimeOrigin::signed(origin),
-				dest,
-				value,
-				gas_limit.unwrap_or(RuntimeBlockWeights::get().max_block),
-				pallet_revive::DepositLimit::Balance(storage_deposit_limit.unwrap_or(u128::MAX)),
-				input_data,
-			)
-		}
-
-		fn instantiate(
-			origin: AccountId,
-			value: Balance,
-			gas_limit: Option<Weight>,
-			storage_deposit_limit: Option<Balance>,
-			code: pallet_revive::Code,
-			data: Vec<u8>,
-			salt: Option<[u8; 32]>,
-		) -> pallet_revive::ContractResult<pallet_revive::InstantiateReturnValue, Balance>
-		{
-			Revive::bare_instantiate(
-				RuntimeOrigin::signed(origin),
-				value,
-				gas_limit.unwrap_or(RuntimeBlockWeights::get().max_block),
-				pallet_revive::DepositLimit::Balance(storage_deposit_limit.unwrap_or(u128::MAX)),
-				code,
-				data,
-				salt,
-			)
-		}
-
-		fn upload_code(
-			origin: AccountId,
-			code: Vec<u8>,
-			storage_deposit_limit: Option<Balance>,
-		) -> pallet_revive::CodeUploadResult<Balance>
-		{
-			Revive::bare_upload_code(
-				RuntimeOrigin::signed(origin),
-				code,
-				storage_deposit_limit.unwrap_or(u128::MAX),
-			)
-		}
-
-		fn get_storage(
-			address: H160,
-			key: [u8; 32],
-		) -> pallet_revive::GetStorageResult {
-			Revive::get_storage(
-				address,
-				key
-			)
-		}
-
-		fn trace_block(
-			block: Block,
-			tracer_type: pallet_revive::evm::TracerType,
-		) -> Vec<(u32, pallet_revive::evm::Trace)> {
-			use pallet_revive::tracing::trace;
-			let mut tracer = Revive::evm_tracer(tracer_type);
-			let mut traces = vec![];
-			let (header, extrinsics) = block.deconstruct();
-			Executive::initialize_block(&header);
-			for (index, ext) in extrinsics.into_iter().enumerate() {
-				trace(tracer.as_tracing(), || {
-					let _ = Executive::apply_extrinsic(ext);
-				});
-
-				if let Some(tx_trace) = tracer.collect_trace() {
-					traces.push((index as u32, tx_trace));
-				}
-			}
-
-			traces
-		}
-
-		fn trace_tx(
-			block: Block,
-			tx_index: u32,
-			tracer_type: pallet_revive::evm::TracerType,
-		) -> Option<pallet_revive::evm::Trace> {
-			use pallet_revive::tracing::trace;
-			let mut tracer = Revive::evm_tracer(tracer_type);
-			let (header, extrinsics) = block.deconstruct();
-
-			Executive::initialize_block(&header);
-			for (index, ext) in extrinsics.into_iter().enumerate() {
-				if index as u32 == tx_index {
-				trace(tracer.as_tracing(), || {
-						let _ = Executive::apply_extrinsic(ext);
-					});
-					break;
-				} else {
-					let _ = Executive::apply_extrinsic(ext);
-				}
-			}
-
-			tracer.collect_trace()
-		}
-
-		fn trace_call(
-			tx: pallet_revive::evm::GenericTransaction,
-			tracer_type: pallet_revive::evm::TracerType,
-			)
-			-> Result<pallet_revive::evm::Trace, pallet_revive::EthTransactError>
-		{
-			use pallet_revive::tracing::trace;
-			let mut tracer = Revive::evm_tracer(tracer_type);
-			let result = trace(tracer.as_tracing(), || Self::eth_transact(tx));
-
-			if let Some(trace) = tracer.collect_trace() {
-				Ok(trace)
-			} else if let Err(err) = result {
-				Err(err)
-			} else {
-				Ok(tracer.empty_trace())
-			}
-		}
-	}
+	//impl pallet_revive::ReviveApi<Block, AccountId, Balance, Nonce, BlockNumber> for Runtime
+	//{
+	//	fn balance(address: H160) -> primitive_types::U256 {
+	//		Revive::evm_balance(&address)
+	//	}
+	//
+	//	fn block_gas_limit() -> primitive_types::U256 {
+	//		Revive::evm_block_gas_limit()
+	//	}
+	//
+	//	fn gas_price() -> primitive_types::U256 {
+	//		Revive::evm_gas_price()
+	//	}
+	//
+	//	fn nonce(address: H160) -> Nonce {
+	//		let account = <Runtime as pallet_revive::Config>::AddressMapper::to_account_id(&address);
+	//		System::account_nonce(account)
+	//	}
+	//
+	//	fn eth_transact(tx: pallet_revive::evm::GenericTransaction) -> Result<pallet_revive::EthTransactInfo<Balance>, pallet_revive::EthTransactError>
+	//	{
+	//		let blockweights: BlockWeights = <Runtime as frame_system::Config>::BlockWeights::get();
+	//		let tx_fee = |pallet_call, mut dispatch_info: DispatchInfo| {
+	//			let call = RuntimeCall::Revive(pallet_call);
+	//			dispatch_info.extension_weight = EthExtraImpl::get_eth_extension(0, 0u32.into()).weight(&call);
+	//			let uxt: UncheckedExtrinsic = sp_runtime::generic::UncheckedExtrinsic::new_bare(call).into();
+	//
+	//			pallet_transaction_payment::Pallet::<Runtime>::compute_fee(
+	//				uxt.encoded_size() as u32,
+	//				&dispatch_info,
+	//				0u32.into(),
+	//			)
+	//		};
+	//
+	//		Revive::bare_eth_transact(tx, blockweights.max_block, tx_fee)
+	//	}
+	//
+	//	fn call(
+	//		origin: AccountId,
+	//		dest: H160,
+	//		value: Balance,
+	//		gas_limit: Option<Weight>,
+	//		storage_deposit_limit: Option<Balance>,
+	//		input_data: Vec<u8>,
+	//	) -> pallet_revive::ContractResult<pallet_revive::ExecReturnValue, Balance> {
+	//		Revive::bare_call(
+	//			RuntimeOrigin::signed(origin),
+	//			dest,
+	//			value,
+	//			gas_limit.unwrap_or(RuntimeBlockWeights::get().max_block),
+	//			pallet_revive::DepositLimit::Balance(storage_deposit_limit.unwrap_or(u128::MAX)),
+	//			input_data,
+	//		)
+	//	}
+	//
+	//	fn instantiate(
+	//		origin: AccountId,
+	//		value: Balance,
+	//		gas_limit: Option<Weight>,
+	//		storage_deposit_limit: Option<Balance>,
+	//		code: pallet_revive::Code,
+	//		data: Vec<u8>,
+	//		salt: Option<[u8; 32]>,
+	//	) -> pallet_revive::ContractResult<pallet_revive::InstantiateReturnValue, Balance>
+	//	{
+	//		Revive::bare_instantiate(
+	//			RuntimeOrigin::signed(origin),
+	//			value,
+	//			gas_limit.unwrap_or(RuntimeBlockWeights::get().max_block),
+	//			pallet_revive::DepositLimit::Balance(storage_deposit_limit.unwrap_or(u128::MAX)),
+	//			code,
+	//			data,
+	//			salt,
+	//		)
+	//	}
+	//
+	//	fn upload_code(
+	//		origin: AccountId,
+	//		code: Vec<u8>,
+	//		storage_deposit_limit: Option<Balance>,
+	//	) -> pallet_revive::CodeUploadResult<Balance>
+	//	{
+	//		Revive::bare_upload_code(
+	//			RuntimeOrigin::signed(origin),
+	//			code,
+	//			storage_deposit_limit.unwrap_or(u128::MAX),
+	//		)
+	//	}
+	//
+	//	fn get_storage(
+	//		address: H160,
+	//		key: [u8; 32],
+	//	) -> pallet_revive::GetStorageResult {
+	//		Revive::get_storage(
+	//			address,
+	//			key
+	//		)
+	//	}
+	//
+	//	fn trace_block(
+	//		block: Block,
+	//		tracer_type: pallet_revive::evm::TracerType,
+	//	) -> Vec<(u32, pallet_revive::evm::Trace)> {
+	//		use pallet_revive::tracing::trace;
+	//		let mut tracer = Revive::evm_tracer(tracer_type);
+	//		let mut traces = vec![];
+	//		let (header, extrinsics) = block.deconstruct();
+	//		Executive::initialize_block(&header);
+	//		for (index, ext) in extrinsics.into_iter().enumerate() {
+	//			trace(tracer.as_tracing(), || {
+	//				let _ = Executive::apply_extrinsic(ext);
+	//			});
+	//
+	//			if let Some(tx_trace) = tracer.collect_trace() {
+	//				traces.push((index as u32, tx_trace));
+	//			}
+	//		}
+	//
+	//		traces
+	//	}
+	//
+	//	fn trace_tx(
+	//		block: Block,
+	//		tx_index: u32,
+	//		tracer_type: pallet_revive::evm::TracerType,
+	//	) -> Option<pallet_revive::evm::Trace> {
+	//		use pallet_revive::tracing::trace;
+	//		let mut tracer = Revive::evm_tracer(tracer_type);
+	//		let (header, extrinsics) = block.deconstruct();
+	//
+	//		Executive::initialize_block(&header);
+	//		for (index, ext) in extrinsics.into_iter().enumerate() {
+	//			if index as u32 == tx_index {
+	//			trace(tracer.as_tracing(), || {
+	//					let _ = Executive::apply_extrinsic(ext);
+	//				});
+	//				break;
+	//			} else {
+	//				let _ = Executive::apply_extrinsic(ext);
+	//			}
+	//		}
+	//
+	//		tracer.collect_trace()
+	//	}
+	//
+	//	fn trace_call(
+	//		tx: pallet_revive::evm::GenericTransaction,
+	//		tracer_type: pallet_revive::evm::TracerType,
+	//		)
+	//		-> Result<pallet_revive::evm::Trace, pallet_revive::EthTransactError>
+	//	{
+	//		use pallet_revive::tracing::trace;
+	//		let mut tracer = Revive::evm_tracer(tracer_type);
+	//		let result = trace(tracer.as_tracing(), || Self::eth_transact(tx));
+	//
+	//		if let Some(trace) = tracer.collect_trace() {
+	//			Ok(trace)
+	//		} else if let Err(err) = result {
+	//			Err(err)
+	//		} else {
+	//			Ok(tracer.empty_trace())
+	//		}
+	//	}
+	//}
 
 	impl pallet_transaction_payment_rpc_runtime_api::TransactionPaymentApi<
 		Block,
