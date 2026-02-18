@@ -509,9 +509,9 @@ parameter_types! {
     pub const MaxBids: u32 = 10;
     pub const SocietyPalletId: PalletId = PalletId(*b"py/socie");
     // The hyperbridge parachain on Polkadot
-    pub const Coprocessor: Option<StateMachine> = Some(StateMachine::Polkadot(3367));
+    pub const Coprocessor: Option<StateMachine> = Some(StateMachine::Kusama(4009));
     // The host state machine of this pallet
-    pub const HostStateMachine: StateMachine = StateMachine::Substrate(*b"polk"); // your paraId here
+    pub const HostStateMachine: StateMachine = StateMachine::Substrate(*b"PDEX");
     pub const Decimals: u8 = 12;
     pub const MaxLengthLimit: u32 = 100;
 }
