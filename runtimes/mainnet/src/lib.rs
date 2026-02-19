@@ -2399,6 +2399,7 @@ impl pallet_mixnet::Config for Runtime {
 	type MinMixnodes = ConstU32<7>; // Low to allow small testing networks
 }
 
+
 #[frame_support::runtime]
 mod runtime {
     use super::*;
@@ -2430,8 +2431,6 @@ mod runtime {
     #[runtime::pallet_index(3)]
     pub type Timestamp = pallet_timestamp::Pallet<Runtime>;
 
-    // Authorship must be before session in order to note author in the correct session and era
-    // for im-online and staking.
     #[runtime::pallet_index(4)]
     pub type Authorship = pallet_authorship::Pallet<Runtime>;
 
@@ -2471,9 +2470,6 @@ mod runtime {
     #[runtime::pallet_index(16)]
     pub type Treasury = pallet_treasury::Pallet<Runtime>;
 
-    #[runtime::pallet_index(17)]
-    pub type Sudo = pallet_sudo::Pallet<Runtime>;
-
     #[runtime::pallet_index(18)]
     pub type ImOnline = pallet_im_online::Pallet<Runtime>;
 
@@ -2504,112 +2500,119 @@ mod runtime {
     #[runtime::pallet_index(27)]
     pub type Bounties = pallet_bounties::Pallet<Runtime>;
 
-    #[runtime::pallet_index(28)]
-    pub type Democracy = pallet_democracy::Pallet<Runtime>;
+    // #28 was OrmlVesting - REMOVED
 
     #[runtime::pallet_index(29)]
-    pub type Preimage = pallet_preimage::Pallet<Runtime>;
-
-    #[runtime::pallet_index(30)]
-    pub type ChildBounties = pallet_child_bounties::Pallet<Runtime>;
-
-    #[runtime::pallet_index(31)]
-    pub type Assets = pallet_assets::Pallet<Runtime, Instance1>;
-
-    #[runtime::pallet_index(32)]
-    pub type PoolAssets = pallet_assets::Pallet<Runtime, Instance2>;
-
-    #[runtime::pallet_index(34)]
-    pub type AssetConversion = pallet_asset_conversion::Pallet<Runtime>;
-
-    #[runtime::pallet_index(35)]
-    pub type AssetConversionTxPayment = pallet_asset_conversion_tx_payment::Pallet<Runtime>;
-
-    #[runtime::pallet_index(36)]
-    pub type Statement = pallet_statement::Pallet<Runtime>;
-
-    // #[runtime::pallet_index(37)]
-    //pub type AssetTxPayment = pallet_asset_tx_payment::Pallet<Runtime>;
-
-    #[runtime::pallet_index(38)]
-    pub type Revive = pallet_revive::Pallet<Runtime>;
-
-    #[runtime::pallet_index(39)]
-    pub type SkipFeelessPayment = pallet_skip_feeless_payment::Pallet<Runtime>;
-
-    #[runtime::pallet_index(40)]
-    pub type Contracts = pallet_contracts::Pallet<Runtime>;
-
-    #[runtime::pallet_index(41)]
-    pub type Alliance = pallet_alliance::Pallet<Runtime>;
-
-    #[runtime::pallet_index(42)]
-    pub type AllianceMotion = pallet_collective::Pallet<Runtime, Instance3>;
-
-    //#[runtime::pallet_index(43)]
-    //pub type NominationPools = pallet_nomination_pools::Pallet<Runtime>;
-
-    #[runtime::pallet_index(44)]
-    pub type DelegatedStaking = pallet_delegated_staking::Pallet<Runtime>;
-
-    #[runtime::pallet_index(45)]
-    pub type RandomnessCollectiveFlip = pallet_insecure_randomness_collective_flip::Pallet<Runtime>;
-
-    #[runtime::pallet_index(46)]
-    pub type SafeMode = pallet_safe_mode::Pallet<Runtime>;
-
-    #[runtime::pallet_index(47)]
-    pub type TxPause = pallet_tx_pause::Pallet<Runtime>;
-
-    #[runtime::pallet_index(48)]
-    pub type MultiBlockMigrations = pallet_migrations::Pallet<Runtime>;
-
-    #[runtime::pallet_index(49)]
-    pub type Beefy = pallet_beefy::Pallet<Runtime>;
-
-    #[runtime::pallet_index(50)]
-    pub type Mmr = pallet_mmr::Pallet<Runtime>;
-
-    #[runtime::pallet_index(51)]
-    pub type MmrLeaf = pallet_beefy_mmr::Pallet<Runtime>;
-
-    #[runtime::pallet_index(52)]
-    pub type Mixnet = pallet_mixnet::Pallet<Runtime>;
-
-    #[runtime::pallet_index(53)]
-    pub type Society = pallet_society::Pallet<Runtime>;
-
-    // ----- Custom
-
-    #[runtime::pallet_index(54)]
-    pub type OCEX = pallet_ocex_lmp::Pallet<Runtime>;
-
-    #[runtime::pallet_index(55)]
-    pub type CrowdSourceLMP = pallet_lmp::pallet::Pallet<Runtime>;
-
-    #[runtime::pallet_index(56)]
-    pub type Rewards = pallet_rewards::Pallet<Runtime>;
-
-    #[runtime::pallet_index(57)]
     pub type PDEXMigration = pdex_migration::pallet::Pallet<Runtime>;
 
-    #[runtime::pallet_index(58)]
+    #[runtime::pallet_index(30)]
+    pub type Democracy = pallet_democracy::Pallet<Runtime>;
+
+    #[runtime::pallet_index(31)]
+    pub type Preimage = pallet_preimage::Pallet<Runtime>;
+
+    // #32 was RandomnessCollectiveFlip - skipped
+
+    #[runtime::pallet_index(33)]
+    pub type ChildBounties = pallet_child_bounties::Pallet<Runtime>;
+
+    #[runtime::pallet_index(34)]
+    pub type Assets = pallet_assets::Pallet<Runtime, Instance1>;
+
+    #[runtime::pallet_index(35)]
+    pub type OCEX = pallet_ocex_lmp::Pallet<Runtime>;
+
+    #[runtime::pallet_index(36)]
     pub type OrderbookCommittee = pallet_collective::Pallet<Runtime, Instance4>;
 
+    // #39 was Thea - REMOVED
+
+    #[runtime::pallet_index(40)]
+    pub type Rewards = pallet_rewards::Pallet<Runtime>;
+
+    // #44 was TheaExecutor - REMOVED
+
+    #[runtime::pallet_index(45)]
+    pub type Sudo = pallet_sudo::Pallet<Runtime>;
+
+    #[runtime::pallet_index(46)]
+    pub type AssetConversion = pallet_asset_conversion::Pallet<Runtime>;
+
+    #[runtime::pallet_index(47)]
+    pub type AssetConversionTxPayment = pallet_asset_conversion_tx_payment::Pallet<Runtime>;
+
+    #[runtime::pallet_index(48)]
+    pub type Statement = pallet_statement::Pallet<Runtime>;
+
+    // #49 was AssetTxPayment - REMOVED
+
+    #[runtime::pallet_index(50)]
+    pub type CrowdSourceLMP = pallet_lmp::pallet::Pallet<Runtime>;
+
+    // ===== NEW PALLETS START AT #51+ =====
+
+    #[runtime::pallet_index(51)]
+    pub type PoolAssets = pallet_assets::Pallet<Runtime, Instance2>;
+
+    #[runtime::pallet_index(52)]
+    pub type Revive = pallet_revive::Pallet<Runtime>;
+
+    #[runtime::pallet_index(53)]
+    pub type SkipFeelessPayment = pallet_skip_feeless_payment::Pallet<Runtime>;
+
+    #[runtime::pallet_index(54)]
+    pub type Contracts = pallet_contracts::Pallet<Runtime>;
+
+    #[runtime::pallet_index(55)]
+    pub type Alliance = pallet_alliance::Pallet<Runtime>;
+
+    #[runtime::pallet_index(56)]
+    pub type AllianceMotion = pallet_collective::Pallet<Runtime, Instance3>;
+
+    // #[runtime::pallet_index(57)]
+    // pub type NominationPools = pallet_nomination_pools::Pallet<Runtime>;
+
+    #[runtime::pallet_index(58)]
+    pub type DelegatedStaking = pallet_delegated_staking::Pallet<Runtime>;
+
     #[runtime::pallet_index(59)]
-    pub type Ismp = pallet_ismp::Pallet<Runtime>;
+    pub type RandomnessCollectiveFlip = pallet_insecure_randomness_collective_flip::Pallet<Runtime>;
 
     #[runtime::pallet_index(60)]
-    pub type IsmpGrandpa = ismp_grandpa::Pallet<Runtime>;
+    pub type SafeMode = pallet_safe_mode::Pallet<Runtime>;
 
     #[runtime::pallet_index(61)]
-    pub type Hyperbridge = pallet_hyperbridge::Pallet<Runtime>;
+    pub type TxPause = pallet_tx_pause::Pallet<Runtime>;
 
     #[runtime::pallet_index(62)]
-    pub type TokenGateway = pallet_token_gateway::Pallet<Runtime>;
+    pub type MultiBlockMigrations = pallet_migrations::Pallet<Runtime>;
 
-    // #[runtime::pallet_index(42)]
-    //pub type Thea: thea::Pallet<Runtime>;
+    #[runtime::pallet_index(63)]
+    pub type Beefy = pallet_beefy::Pallet<Runtime>;
+
+    #[runtime::pallet_index(64)]
+    pub type Mmr = pallet_mmr::Pallet<Runtime>;
+
+    #[runtime::pallet_index(65)]
+    pub type MmrLeaf = pallet_beefy_mmr::Pallet<Runtime>;
+
+    #[runtime::pallet_index(66)]
+    pub type Mixnet = pallet_mixnet::Pallet<Runtime>;
+
+    #[runtime::pallet_index(67)]
+    pub type Society = pallet_society::Pallet<Runtime>;
+
+    #[runtime::pallet_index(68)]
+    pub type Ismp = pallet_ismp::Pallet<Runtime>;
+
+    #[runtime::pallet_index(69)]
+    pub type IsmpGrandpa = ismp_grandpa::Pallet<Runtime>;
+
+    #[runtime::pallet_index(70)]
+    pub type Hyperbridge = pallet_hyperbridge::Pallet<Runtime>;
+
+    #[runtime::pallet_index(71)]
+    pub type TokenGateway = pallet_token_gateway::Pallet<Runtime>;
 }
 
 //#[cfg(not(feature = "runtime-benchmarks"))]
