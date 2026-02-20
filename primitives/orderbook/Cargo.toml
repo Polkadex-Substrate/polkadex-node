@@ -4,7 +4,8 @@ version = "1.1.0"
 edition = "2021"
 
 [dependencies]
-primitive-types = { version = "0.13.1", default-features = false, features = ["scale-info"] }
+# primitive-types = { version = "0.13.1", default-features = false, features = ["scale-info"] }
+primitive-types = { workspace = true }
 parity-scale-codec = { workspace = true }
 scale-info = { workspace = true }
 sp-api = { workspace = true }

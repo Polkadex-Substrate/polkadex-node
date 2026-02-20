@@ -34,6 +34,7 @@ pub struct StateInfo {
 
 impl Default for StateInfo {
 	fn default() -> Self {
-		Self { last_block: 4768083, worker_nonce: 0, stid: 0, snapshot_id: 0 }
+		//Self { last_block: 4768083, worker_nonce: 0, stid: 0, snapshot_id: 0 }
+		Self { last_block: 0, worker_nonce: 0, stid: 0, snapshot_id: 0 }
 	}
 }
