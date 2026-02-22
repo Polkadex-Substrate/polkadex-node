@@ -31,7 +31,7 @@ consensus_state_id = "PAS0"
 # For Polkadot Mainnet: POLKADOT-3367
 state_machine = "KUSAMA-4009"
 # Relayer account seed
-signer = "0xfac7959dbfe72f052e5a0c3c8d6530f202b02fd8f9f5ca3580ec8deb7797479e"
+signer = "0x2b5a65eea607afc816970ee383c05a88fb083d4260bd425211c1788a0efb860a"
 
 # can use any key here
 [polkadex]
@@ -39,22 +39,22 @@ type = "grandpa"
 
 [polkadex.substrate]
 # Solochains's websocket RPC
-rpc_ws = "ws://127.0.0.1:9944"
+rpc_ws = "wss://polkadex-testnet.polkadex.ee"
 # Hashing can be "Keccak" or "Blake2"
 hashing = "Blake2"
 # Solochains's consensus state id on Hyperbridge
 # should be 4 utf-8 chars chosen by solochain
-consensus_state_id = "POLK"
+consensus_state_id = "PDEX"
 # Solochains's state machine id. eg
-state_machine = "SUBSTRATE-POLK"
+state_machine = "SUBSTRATE-PDEX"
 # Relayer account seed
-signer = "0xfac7959dbfe72f052e5a0c3c8d6530f202b02fd8f9f5ca3580ec8deb7797479e"
+signer = "0x2b5a65eea607afc816970ee383c05a88fb083d4260bd425211c1788a0efb860a"
 
 [polkadex.grandpa]
 # Solochains's websocket RPC
-rpc = "ws://127.0.0.1:9944"
+rpc = "wss://polkadex-testnet.polkadex.ee"
 # Solochains's slot duration
-slot_duration = 6000
+slot_duration = 12000
 # How frequently to exchange consensus proofs
 consensus_update_frequency = 60
 # Any para ids to prove if solochain is actually a relay chain
@@ -65,5 +65,5 @@ maximum_update_intervals = [
     # restart if the polkadot consensus client on your solochain is not updated within 3 minutes
     [{state_id = "KUSAMA-4009", consensus_state_id = "PAS0"}, 180],
     # restart if your solochain consensus client on hyperbridge is not updated within 3 minutes
-    [{state_id = "SUBSTRATE-POLK", consensus_state_id = "POLK"}, 180],
+    [{state_id = "SUBSTRATE-PDEX", consensus_state_id = "PDEX"}, 180],
 ]
