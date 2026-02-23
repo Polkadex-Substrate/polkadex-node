@@ -572,7 +572,8 @@ impl ismp_grandpa::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type IsmpHost = Ismp;
 	type WeightInfo = ismp_grandpa_weight::WeightInfo<Runtime>;
-	type RootOrigin = EnsureRoot<AccountId>;
+	// type RootOrigin = EnsureRoot<AccountId>;
+	type RootOrigin = EnsureRootOrHalfCouncil;
 }
 
 /// Should provide an account that is funded and can be used to pay for asset creation
@@ -589,7 +590,8 @@ impl pallet_token_gateway::Config for Runtime {
     type Dispatcher = Hyperbridge;
     type NativeCurrency = Balances;
     type AssetAdmin = AssetAdmin;
-    type CreateOrigin = EnsureRoot<AccountId>;
+    // type CreateOrigin = EnsureRoot<AccountId>;
+	type CreateOrigin = EnsureRootOrHalfCouncil;
     type Assets = Assets;
     type NativeAssetId = NativeAssetId;
     type Decimals = Decimals;
@@ -601,7 +603,8 @@ impl pallet_ismp::Config for Runtime {
     // configure the runtime event
     type RuntimeEvent = RuntimeEvent;
     // Permissioned origin who can create or update consensus clients
-    type AdminOrigin = EnsureRoot<AccountId>;
+    // type AdminOrigin = EnsureRoot<AccountId>;
+	type AdminOrigin = EnsureRootOrHalfCouncil;
     // The state machine identifier for this state machine
     type HostStateMachine = HostStateMachine;
     // The pallet_timestamp pallet
@@ -773,7 +776,7 @@ impl frame_system::Config for Runtime {
     type Version = Version;
     type AccountData = pallet_balances::AccountData<Balance>;
     type SystemWeightInfo = frame_system::weights::SubstrateWeight<Runtime>;
-    type SS58Prefix = ConstU16<42>;
+    type SS58Prefix = ConstU16<88>;
     type MaxConsumers = ConstU32<16>;
     type MultiBlockMigrator = MultiBlockMigrations;
 }
