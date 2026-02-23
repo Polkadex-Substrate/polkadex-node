@@ -23,7 +23,7 @@
 #![allow(unused_crate_dependencies)]
 
 mod weights;
-
+mod migrations;
 extern crate alloc;
 
 // --------------- imports starts
@@ -179,7 +179,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 370,
+    spec_version: 379,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 2,
@@ -509,9 +509,9 @@ parameter_types! {
     pub const MaxBids: u32 = 10;
     pub const SocietyPalletId: PalletId = PalletId(*b"py/socie");
     // The hyperbridge parachain on Polkadot
-    pub const Coprocessor: Option<StateMachine> = Some(StateMachine::Polkadot(3367));
+    pub const Coprocessor: Option<StateMachine> = Some(StateMachine::Kusama(4009));
     // The host state machine of this pallet
-    pub const HostStateMachine: StateMachine = StateMachine::Substrate(*b"polk"); // your paraId here
+    pub const HostStateMachine: StateMachine = StateMachine::Substrate(*b"PDEX");
     pub const Decimals: u8 = 12;
     pub const MaxLengthLimit: u32 = 100;
 }
@@ -572,7 +572,8 @@ impl ismp_grandpa::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type IsmpHost = Ismp;
 	type WeightInfo = ismp_grandpa_weight::WeightInfo<Runtime>;
-	type RootOrigin = EnsureRoot<AccountId>;
+	// type RootOrigin = EnsureRoot<AccountId>;
+	type RootOrigin = EnsureRootOrHalfCouncil;
 }
 
 /// Should provide an account that is funded and can be used to pay for asset creation
@@ -589,7 +590,8 @@ impl pallet_token_gateway::Config for Runtime {
     type Dispatcher = Hyperbridge;
     type NativeCurrency = Balances;
     type AssetAdmin = AssetAdmin;
-    type CreateOrigin = EnsureRoot<AccountId>;
+    // type CreateOrigin = EnsureRoot<AccountId>;
+	type CreateOrigin = EnsureRootOrHalfCouncil;
     type Assets = Assets;
     type NativeAssetId = NativeAssetId;
     type Decimals = Decimals;
@@ -601,7 +603,8 @@ impl pallet_ismp::Config for Runtime {
     // configure the runtime event
     type RuntimeEvent = RuntimeEvent;
     // Permissioned origin who can create or update consensus clients
-    type AdminOrigin = EnsureRoot<AccountId>;
+    // type AdminOrigin = EnsureRoot<AccountId>;
+	type AdminOrigin = EnsureRootOrHalfCouncil;
     // The state machine identifier for this state machine
     type HostStateMachine = HostStateMachine;
     // The pallet_timestamp pallet
@@ -773,7 +776,7 @@ impl frame_system::Config for Runtime {
     type Version = Version;
     type AccountData = pallet_balances::AccountData<Balance>;
     type SystemWeightInfo = frame_system::weights::SubstrateWeight<Runtime>;
-    type SS58Prefix = ConstU16<42>;
+    type SS58Prefix = ConstU16<88>;
     type MaxConsumers = ConstU32<16>;
     type MultiBlockMigrator = MultiBlockMigrations;
 }
@@ -1094,18 +1097,21 @@ impl pallet_authorship::Config for Runtime {
 	type EventHandler = (Staking, ImOnline);
 }
 
+
 impl_opaque_keys! {
 	pub struct SessionKeys {
 		pub grandpa: Grandpa,
 		pub babe: Babe,
 		pub im_online: ImOnline,
 		pub authority_discovery: AuthorityDiscovery,
+		pub orderbook: OCEX,
 		pub mixnet: Mixnet,
 		pub beefy: Beefy,
-		pub orderbook: OCEX,
-		//pub thea: Thea,
 	}
 }
+
+
+
 
 impl pallet_session::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
@@ -2428,8 +2434,6 @@ mod runtime {
     #[runtime::pallet_index(3)]
     pub type Timestamp = pallet_timestamp::Pallet<Runtime>;
 
-    // Authorship must be before session in order to note author in the correct session and era
-    // for im-online and staking.
     #[runtime::pallet_index(4)]
     pub type Authorship = pallet_authorship::Pallet<Runtime>;
 
@@ -2469,9 +2473,6 @@ mod runtime {
     #[runtime::pallet_index(16)]
     pub type Treasury = pallet_treasury::Pallet<Runtime>;
 
-    #[runtime::pallet_index(17)]
-    pub type Sudo = pallet_sudo::Pallet<Runtime>;
-
     #[runtime::pallet_index(18)]
     pub type ImOnline = pallet_im_online::Pallet<Runtime>;
 
@@ -2502,112 +2503,119 @@ mod runtime {
     #[runtime::pallet_index(27)]
     pub type Bounties = pallet_bounties::Pallet<Runtime>;
 
-    #[runtime::pallet_index(28)]
-    pub type Democracy = pallet_democracy::Pallet<Runtime>;
+    // #28 was OrmlVesting - REMOVED
 
     #[runtime::pallet_index(29)]
-    pub type Preimage = pallet_preimage::Pallet<Runtime>;
-
-    #[runtime::pallet_index(30)]
-    pub type ChildBounties = pallet_child_bounties::Pallet<Runtime>;
-
-    #[runtime::pallet_index(31)]
-    pub type Assets = pallet_assets::Pallet<Runtime, Instance1>;
-
-    #[runtime::pallet_index(32)]
-    pub type PoolAssets = pallet_assets::Pallet<Runtime, Instance2>;
-
-    #[runtime::pallet_index(34)]
-    pub type AssetConversion = pallet_asset_conversion::Pallet<Runtime>;
-
-    #[runtime::pallet_index(35)]
-    pub type AssetConversionTxPayment = pallet_asset_conversion_tx_payment::Pallet<Runtime>;
-
-    #[runtime::pallet_index(36)]
-    pub type Statement = pallet_statement::Pallet<Runtime>;
-
-    // #[runtime::pallet_index(37)]
-    //pub type AssetTxPayment = pallet_asset_tx_payment::Pallet<Runtime>;
-
-    #[runtime::pallet_index(38)]
-    pub type Revive = pallet_revive::Pallet<Runtime>;
-
-    #[runtime::pallet_index(39)]
-    pub type SkipFeelessPayment = pallet_skip_feeless_payment::Pallet<Runtime>;
-
-    #[runtime::pallet_index(40)]
-    pub type Contracts = pallet_contracts::Pallet<Runtime>;
-
-    #[runtime::pallet_index(41)]
-    pub type Alliance = pallet_alliance::Pallet<Runtime>;
-
-    #[runtime::pallet_index(42)]
-    pub type AllianceMotion = pallet_collective::Pallet<Runtime, Instance3>;
-
-    //#[runtime::pallet_index(43)]
-    //pub type NominationPools = pallet_nomination_pools::Pallet<Runtime>;
-
-    #[runtime::pallet_index(44)]
-    pub type DelegatedStaking = pallet_delegated_staking::Pallet<Runtime>;
-
-    #[runtime::pallet_index(45)]
-    pub type RandomnessCollectiveFlip = pallet_insecure_randomness_collective_flip::Pallet<Runtime>;
-
-    #[runtime::pallet_index(46)]
-    pub type SafeMode = pallet_safe_mode::Pallet<Runtime>;
-
-    #[runtime::pallet_index(47)]
-    pub type TxPause = pallet_tx_pause::Pallet<Runtime>;
-
-    #[runtime::pallet_index(48)]
-    pub type MultiBlockMigrations = pallet_migrations::Pallet<Runtime>;
-
-    #[runtime::pallet_index(49)]
-    pub type Beefy = pallet_beefy::Pallet<Runtime>;
-
-    #[runtime::pallet_index(50)]
-    pub type Mmr = pallet_mmr::Pallet<Runtime>;
-
-    #[runtime::pallet_index(51)]
-    pub type MmrLeaf = pallet_beefy_mmr::Pallet<Runtime>;
-
-    #[runtime::pallet_index(52)]
-    pub type Mixnet = pallet_mixnet::Pallet<Runtime>;
-
-    #[runtime::pallet_index(53)]
-    pub type Society = pallet_society::Pallet<Runtime>;
-
-    // ----- Custom
-
-    #[runtime::pallet_index(54)]
-    pub type OCEX = pallet_ocex_lmp::Pallet<Runtime>;
-
-    #[runtime::pallet_index(55)]
-    pub type CrowdSourceLMP = pallet_lmp::pallet::Pallet<Runtime>;
-
-    #[runtime::pallet_index(56)]
-    pub type Rewards = pallet_rewards::Pallet<Runtime>;
-
-    #[runtime::pallet_index(57)]
     pub type PDEXMigration = pdex_migration::pallet::Pallet<Runtime>;
 
-    #[runtime::pallet_index(58)]
+    #[runtime::pallet_index(30)]
+    pub type Democracy = pallet_democracy::Pallet<Runtime>;
+
+    #[runtime::pallet_index(31)]
+    pub type Preimage = pallet_preimage::Pallet<Runtime>;
+
+    // #32 was RandomnessCollectiveFlip - skipped
+
+    #[runtime::pallet_index(33)]
+    pub type ChildBounties = pallet_child_bounties::Pallet<Runtime>;
+
+    #[runtime::pallet_index(34)]
+    pub type Assets = pallet_assets::Pallet<Runtime, Instance1>;
+
+    #[runtime::pallet_index(35)]
+    pub type OCEX = pallet_ocex_lmp::Pallet<Runtime>;
+
+    #[runtime::pallet_index(36)]
     pub type OrderbookCommittee = pallet_collective::Pallet<Runtime, Instance4>;
 
+    // #39 was Thea - REMOVED
+
+    #[runtime::pallet_index(40)]
+    pub type Rewards = pallet_rewards::Pallet<Runtime>;
+
+    // #44 was TheaExecutor - REMOVED
+
+    #[runtime::pallet_index(45)]
+    pub type Sudo = pallet_sudo::Pallet<Runtime>;
+
+    #[runtime::pallet_index(46)]
+    pub type AssetConversion = pallet_asset_conversion::Pallet<Runtime>;
+
+    #[runtime::pallet_index(47)]
+    pub type AssetConversionTxPayment = pallet_asset_conversion_tx_payment::Pallet<Runtime>;
+
+    #[runtime::pallet_index(48)]
+    pub type Statement = pallet_statement::Pallet<Runtime>;
+
+    // #49 was AssetTxPayment - REMOVED
+
+    #[runtime::pallet_index(50)]
+    pub type CrowdSourceLMP = pallet_lmp::pallet::Pallet<Runtime>;
+
+    // ===== NEW PALLETS START AT #51+ =====
+
+    #[runtime::pallet_index(51)]
+    pub type PoolAssets = pallet_assets::Pallet<Runtime, Instance2>;
+
+    #[runtime::pallet_index(52)]
+    pub type Revive = pallet_revive::Pallet<Runtime>;
+
+    #[runtime::pallet_index(53)]
+    pub type SkipFeelessPayment = pallet_skip_feeless_payment::Pallet<Runtime>;
+
+    #[runtime::pallet_index(54)]
+    pub type Contracts = pallet_contracts::Pallet<Runtime>;
+
+    #[runtime::pallet_index(55)]
+    pub type Alliance = pallet_alliance::Pallet<Runtime>;
+
+    #[runtime::pallet_index(56)]
+    pub type AllianceMotion = pallet_collective::Pallet<Runtime, Instance3>;
+
+    // #[runtime::pallet_index(57)]
+    // pub type NominationPools = pallet_nomination_pools::Pallet<Runtime>;
+
+    #[runtime::pallet_index(58)]
+    pub type DelegatedStaking = pallet_delegated_staking::Pallet<Runtime>;
+
     #[runtime::pallet_index(59)]
-    pub type Ismp = pallet_ismp::Pallet<Runtime>;
+    pub type RandomnessCollectiveFlip = pallet_insecure_randomness_collective_flip::Pallet<Runtime>;
 
     #[runtime::pallet_index(60)]
-    pub type IsmpGrandpa = ismp_grandpa::Pallet<Runtime>;
+    pub type SafeMode = pallet_safe_mode::Pallet<Runtime>;
 
     #[runtime::pallet_index(61)]
-    pub type Hyperbridge = pallet_hyperbridge::Pallet<Runtime>;
+    pub type TxPause = pallet_tx_pause::Pallet<Runtime>;
 
     #[runtime::pallet_index(62)]
-    pub type TokenGateway = pallet_token_gateway::Pallet<Runtime>;
+    pub type MultiBlockMigrations = pallet_migrations::Pallet<Runtime>;
 
-    // #[runtime::pallet_index(42)]
-    //pub type Thea: thea::Pallet<Runtime>;
+    #[runtime::pallet_index(63)]
+    pub type Beefy = pallet_beefy::Pallet<Runtime>;
+
+    #[runtime::pallet_index(64)]
+    pub type Mmr = pallet_mmr::Pallet<Runtime>;
+
+    #[runtime::pallet_index(65)]
+    pub type MmrLeaf = pallet_beefy_mmr::Pallet<Runtime>;
+
+    #[runtime::pallet_index(66)]
+    pub type Mixnet = pallet_mixnet::Pallet<Runtime>;
+
+    #[runtime::pallet_index(67)]
+    pub type Society = pallet_society::Pallet<Runtime>;
+
+    #[runtime::pallet_index(68)]
+    pub type Ismp = pallet_ismp::Pallet<Runtime>;
+
+    #[runtime::pallet_index(69)]
+    pub type IsmpGrandpa = ismp_grandpa::Pallet<Runtime>;
+
+    #[runtime::pallet_index(70)]
+    pub type Hyperbridge = pallet_hyperbridge::Pallet<Runtime>;
+
+    #[runtime::pallet_index(71)]
+    pub type TokenGateway = pallet_token_gateway::Pallet<Runtime>;
 }
 
 //#[cfg(not(feature = "runtime-benchmarks"))]
@@ -2886,7 +2894,16 @@ const IDENTITY_MIGRATION_KEY_LIMIT: u64 = u64::MAX;
 // `OnRuntimeUpgrade`. Note: These are examples and do not need to be run directly
 // after the genesis block.
 type Migrations = (
-    //pallet_nomination_pools::migration::versioned::V6ToV7<Runtime>,
+	migrations::InitOcexFeeConfig<Runtime>,
+	migrations::UpgradeSessionKeys,
+    // Pallet storage version migrations
+    migrations::StakingStorageVersionMigration<Runtime>,
+    migrations::SessionStorageVersionMigration<Runtime>,
+    migrations::GrandpaStorageVersionMigration<Runtime>,
+    migrations::IdentityStorageVersionMigration<Runtime>,
+    migrations::ChildBountiesStorageVersionMigration<Runtime>,
+    // Existing migrations
+    // pallet_nomination_pools::migration::versioned::V6ToV7<Runtime>,
     pallet_alliance::migration::Migration<Runtime>,
     pallet_contracts::Migration<Runtime>,
     pallet_identity::migration::versioned::V0ToV1<Runtime, IDENTITY_MIGRATION_KEY_LIMIT>,
