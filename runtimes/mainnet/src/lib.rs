@@ -179,7 +179,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 379,
+    spec_version: 378,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 2,
@@ -651,33 +651,33 @@ impl IsmpRouter for Router {
 
 /// Some custom module capable of processing some incoming/request or response.
 /// This could also be a pallet itself.
-#[derive(Default)]
-struct YourModule;
+// #[derive(Default)]
+// struct YourModule;
 
-pub const YOUR_MODULE_ID: &'static [u8] = &[12, 24, 36, 48];
+// pub const YOUR_MODULE_ID: &'static [u8] = &[12, 24, 36, 48];
 
-impl IsmpModule for YourModule {
-    /// Called by the ISMP hanlder, to notify module of a new POST request
-    /// the module may choose to respond immediately, or in a later block
-    fn on_accept(&self, request: PostRequest) -> Result<(), anyhow::Error> {
-        // do something useful with the request
-        Ok(())
-    }
+// impl IsmpModule for YourModule {
+//     /// Called by the ISMP hanlder, to notify module of a new POST request
+//     /// the module may choose to respond immediately, or in a later block
+//     fn on_accept(&self, request: PostRequest) -> Result<(), anyhow::Error> {
+//         // do something useful with the request
+//         Ok(())
+//     }
 
-    /// Called by the ISMP hanlder, to notify module of a response to a previously
-    /// sent out request
-    fn on_response(&self, response: Response) -> Result<(), anyhow::Error> {
-        // do something useful with the response
-        Ok(())
-    }
+//     /// Called by the ISMP hanlder, to notify module of a response to a previously
+//     /// sent out request
+//     fn on_response(&self, response: Response) -> Result<(), anyhow::Error> {
+//         // do something useful with the response
+//         Ok(())
+//     }
 
-    /// Called by the ISMP hanlder, to notify module of requests that were previously
-    /// sent but have now timed-out
-	fn on_timeout(&self, request: Timeout) -> Result<(), anyhow::Error> {
-        // revert any state changes that were made prior to dispatching the request
-        Ok(())
-    }
-}
+//     /// Called by the ISMP hanlder, to notify module of requests that were previously
+//     /// sent but have now timed-out
+// 	fn on_timeout(&self, request: Timeout) -> Result<(), anyhow::Error> {
+//         // revert any state changes that were made prior to dispatching the request
+//         Ok(())
+//     }
+// }
 
 pub struct DealWithFees;
 impl OnUnbalanced<NegativeImbalance> for DealWithFees {
