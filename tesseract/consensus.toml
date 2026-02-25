@@ -4,7 +4,7 @@ type = "grandpa"
 
 [hyperbridge.grandpa]
 # Hyperbridge's relay chain websocket RPC
-rpc = "wss://paseo-rpc.n.dwellir.com"
+rpc = "wss://hyperbridge-paseo-rpc.blockops.network"
 # Hyperbridge's slot duration
 # on Polkadot
 # slot_duration = 12000
@@ -19,7 +19,7 @@ para_ids = [4009]
 
 [hyperbridge.substrate]
 # Hyperbridge's relay chain websocket RPC
-rpc_ws = "wss://paseo-rpc.n.dwellir.com"
+rpc_ws = "wss://hyperbridge-paseo-rpc.blockops.network"
 # Hyperbridge's hashing algorithm
 hashing = "Keccak"
 # Hyperbridge's consensus state id
