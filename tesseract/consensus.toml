@@ -4,7 +4,7 @@ type = "grandpa"
 
 [hyperbridge.grandpa]
 # Hyperbridge's relay chain websocket RPC
-rpc = "wss://hyperbridge-paseo-rpc.blockops.network"
+rpc = "wss://paseo-rpc.n.dwellir.com"
 # Hyperbridge's slot duration
 # on Polkadot
 # slot_duration = 12000
@@ -61,9 +61,4 @@ consensus_update_frequency = 60
 para_ids = []
 
 [relayer]
-maximum_update_intervals = [
-    # restart if the polkadot consensus client on your solochain is not updated within 3 minutes
-    [{state_id = "KUSAMA-4009", consensus_state_id = "PAS0"}, 180],
-    # restart if your solochain consensus client on hyperbridge is not updated within 3 minutes
-    [{state_id = "SUBSTRATE-PDEX", consensus_state_id = "PDEX"}, 180],
-]
+maximum_update_intervals = []
