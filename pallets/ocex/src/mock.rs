@@ -25,7 +25,7 @@ use frame_support::{
 	PalletId,
 };
 use frame_system::{EnsureRoot, EnsureSigned};
-use polkadex_primitives::{Moment, Signature};
+use polkadex_primitives::{Moment, Signature, AccountIndex};
 use sp_application_crypto::sp_core::H256;
 use sp_core::offchain::testing::TestOffchainExt;
 use sp_core::offchain::{OffchainDbExt, OffchainWorkerExt};
@@ -38,10 +38,17 @@ use sp_std::cell::RefCell;
 use sp_runtime::{
 	traits::{BlakeTwo256, IdentityLookup},
 	BuildStorage,
+	MultiAddress,
+	MultiSignature,
 };
+use frame_support::derive_impl;
+use pallet_revive::{evm::runtime::EthExtra};
 // Reexport crate as its pallet name for construct_runtime.
 
 type Block = frame_system::mocking::MockBlock<Test>;
+type Address = sp_runtime::MultiAddress<AccountId, AccountIndex>;
+type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
+// type UncheckedExtrinsic = pallet_revive::evm::runtime::UncheckedExtrinsic<Address, Signature, EthExtraImpl>;
 
 // For testing the pallet, we construct a mock runtime.
 frame_support::construct_runtime!(
@@ -59,46 +66,84 @@ parameter_types! {
 	pub BlockWeights: frame_system::limits::BlockWeights =
 		frame_system::limits::BlockWeights::simple_max(Weight::from_parts(1024, 64));
 }
+
+#[derive_impl(frame_system::config_preludes::SolochainDefaultConfig)]
 impl frame_system::Config for Test {
-	type BaseCallFilter = frame_support::traits::Everything;
-	type BlockWeights = ();
-	type BlockLength = ();
-	type RuntimeOrigin = RuntimeOrigin;
-	type RuntimeCall = RuntimeCall;
-	type Hash = H256;
-	type Hashing = BlakeTwo256;
-	type AccountId = sp_runtime::AccountId32;
-	type Lookup = IdentityLookup<Self::AccountId>;
-	type RuntimeEvent = RuntimeEvent;
-	type BlockHashCount = ConstU64<250>;
-	type DbWeight = ();
-	type Version = ();
-	type PalletInfo = PalletInfo;
-	type AccountData = pallet_balances::AccountData<u128>;
-	type OnNewAccount = ();
-	type OnKilledAccount = ();
-	type SystemWeightInfo = ();
-	type SS58Prefix = ();
-	type OnSetCode = ();
-	type MaxConsumers = frame_support::traits::ConstU32<16>;
-	type Nonce = u64;
-	type Block = Block;
+    type BaseCallFilter = frame_support::traits::Everything;
+    type BlockWeights = ();
+    type BlockLength = ();
+    type DbWeight = ();
+    type Nonce = u64;
+    type Hash = H256;
+    type AccountId = sp_runtime::AccountId32;
+    type Lookup = IdentityLookup<Self::AccountId>;
+    type Block = Block;
+    type BlockHashCount = ConstU64<250>;
+    type Version = ();
+    type AccountData = pallet_balances::AccountData<u128>;
+    type SystemWeightInfo = ();
+    type SS58Prefix = ();
+    type MaxConsumers = frame_support::traits::ConstU32<16>;
+    type MultiBlockMigrator = ();
 }
 
+// impl frame_system::Config for Test {
+// 	type BaseCallFilter = frame_support::traits::Everything;
+// 	type BlockWeights = ();
+// 	type BlockLength = ();
+// 	type RuntimeOrigin = RuntimeOrigin;
+// 	type RuntimeCall = RuntimeCall;
+// 	type Hash = H256;
+// 	type Hashing = BlakeTwo256;
+// 	type AccountId = sp_runtime::AccountId32;
+// 	type Lookup = IdentityLookup<Self::AccountId>;
+// 	type RuntimeEvent = RuntimeEvent;
+// 	type BlockHashCount = ConstU64<250>;
+// 	type DbWeight = ();
+// 	type Version = ();
+// 	type PalletInfo = PalletInfo;
+// 	type AccountData = pallet_balances::AccountData<u128>;
+// 	type OnNewAccount = ();
+// 	type OnKilledAccount = ();
+// 	type SystemWeightInfo = ();
+// 	type SS58Prefix = ();
+// 	type OnSetCode = ();
+// 	type MaxConsumers = frame_support::traits::ConstU32<16>;
+// 	type Nonce = u64;
+// 	type Block = Block;
+// }
+
+// impl pallet_balances::Config for Test {
+// 	type RuntimeEvent = RuntimeEvent;
+// 	type WeightInfo = ();
+// 	type Balance = u128;
+// 	type DustRemoval = ();
+// 	type ExistentialDeposit = ConstU128<1>;
+// 	type AccountStore = System;
+// 	type ReserveIdentifier = [u8; 8];
+// 	type RuntimeHoldReason = ();
+// 	type FreezeIdentifier = ();
+// 	type MaxLocks = ();
+// 	type MaxReserves = ();
+// 	type MaxHolds = ();
+// 	type MaxFreezes = ();
+// }
+
 impl pallet_balances::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = ();
-	type Balance = u128;
-	type DustRemoval = ();
-	type ExistentialDeposit = ConstU128<1>;
-	type AccountStore = System;
-	type ReserveIdentifier = [u8; 8];
 	type RuntimeHoldReason = ();
-	type FreezeIdentifier = ();
+	type RuntimeFreezeReason = ();
 	type MaxLocks = ();
 	type MaxReserves = ();
-	type MaxHolds = ();
+	type ReserveIdentifier = [u8; 8];
+	type Balance = u128;
+	type DustRemoval = ();
+	type RuntimeEvent = RuntimeEvent;
+	type ExistentialDeposit = ConstU128<1>;
+	type AccountStore = System;
+	type WeightInfo = ();
+	type FreezeIdentifier = ();
 	type MaxFreezes = ();
+	type DoneSlashHandler = ();
 }
 
 thread_local! {
@@ -161,25 +206,49 @@ parameter_types! {
 }
 
 impl pallet_assets::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
-	type Balance = u128;
-	type RemoveItemsLimit = ();
-	type AssetId = u128;
-	type AssetIdParameter = parity_scale_codec::Compact<u128>;
-	type Currency = Balances;
-	type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<sp_runtime::AccountId32>>;
-	type ForceOrigin = EnsureRoot<sp_runtime::AccountId32>;
-	type AssetDeposit = AssetDeposit;
-	type AssetAccountDeposit = AssetDeposit;
-	type MetadataDepositBase = MetadataDepositBase;
-	type MetadataDepositPerByte = MetadataDepositPerByte;
-	type ApprovalDeposit = ApprovalDeposit;
-	type StringLimit = StringLimit;
-	type Freezer = ();
-	type Extra = ();
-	type CallbackHandle = ();
-	type WeightInfo = ();
+    type RuntimeEvent = RuntimeEvent;
+    type Balance = u128;
+    type AssetId = u32;
+    type AssetIdParameter = parity_scale_codec::Compact<u32>;
+    type Currency = Balances;
+    type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<sp_runtime::AccountId32>>;
+    type ForceOrigin = EnsureRoot<sp_runtime::AccountId32>;
+    type AssetDeposit = AssetDeposit;
+    type AssetAccountDeposit = AssetDeposit;
+    type MetadataDepositBase = MetadataDepositBase;
+    type MetadataDepositPerByte = MetadataDepositPerByte;
+    type ApprovalDeposit = ApprovalDeposit;
+    type StringLimit = StringLimit;
+    type Holder = ();
+    type Freezer = ();
+    type Extra = ();
+    type CallbackHandle = ();
+    type WeightInfo = ();
+    type RemoveItemsLimit = ();
+    #[cfg(feature = "runtime-benchmarks")]
+    type BenchmarkHelper = ();
 }
+
+// impl pallet_assets::Config for Test {
+// 	type RuntimeEvent = RuntimeEvent;
+// 	type Balance = u128;
+// 	type RemoveItemsLimit = ();
+// 	type AssetId = u128;
+// 	type AssetIdParameter = parity_scale_codec::Compact<u128>;
+// 	type Currency = Balances;
+// 	type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<sp_runtime::AccountId32>>;
+// 	type ForceOrigin = EnsureRoot<sp_runtime::AccountId32>;
+// 	type AssetDeposit = AssetDeposit;
+// 	type AssetAccountDeposit = AssetDeposit;
+// 	type MetadataDepositBase = MetadataDepositBase;
+// 	type MetadataDepositPerByte = MetadataDepositPerByte;
+// 	type ApprovalDeposit = ApprovalDeposit;
+// 	type StringLimit = StringLimit;
+// 	type Freezer = ();
+// 	type Extra = ();
+// 	type CallbackHandle = ();
+// 	type WeightInfo = ();
+// }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
 	let t = frame_system::GenesisConfig::<Test>::default().build_storage().unwrap();
@@ -223,24 +292,88 @@ impl frame_system::offchain::SigningTypes for Test {
 	type Signature = Signature;
 }
 
-impl<LocalCall> frame_system::offchain::SendTransactionTypes<LocalCall> for Test
-where
-	RuntimeCall: From<LocalCall>,
-{
-	type OverarchingCall = RuntimeCall;
-	type Extrinsic = Extrinsic;
-}
+// impl<LocalCall> frame_system::offchain::SendTransactionTypes<LocalCall> for Test
+// where
+// 	RuntimeCall: From<LocalCall>,
+// {
+// 	type OverarchingCall = RuntimeCall;
+// 	type Extrinsic = Extrinsic;
+// }
+
+// impl<LocalCall> frame_system::offchain::CreateSignedTransaction<LocalCall> for Test
+// where
+// 	RuntimeCall: From<LocalCall>,
+// {
+// 	fn create_signed_transaction<C: frame_system::offchain::AppCrypto<Self::Public, Self::Signature>>(
+// 		call: RuntimeCall,
+// 		_public: <Signature as Verify>::Signer,
+// 		_account: AccountId,
+// 		nonce: u64,
+// 	) -> std::option::Option<sp_runtime::generic::UncheckedExtrinsic<AccountId, RuntimeCall, (), ()>> {
+// 		Some((call, (nonce, ())))
+// 	}
+// }
 
 impl<LocalCall> frame_system::offchain::CreateSignedTransaction<LocalCall> for Test
 where
-	RuntimeCall: From<LocalCall>,
+    RuntimeCall: From<LocalCall>,
 {
-	fn create_transaction<C: frame_system::offchain::AppCrypto<Self::Public, Self::Signature>>(
-		call: RuntimeCall,
-		_public: <Signature as Verify>::Signer,
-		_account: AccountId,
-		nonce: u64,
-	) -> Option<(RuntimeCall, <Extrinsic as ExtrinsicT>::SignaturePayload)> {
-		Some((call, (nonce, ())))
-	}
+    fn create_signed_transaction<
+        C: frame_system::offchain::AppCrypto<Self::Public, Self::Signature>,
+    >(
+        call: RuntimeCall,
+        _public: <Signature as Verify>::Signer,
+        _account: AccountId,
+        nonce: u64,
+    ) -> Option<UncheckedExtrinsic> {
+        Some(UncheckedExtrinsic::new_bare(call))
+    }
 }
+
+impl<C> frame_system::offchain::CreateTransactionBase<C> for Test
+where
+	RuntimeCall: From<C>,
+{
+	type Extrinsic = UncheckedExtrinsic;
+	type RuntimeCall = RuntimeCall;
+}
+
+// pub type TxExtension = (
+// 	frame_system::CheckNonZeroSender<Test>,
+// 	frame_system::CheckSpecVersion<Test>,
+// 	frame_system::CheckTxVersion<Test>,
+// 	frame_system::CheckGenesis<Test>,
+// 	frame_system::CheckEra<Test>,
+// 	frame_system::CheckNonce<Test>,
+// 	frame_system::CheckWeight<Test>,
+// 	pallet_skip_feeless_payment::SkipCheckIfFeeless<
+// 		Test,
+// 		pallet_asset_conversion_tx_payment::ChargeAssetTxPayment<Test>,
+// 	>,
+// 	frame_metadata_hash_extension::CheckMetadataHash<Test>,
+// 	frame_system::WeightReclaim<Test>,
+// );
+
+// #[derive(Clone, PartialEq, Eq, Debug)]
+// pub struct EthExtraImpl;
+
+// impl EthExtra for EthExtraImpl {
+// 	type Config = Test;
+// 	type Extension = TxExtension;
+
+// 	fn get_eth_extension(nonce: u32, tip: u128) -> Self::Extension {
+// 		(
+// 			frame_system::CheckNonZeroSender::<Test>::new(),
+// 			frame_system::CheckSpecVersion::<Test>::new(),
+// 			frame_system::CheckTxVersion::<Test>::new(),
+// 			frame_system::CheckGenesis::<Test>::new(),
+// 			frame_system::CheckEra::from(sp_runtime::generic::Era::Immortal),
+// 			frame_system::CheckNonce::<Test>::from(nonce),
+// 			frame_system::CheckWeight::<Test>::new(),
+// 			pallet_asset_conversion_tx_payment::ChargeAssetTxPayment::<Test>::from(tip, None)
+// 				.into(),
+// 			frame_metadata_hash_extension::CheckMetadataHash::<Test>::new(false),
+// 			frame_system::WeightReclaim::<Test>::new(),
+// 		)
+// 	}
+// }
