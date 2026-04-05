@@ -147,7 +147,7 @@ use impls::{AllianceProposalProvider, Author};
 pub mod constants;
 
 /// Runtime API definition for assets.
-pub mod assets_api;
+// pub mod assets_api;
 
 /// Genesis presets used by this runtime.
 pub mod genesis_config_presets;
@@ -448,7 +448,7 @@ parameter_types! {
     //pub TrustBackedAssetsPalletIndex: u8 = <Assets as frame_support::pallet_prelude::PalletInfoAccess>::index() as u8;
     //pub TrustBackedAssetsPalletLocation: xcm::v5::Location = xcm::v3::Junction::PalletInstance(TrustBackedAssetsPalletIndex::get()).into();
     //pub StakingPot: AccountId = CollatorSelection::account_id();
-    pub const Native: NativeOrWithId<u32> = NativeOrWithId::Native;
+    pub const Native: NativeOrWithId<u128> = NativeOrWithId::Native;
     pub TreasuryAccount: AccountId = Treasury::account_id();
     pub const AssetDeposit: Balance = 100 * DOLLARS;
     pub const ApprovalDeposit: Balance = 1 * DOLLARS;
@@ -1999,11 +1999,11 @@ use polkadex_primitives::POLKADEX_NATIVE_ASSET_ID;
 //	type WeightInfo = thea_message_handler::weights::WeightInfo<Runtime>;
 //}
 
-pub type NativeAndAssets = fungible::UnionOf<Balances, Assets, NativeFromLeft, NativeOrWithId<u32>, AccountId>;
+pub type NativeAndAssets = fungible::UnionOf<Balances, Assets, NativeFromLeft, NativeOrWithId<u128>, AccountId>;
 
 impl pallet_asset_conversion_tx_payment::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type AssetId = NativeOrWithId<u32>;
+	type AssetId = NativeOrWithId<u128>;
 	type OnChargeAssetTransaction = pallet_asset_conversion_tx_payment::SwapAssetAdapter<
 		Native,
 		NativeAndAssets,
@@ -2111,8 +2111,8 @@ impl pallet_beefy_mmr::Config for Runtime {
 impl pallet_assets::Config<Instance1> for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Balance = u128;
-    type AssetId = u32;
-    type AssetIdParameter = parity_scale_codec::Compact<u32>;
+    type AssetId = u128;
+    type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
     type CreateOrigin = AsEnsureOriginWithArg<EnsureSignedBy<AssetConversionOrigin, AccountId>>;
     type ForceOrigin = EnsureRoot<AccountId>;
@@ -2137,8 +2137,8 @@ impl pallet_assets::Config<Instance1> for Runtime {
 impl pallet_assets::Config<Instance2> for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Balance = u128;
-    type AssetId = u32;
-    type AssetIdParameter = parity_scale_codec::Compact<u32>;
+    type AssetId = u128;
+    type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
     type CreateOrigin = AsEnsureOriginWithArg<EnsureSignedBy<AssetConversionOrigin, AccountId>>;
     type ForceOrigin = EnsureRoot<AccountId>;
@@ -2165,19 +2165,19 @@ impl pallet_asset_conversion::Config for Runtime {
     type Balance = u128;
     //type HigherPrecisionBalance = primitive_types::U256;
     type HigherPrecisionBalance = u128;
-    type AssetKind = NativeOrWithId<u32>;
+    type AssetKind = NativeOrWithId<u128>;
     type Assets = NativeAndAssets;
     type PoolId = (Self::AssetKind, Self::AssetKind);
     type PoolLocator = pallet_asset_conversion::Chain<
         pallet_asset_conversion::WithFirstAsset<
             Native,
             AccountId,
-            NativeOrWithId<u32>,
+            NativeOrWithId<u128>,
             pallet_asset_conversion::AccountIdConverter<AssetConversionPalletId, Self::PoolId>,
         >,
         pallet_asset_conversion::Ascending<
             AccountId,
-            NativeOrWithId<u32>,
+            NativeOrWithId<u128>,
             pallet_asset_conversion::AccountIdConverter<AssetConversionPalletId, Self::PoolId>,
         >,
     >;
@@ -3166,17 +3166,17 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl assets_api::AssetsApi<
-		Block,
-		AccountId,
-		Balance,
-		u32,
-	> for Runtime
-	{
-		fn account_balances(account: AccountId) -> Vec<(u32, Balance)> {
-			Assets::account_balances(account)
-		}
-	}
+	// impl assets_api::AssetsApi<
+	// 	Block,
+	// 	AccountId,
+	// 	Balance,
+	// 	u32,
+	// > for Runtime
+	// {
+	// 	fn account_balances(account: AccountId) -> Vec<(u32, Balance)> {
+	// 		Assets::account_balances(account)
+	// 	}
+	// }
 
 	impl pallet_contracts::ContractsApi<Block, AccountId, Balance, BlockNumber, Hash, EventRecord> for Runtime
 	{
@@ -3438,18 +3438,18 @@ impl_runtime_apis! {
 	impl pallet_asset_conversion::AssetConversionApi<
 		Block,
 		Balance,
-		NativeOrWithId<u32>
+		NativeOrWithId<u128>
 	> for Runtime
 	{
-		fn quote_price_exact_tokens_for_tokens(asset1: NativeOrWithId<u32>, asset2: NativeOrWithId<u32>, amount: Balance, include_fee: bool) -> Option<Balance> {
+		fn quote_price_exact_tokens_for_tokens(asset1: NativeOrWithId<u128>, asset2: NativeOrWithId<u128>, amount: Balance, include_fee: bool) -> Option<Balance> {
 			AssetConversion::quote_price_exact_tokens_for_tokens(asset1, asset2, amount, include_fee)
 		}
 
-		fn quote_price_tokens_for_exact_tokens(asset1: NativeOrWithId<u32>, asset2: NativeOrWithId<u32>, amount: Balance, include_fee: bool) -> Option<Balance> {
+		fn quote_price_tokens_for_exact_tokens(asset1: NativeOrWithId<u128>, asset2: NativeOrWithId<u128>, amount: Balance, include_fee: bool) -> Option<Balance> {
 			AssetConversion::quote_price_tokens_for_exact_tokens(asset1, asset2, amount, include_fee)
 		}
 
-		fn get_reserves(asset1: NativeOrWithId<u32>, asset2: NativeOrWithId<u32>) -> Option<(Balance, Balance)> {
+		fn get_reserves(asset1: NativeOrWithId<u128>, asset2: NativeOrWithId<u128>) -> Option<(Balance, Balance)> {
 			AssetConversion::get_reserves(asset1, asset2).ok()
 		}
 	}
