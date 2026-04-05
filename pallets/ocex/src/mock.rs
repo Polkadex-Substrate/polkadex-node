@@ -208,8 +208,8 @@ parameter_types! {
 impl pallet_assets::Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type Balance = u128;
-    type AssetId = u32;
-    type AssetIdParameter = parity_scale_codec::Compact<u32>;
+    type AssetId = u128;
+    type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
     type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<sp_runtime::AccountId32>>;
     type ForceOrigin = EnsureRoot<sp_runtime::AccountId32>;
