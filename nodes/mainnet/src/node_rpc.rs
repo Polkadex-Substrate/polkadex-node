@@ -139,7 +139,7 @@
 //	//C::Api: rpc_assets::PolkadexAssetHandlerRuntimeApi<Block, AccountId, Hash>,
 //	//C::Api: pallet_rewards_rpc::PolkadexRewardsRuntimeApi<Block, AccountId, Hash>,
 //	//C::Api: pallet_ocex_rpc::PolkadexOcexRuntimeApi<Block, AccountId, Hash>,
-//	C::Api: pallet_asset_conversion::AssetConversionApi<Block, Balance, NativeOrWithId<u32>>,
+//	C::Api: pallet_asset_conversion::AssetConversionApi<Block, Balance, NativeOrWithId<u128>>,
 //	C: BlockchainEvents<Block>,
 //{
 //	//use pallet_ocex_rpc::PolkadexOcexRpcApiServer;
@@ -370,7 +370,7 @@ where
 	C::Api: BabeApi<Block>,
 	C::Api: BlockBuilder<Block>,
 	//C::Api: pallet_asset_conversion::AssetConversionApi<Block, Balance, AssetId>,
-	C::Api: pallet_asset_conversion::AssetConversionApi<Block, Balance, NativeOrWithId<u32>>,
+	C::Api: pallet_asset_conversion::AssetConversionApi<Block, Balance, NativeOrWithId<u128>>,
 	P: TransactionPool + 'static,
 	SC: SelectChain<Block> + 'static,
 	B: sc_client_api::Backend<Block> + Send + Sync + 'static,

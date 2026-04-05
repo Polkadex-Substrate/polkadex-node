@@ -261,7 +261,7 @@ pub mod pallet {
 		type OtherAssets: Mutate<
 				<Self as frame_system::Config>::AccountId,
 				Balance = BalanceOf<Self>,
-				AssetId = u32,
+				AssetId = u128,
 			> + Inspect<<Self as frame_system::Config>::AccountId>
 			+ Create<<Self as frame_system::Config>::AccountId>;
 

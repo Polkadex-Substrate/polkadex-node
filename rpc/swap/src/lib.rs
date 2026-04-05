@@ -91,7 +91,7 @@ impl<Client, Block> PolkadexSwapRpcApiServer<<Block as BlockT>::Hash>
 where
 	Block: BlockT,
 	Client: ProvideRuntimeApi<Block> + Send + Sync + 'static + HeaderBackend<Block>,
-	Client::Api: pallet_asset_conversion::AssetConversionApi<Block, Balance, NativeOrWithId<u32>>,
+	Client::Api: pallet_asset_conversion::AssetConversionApi<Block, Balance, NativeOrWithId<u128>>,
 {
 	async fn quote_price_exact_tokens_for_tokens(
 		&self,
@@ -107,20 +107,26 @@ where
 		let asset_id2: AssetId =
 			AssetId::try_from(asset_id2).map_err(runtime_error_into_rpc_err)?;
 
-    // Convert AssetId into NativeOrWithId<u32>
-    let native_or_id1: Option<NativeOrWithId<u32>> = match asset_id1 {
-        AssetId::Asset(id) => Some(NativeOrWithId::WithId(id as u32)),
+    // Convert AssetId into NativeOrWithId<u128>
+    let native_or_id1: Option<NativeOrWithId<u128>> = match asset_id1 {
+        AssetId::Asset(id) => Some(NativeOrWithId::WithId(id)),
         AssetId::Polkadex => Some(NativeOrWithId::Native),
     };
 
-    let native_or_id2: Option<NativeOrWithId<u32>> = match asset_id2 {
-        AssetId::Asset(id) => Some(NativeOrWithId::WithId(id as u32)),
+    let native_or_id2: Option<NativeOrWithId<u128>> = match asset_id2 {
+        AssetId::Asset(id) => Some(NativeOrWithId::WithId(id)),
         AssetId::Polkadex => Some(NativeOrWithId::Native),
     };
 
 		let amount: u128 = amount.parse().map_err(runtime_error_into_rpc_err)?;
 		let runtime_api_result = api
-			.quote_price_exact_tokens_for_tokens(at, native_or_id1.ok_or(0u32).expect("Native 1 is wrong"), native_or_id2.ok_or(0u32).expect("Native 2 is wrong"), amount, include_fee)
+			.quote_price_exact_tokens_for_tokens(
+				at,
+				native_or_id1.ok_or(0u128).expect("Native 1 is wrong"),
+				native_or_id2.ok_or(0u128).expect("Native 2 is wrong"),
+				amount,
+				include_fee
+			)
 			.map_err(runtime_error_into_rpc_err)?;
 
 		Ok(runtime_api_result)
@@ -140,21 +146,27 @@ where
 		let asset_id2: AssetId =
 			AssetId::try_from(asset_id2).map_err(runtime_error_into_rpc_err)?;
 
-    // Convert AssetId into NativeOrWithId<u32>
-    let native_or_id1: Option<NativeOrWithId<u32>> = match asset_id1 {
-        AssetId::Asset(id) => Some(NativeOrWithId::WithId(id as u32)),
+    // Convert AssetId into NativeOrWithId<u128>
+    let native_or_id1: Option<NativeOrWithId<u128>> = match asset_id1 {
+        AssetId::Asset(id) => Some(NativeOrWithId::WithId(id)),
         AssetId::Polkadex => Some(NativeOrWithId::Native),
     };
 
-    let native_or_id2: Option<NativeOrWithId<u32>> = match asset_id2 {
-        AssetId::Asset(id) => Some(NativeOrWithId::WithId(id as u32)),
+    let native_or_id2: Option<NativeOrWithId<u128>> = match asset_id2 {
+        AssetId::Asset(id) => Some(NativeOrWithId::WithId(id)),
         AssetId::Polkadex => Some(NativeOrWithId::Native),
     };
 
 		let amount: u128 = amount.parse().map_err(runtime_error_into_rpc_err)?;
 		let runtime_api_result = api
 			//.quote_price_tokens_for_exact_tokens(at, asset_id1, asset_id2, amount, include_fee)
-			.quote_price_tokens_for_exact_tokens(at, native_or_id1.ok_or(0u32).expect("Native 1 is wrong"), native_or_id2.ok_or(0u32).expect("Native 2 is wrong"), amount, include_fee)
+			.quote_price_tokens_for_exact_tokens(
+				at,
+				native_or_id1.ok_or(0u128).expect("Native 1 is wrong"),
+				native_or_id2.ok_or(0u128).expect("Native 2 is wrong"),
+				amount,
+				include_fee
+			)
 			.map_err(runtime_error_into_rpc_err)?;
 
 		Ok(runtime_api_result)
@@ -172,19 +184,23 @@ where
 		let asset_id2: AssetId =
 			AssetId::try_from(asset_id2).map_err(runtime_error_into_rpc_err)?;
 
-    // Convert AssetId into NativeOrWithId<u32>
-    let native_or_id1: Option<NativeOrWithId<u32>> = match asset_id1 {
-        AssetId::Asset(id) => Some(NativeOrWithId::WithId(id as u32)),
+    // Convert AssetId into NativeOrWithId<u128>
+    let native_or_id1: Option<NativeOrWithId<u128>> = match asset_id1 {
+        AssetId::Asset(id) => Some(NativeOrWithId::WithId(id)),
         AssetId::Polkadex => Some(NativeOrWithId::Native),
     };
 
-    let native_or_id2: Option<NativeOrWithId<u32>> = match asset_id2 {
-        AssetId::Asset(id) => Some(NativeOrWithId::WithId(id as u32)),
+    let native_or_id2: Option<NativeOrWithId<u128>> = match asset_id2 {
+        AssetId::Asset(id) => Some(NativeOrWithId::WithId(id)),
         AssetId::Polkadex => Some(NativeOrWithId::Native),
     };
 
 		let runtime_api_result = api
-            .get_reserves(at, native_or_id1.ok_or(0u32).expect("Native 1 is wrong"), native_or_id2.ok_or(0u32).expect("Native 2 is wrong"))
+            .get_reserves(
+				at,
+				native_or_id1.ok_or(0u128).expect("Native 1 is wrong"),
+				native_or_id2.ok_or(0u128).expect("Native 2 is wrong")
+			)
             .map_err(runtime_error_into_rpc_err)?;
 
 		Ok(runtime_api_result)
