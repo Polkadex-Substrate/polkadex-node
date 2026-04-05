@@ -9505,6 +9505,7 @@ dependencies = [
  "pallet-assets",
  "pallet-balances",
  "pallet-lmp",
+ "pallet-revive 0.6.2",
  "pallet-timestamp",
  "parity-scale-codec",
  "polkadex-primitives",
