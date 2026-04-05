@@ -9494,6 +9494,7 @@ name = "pallet-ocex-lmp"
 version = "6.0.0"
 dependencies = [
  "frame-benchmarking",
+ "frame-metadata-hash-extension",
  "frame-support",
  "frame-system",
  "hash-db",
@@ -9502,9 +9503,12 @@ dependencies = [
  "log",
  "num-traits",
  "orderbook-primitives",
+ "pallet-asset-conversion-tx-payment",
  "pallet-assets",
  "pallet-balances",
  "pallet-lmp",
+ "pallet-revive 0.6.2",
+ "pallet-skip-feeless-payment",
  "pallet-timestamp",
  "parity-scale-codec",
  "polkadex-primitives",
