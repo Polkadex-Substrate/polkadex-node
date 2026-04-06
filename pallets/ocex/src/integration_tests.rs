@@ -51,7 +51,8 @@ use std::collections::BTreeMap;
 #[sequential]
 fn test_run_on_chain_validation_trades_happy_path() {
 	new_test_ext().execute_with(|| {
-		push_trade_user_actions(1, 0, 4768084);
+		// previous block: 4768084, third argument
+		push_trade_user_actions(1, 0, 1);
 		assert_ok!(OCEX::run_on_chain_validation(1));
 		let snapshot_id: u64 = 1;
 		let mut key = LAST_PROCESSED_SNAPSHOT.to_vec();
@@ -63,7 +64,8 @@ fn test_run_on_chain_validation_trades_happy_path() {
 			Ok(Some((summary, signature, index))) => {
 				assert_eq!(summary.snapshot_id, 1);
 				assert_eq!(summary.state_change_id, 1);
-				assert_eq!(summary.last_processed_blk, 4768084);
+				// previous block: 4768084, third argument
+				assert_eq!(summary.last_processed_blk, 1);
 			},
 			_ => panic!("Snapshot not found"),
 		};
@@ -78,7 +80,8 @@ fn test_run_on_chain_validation_trades_happy_path() {
 				panic!("Error {:?}", err);
 			},
 		};
-		assert_eq!(state_info.last_block, 4768084);
+		// previous block: 4768084, third argument
+		assert_eq!(state_info.last_block, 1);
 		assert_eq!(state_info.stid, 1);
 		assert_eq!(state_info.snapshot_id, 0);
 	});
@@ -103,7 +106,8 @@ fn test_on_chain_validation_with_auction() {
 		assert_ok!(OCEX::set_fee_distribution(RuntimeOrigin::root(), fee_distribution));
 		set_lmp_config();
 		Assets::mint_into(1u128, &pallet_account, 1000 * UNIT_BALANCE).unwrap();
-		push_trade_user_actions(1, 1, 4768084);
+		// previous block: 4768084, third argument
+		push_trade_user_actions(1, 1, 1);
 		assert_eq!(Balances::free_balance(&recipient_address), 0);
 		assert_ok!(OCEX::run_on_chain_validation(1));
 		let snapshot_id: u64 = 1;
@@ -117,13 +121,15 @@ fn test_on_chain_validation_with_auction() {
 				println!("Summary {:?}", summary);
 				assert_eq!(summary.snapshot_id, 1);
 				assert_eq!(summary.state_change_id, 1);
-				assert_eq!(summary.last_processed_blk, 4768084);
+				// previous block: 4768084, third argument
+				assert_eq!(summary.last_processed_blk, 1);
 				assert_ok!(OCEX::submit_snapshot(RuntimeOrigin::none(), summary, Vec::new()));
 			},
 			_ => panic!("Snapshot not found"),
 		};
 		OCEX::start_new_epoch(2);
-		push_trade_user_actions_with_fee(2, 1, 4768085);
+		// previous block: 4768085, third argument
+		push_trade_user_actions_with_fee(2, 1, 2);
 		let s_info = StorageValueRef::persistent(&WORKER_STATUS);
 		s_info.set(&false);
 		assert_ok!(OCEX::run_on_chain_validation(2));
@@ -138,7 +144,8 @@ fn test_on_chain_validation_with_auction() {
 				println!("Summary {:?}", summary);
 				assert_eq!(summary.snapshot_id, 2);
 				assert_eq!(summary.state_change_id, 2);
-				assert_eq!(summary.last_processed_blk, 4768086);
+				// previous block: 4768086, third argument
+				assert_eq!(summary.last_processed_blk, 3);
 				assert_ok!(OCEX::submit_snapshot(RuntimeOrigin::none(), summary, Vec::new()));
 			},
 			_ => panic!("Snapshot not found"),
