@@ -42,13 +42,10 @@ use sp_runtime::{
 	MultiSignature,
 };
 use frame_support::derive_impl;
-use pallet_revive::{evm::runtime::EthExtra};
 // Reexport crate as its pallet name for construct_runtime.
 
 type Block = frame_system::mocking::MockBlock<Test>;
-type Address = sp_runtime::MultiAddress<AccountId, AccountIndex>;
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
-// type UncheckedExtrinsic = pallet_revive::evm::runtime::UncheckedExtrinsic<Address, Signature, EthExtraImpl>;
 
 // For testing the pallet, we construct a mock runtime.
 frame_support::construct_runtime!(
@@ -337,43 +334,3 @@ where
 	type Extrinsic = UncheckedExtrinsic;
 	type RuntimeCall = RuntimeCall;
 }
-
-// pub type TxExtension = (
-// 	frame_system::CheckNonZeroSender<Test>,
-// 	frame_system::CheckSpecVersion<Test>,
-// 	frame_system::CheckTxVersion<Test>,
-// 	frame_system::CheckGenesis<Test>,
-// 	frame_system::CheckEra<Test>,
-// 	frame_system::CheckNonce<Test>,
-// 	frame_system::CheckWeight<Test>,
-// 	pallet_skip_feeless_payment::SkipCheckIfFeeless<
-// 		Test,
-// 		pallet_asset_conversion_tx_payment::ChargeAssetTxPayment<Test>,
-// 	>,
-// 	frame_metadata_hash_extension::CheckMetadataHash<Test>,
-// 	frame_system::WeightReclaim<Test>,
-// );
-
-// #[derive(Clone, PartialEq, Eq, Debug)]
-// pub struct EthExtraImpl;
-
-// impl EthExtra for EthExtraImpl {
-// 	type Config = Test;
-// 	type Extension = TxExtension;
-
-// 	fn get_eth_extension(nonce: u32, tip: u128) -> Self::Extension {
-// 		(
-// 			frame_system::CheckNonZeroSender::<Test>::new(),
-// 			frame_system::CheckSpecVersion::<Test>::new(),
-// 			frame_system::CheckTxVersion::<Test>::new(),
-// 			frame_system::CheckGenesis::<Test>::new(),
-// 			frame_system::CheckEra::from(sp_runtime::generic::Era::Immortal),
-// 			frame_system::CheckNonce::<Test>::from(nonce),
-// 			frame_system::CheckWeight::<Test>::new(),
-// 			pallet_asset_conversion_tx_payment::ChargeAssetTxPayment::<Test>::from(tip, None)
-// 				.into(),
-// 			frame_metadata_hash_extension::CheckMetadataHash::<Test>::new(false),
-// 			frame_system::WeightReclaim::<Test>::new(),
-// 		)
-// 	}
-// }

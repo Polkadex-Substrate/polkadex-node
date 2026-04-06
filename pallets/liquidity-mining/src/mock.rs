@@ -35,9 +35,11 @@ use sp_runtime::{
 	traits::{BlakeTwo256, IdentityLookup},
 	BuildStorage,
 };
+use frame_support::derive_impl;
 // Reexport crate as its pallet name for construct_runtime.
 
 type Block = frame_system::mocking::MockBlock<Test>;
+type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 
 // For testing the pallet, we construct a mock runtime.
 frame_support::construct_runtime!(
@@ -55,46 +57,84 @@ parameter_types! {
 	pub BlockWeights: frame_system::limits::BlockWeights =
 		frame_system::limits::BlockWeights::simple_max(Weight::from_parts(1024, 64));
 }
+
+#[derive_impl(frame_system::config_preludes::SolochainDefaultConfig)]
 impl frame_system::Config for Test {
-	type BaseCallFilter = frame_support::traits::Everything;
-	type BlockWeights = ();
-	type BlockLength = ();
-	type RuntimeOrigin = RuntimeOrigin;
-	type RuntimeCall = RuntimeCall;
-	type Hash = H256;
-	type Hashing = BlakeTwo256;
-	type AccountId = sp_runtime::AccountId32;
-	type Lookup = IdentityLookup<Self::AccountId>;
-	type RuntimeEvent = RuntimeEvent;
-	type BlockHashCount = ConstU64<250>;
-	type DbWeight = ();
-	type Version = ();
-	type PalletInfo = PalletInfo;
-	type AccountData = pallet_balances::AccountData<u128>;
-	type OnNewAccount = ();
-	type OnKilledAccount = ();
-	type SystemWeightInfo = ();
-	type SS58Prefix = ();
-	type OnSetCode = ();
-	type MaxConsumers = frame_support::traits::ConstU32<16>;
-	type Nonce = u64;
-	type Block = Block;
+    type BaseCallFilter = frame_support::traits::Everything;
+    type BlockWeights = ();
+    type BlockLength = ();
+    type DbWeight = ();
+    type Nonce = u64;
+    type Hash = H256;
+    type AccountId = sp_runtime::AccountId32;
+    type Lookup = IdentityLookup<Self::AccountId>;
+    type Block = Block;
+    type BlockHashCount = ConstU64<250>;
+    type Version = ();
+    type AccountData = pallet_balances::AccountData<u128>;
+    type SystemWeightInfo = ();
+    type SS58Prefix = ();
+    type MaxConsumers = frame_support::traits::ConstU32<16>;
+    type MultiBlockMigrator = ();
 }
 
+// impl frame_system::Config for Test {
+// 	type BaseCallFilter = frame_support::traits::Everything;
+// 	type BlockWeights = ();
+// 	type BlockLength = ();
+// 	type RuntimeOrigin = RuntimeOrigin;
+// 	type RuntimeCall = RuntimeCall;
+// 	type Hash = H256;
+// 	type Hashing = BlakeTwo256;
+// 	type AccountId = sp_runtime::AccountId32;
+// 	type Lookup = IdentityLookup<Self::AccountId>;
+// 	type RuntimeEvent = RuntimeEvent;
+// 	type BlockHashCount = ConstU64<250>;
+// 	type DbWeight = ();
+// 	type Version = ();
+// 	type PalletInfo = PalletInfo;
+// 	type AccountData = pallet_balances::AccountData<u128>;
+// 	type OnNewAccount = ();
+// 	type OnKilledAccount = ();
+// 	type SystemWeightInfo = ();
+// 	type SS58Prefix = ();
+// 	type OnSetCode = ();
+// 	type MaxConsumers = frame_support::traits::ConstU32<16>;
+// 	type Nonce = u64;
+// 	type Block = Block;
+// }
+
+// impl pallet_balances::Config for Test {
+// 	type RuntimeEvent = RuntimeEvent;
+// 	type WeightInfo = ();
+// 	type Balance = u128;
+// 	type DustRemoval = ();
+// 	type ExistentialDeposit = ConstU128<1>;
+// 	type AccountStore = System;
+// 	type ReserveIdentifier = [u8; 8];
+// 	type RuntimeHoldReason = ();
+// 	type FreezeIdentifier = ();
+// 	type MaxLocks = ();
+// 	type MaxReserves = ();
+// 	type MaxHolds = ();
+// 	type MaxFreezes = ();
+// }
+
 impl pallet_balances::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = ();
-	type Balance = u128;
-	type DustRemoval = ();
-	type ExistentialDeposit = ConstU128<1>;
-	type AccountStore = System;
-	type ReserveIdentifier = [u8; 8];
 	type RuntimeHoldReason = ();
-	type FreezeIdentifier = ();
+	type RuntimeFreezeReason = ();
 	type MaxLocks = ();
 	type MaxReserves = ();
-	type MaxHolds = ();
+	type ReserveIdentifier = [u8; 8];
+	type Balance = u128;
+	type DustRemoval = ();
+	type RuntimeEvent = RuntimeEvent;
+	type ExistentialDeposit = ConstU128<1>;
+	type AccountStore = System;
+	type WeightInfo = ();
+	type FreezeIdentifier = ();
 	type MaxFreezes = ();
+	type DoneSlashHandler = ();
 }
 
 thread_local! {
@@ -157,25 +197,49 @@ parameter_types! {
 }
 
 impl pallet_assets::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
-	type Balance = u128;
-	type RemoveItemsLimit = ();
-	type AssetId = u128;
-	type AssetIdParameter = parity_scale_codec::Compact<u128>;
-	type Currency = Balances;
-	type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<sp_runtime::AccountId32>>;
-	type ForceOrigin = EnsureRoot<sp_runtime::AccountId32>;
-	type AssetDeposit = AssetDeposit;
-	type AssetAccountDeposit = AssetDeposit;
-	type MetadataDepositBase = MetadataDepositBase;
-	type MetadataDepositPerByte = MetadataDepositPerByte;
-	type ApprovalDeposit = ApprovalDeposit;
-	type StringLimit = StringLimit;
-	type Freezer = ();
-	type Extra = ();
-	type CallbackHandle = ();
-	type WeightInfo = ();
+    type RuntimeEvent = RuntimeEvent;
+    type Balance = u128;
+    type AssetId = u128;
+    type AssetIdParameter = parity_scale_codec::Compact<u128>;
+    type Currency = Balances;
+    type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<sp_runtime::AccountId32>>;
+    type ForceOrigin = EnsureRoot<sp_runtime::AccountId32>;
+    type AssetDeposit = AssetDeposit;
+    type AssetAccountDeposit = AssetDeposit;
+    type MetadataDepositBase = MetadataDepositBase;
+    type MetadataDepositPerByte = MetadataDepositPerByte;
+    type ApprovalDeposit = ApprovalDeposit;
+    type StringLimit = StringLimit;
+    type Holder = ();
+    type Freezer = ();
+    type Extra = ();
+    type CallbackHandle = ();
+    type WeightInfo = ();
+    type RemoveItemsLimit = ();
+    #[cfg(feature = "runtime-benchmarks")]
+    type BenchmarkHelper = ();
 }
+
+// impl pallet_assets::Config for Test {
+// 	type RuntimeEvent = RuntimeEvent;
+// 	type Balance = u128;
+// 	type RemoveItemsLimit = ();
+// 	type AssetId = u128;
+// 	type AssetIdParameter = parity_scale_codec::Compact<u128>;
+// 	type Currency = Balances;
+// 	type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<sp_runtime::AccountId32>>;
+// 	type ForceOrigin = EnsureRoot<sp_runtime::AccountId32>;
+// 	type AssetDeposit = AssetDeposit;
+// 	type AssetAccountDeposit = AssetDeposit;
+// 	type MetadataDepositBase = MetadataDepositBase;
+// 	type MetadataDepositPerByte = MetadataDepositPerByte;
+// 	type ApprovalDeposit = ApprovalDeposit;
+// 	type StringLimit = StringLimit;
+// 	type Freezer = ();
+// 	type Extra = ();
+// 	type CallbackHandle = ();
+// 	type WeightInfo = ();
+// }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
 	let t = frame_system::GenesisConfig::<Test>::default().build_storage().unwrap();
@@ -197,24 +261,48 @@ impl frame_system::offchain::SigningTypes for Test {
 	type Signature = Signature;
 }
 
-impl<LocalCall> frame_system::offchain::SendTransactionTypes<LocalCall> for Test
-where
-	RuntimeCall: From<LocalCall>,
-{
-	type Extrinsic = Extrinsic;
-	type OverarchingCall = RuntimeCall;
-}
+// impl<LocalCall> frame_system::offchain::SendTransactionTypes<LocalCall> for Test
+// where
+// 	RuntimeCall: From<LocalCall>,
+// {
+// 	type Extrinsic = Extrinsic;
+// 	type OverarchingCall = RuntimeCall;
+// }
+
+// impl<LocalCall> frame_system::offchain::CreateSignedTransaction<LocalCall> for Test
+// where
+// 	RuntimeCall: From<LocalCall>,
+// {
+// 	fn create_transaction<C: frame_system::offchain::AppCrypto<Self::Public, Self::Signature>>(
+// 		call: RuntimeCall,
+// 		_public: <Signature as Verify>::Signer,
+// 		_account: AccountId,
+// 		nonce: u64,
+// 	) -> Option<(RuntimeCall, <Extrinsic as ExtrinsicT>::SignaturePayload)> {
+// 		Some((call, (nonce, ())))
+// 	}
+// }
 
 impl<LocalCall> frame_system::offchain::CreateSignedTransaction<LocalCall> for Test
 where
-	RuntimeCall: From<LocalCall>,
+    RuntimeCall: From<LocalCall>,
 {
-	fn create_transaction<C: frame_system::offchain::AppCrypto<Self::Public, Self::Signature>>(
-		call: RuntimeCall,
-		_public: <Signature as Verify>::Signer,
-		_account: AccountId,
-		nonce: u64,
-	) -> Option<(RuntimeCall, <Extrinsic as ExtrinsicT>::SignaturePayload)> {
-		Some((call, (nonce, ())))
-	}
+    fn create_signed_transaction<
+        C: frame_system::offchain::AppCrypto<Self::Public, Self::Signature>,
+    >(
+        call: RuntimeCall,
+        _public: <Signature as Verify>::Signer,
+        _account: AccountId,
+        nonce: u64,
+    ) -> Option<UncheckedExtrinsic> {
+        Some(UncheckedExtrinsic::new_bare(call))
+    }
+}
+
+impl<C> frame_system::offchain::CreateTransactionBase<C> for Test
+where
+	RuntimeCall: From<C>,
+{
+	type Extrinsic = UncheckedExtrinsic;
+	type RuntimeCall = RuntimeCall;
 }
