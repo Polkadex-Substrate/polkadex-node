@@ -1038,6 +1038,7 @@ mod tests {
 	use sp_runtime::MultiSignature;
 	use std::collections::BTreeMap;
 	use std::str::FromStr;
+  use sp_core::ByteArray;
 
 	#[test]
 	pub fn test_serialize_deserialize_user_actions() {
