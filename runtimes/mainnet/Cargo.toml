@@ -11,20 +11,18 @@ repository = "https://github.com/Polkadex-Substrate/Polkadex"
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
+log = { workspace = true, default-features = false }
 anyhow = { workspace = true, default-features = false }
 serde_json = { workspace = true, default-features = false }
 array-bytes = { workspace = true, default-features = false }
-# assets-common = { workspace = true, default-features = false }
-# parachains-common = { workspace = true, default-features = false }
 primitive-types = { workspace = true }
 parity-scale-codec = { workspace = true, default-features = false, features = ["max-encoded-len"] }
 scale-info = { workspace = true, default-features = false, features = ["derive"] }
-hex-literal = { version = "0.3.1", optional = true }
+hex-literal = { workspace = true, optional = true }
 static_assertions = { workspace = true }
-log = { workspace = true, default-features = false }
 rust_decimal = { workspace = true }
-#pallets
-#added
+
+# Pallets
 pallet-authorship = { default-features = false, workspace = true }
 pallet-babe = { default-features = false, workspace = true }
 pallet-balances = { default-features = false, workspace = true }
@@ -164,7 +162,7 @@ frame-metadata-hash-extension = { workspace = true, default-features = false }
 [build-dependencies]
 # substrate-wasm-builder = { workspace = true , features = ["frame-metadata"]}
 substrate-wasm-builder = { workspace = true }
-docify = "0.2.8"
+docify = { workspace = true }
 
 
 [features]
