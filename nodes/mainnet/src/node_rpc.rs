@@ -260,7 +260,7 @@ use sc_consensus_babe::BabeWorkerHandle;
 use sc_consensus_beefy::communication::notification::{
 	BeefyBestBlockStream, BeefyVersionedFinalityProofStream,
 };
-use grandpa::{
+use sc_consensus_grandpa::{
 	FinalityProofProvider, GrandpaJustificationStream, SharedAuthoritySet, SharedVoterState,
 };
 pub use sc_rpc::SubscriptionTaskExecutor;

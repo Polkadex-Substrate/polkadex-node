@@ -17,7 +17,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 use frame_support::PalletId;
-use grandpa_primitives::AuthorityId as GrandpaId;
+use sp_consensus_grandpa::AuthorityId as GrandpaId;
 use hex_literal::hex;
 use itertools::Itertools;
 use node_polkadex_runtime::{

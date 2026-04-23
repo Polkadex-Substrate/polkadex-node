@@ -21,11 +21,10 @@
 //! Service implementation. Specialized wrapper over substrate service.
 
 use sc_consensus_beefy as beefy;
-use grandpa;
 use sp_consensus_beefy as beefy_primitives;
 use sp_consensus_beefy::*;
 use crate::{cli::Cli, node_rpc};
-use codec::Encode;
+use parity_scale_codec::Encode;
 use frame_benchmarking_cli::SUBSTRATE_REFERENCE_HARDWARE;
 use frame_system_rpc_runtime_api::AccountNonceApi;
 use futures::prelude::*;
@@ -75,7 +74,7 @@ pub type FullClient = sc_service::TFullClient<Block, RuntimeApi, RuntimeExecutor
 type FullBackend = sc_service::TFullBackend<Block>;
 type FullSelectChain = sc_consensus::LongestChain<FullBackend, Block>;
 type FullGrandpaBlockImport =
-	grandpa::GrandpaBlockImport<FullBackend, Block, FullClient, FullSelectChain>;
+	sc_consensus_grandpa::GrandpaBlockImport<FullBackend, Block, FullClient, FullSelectChain>;
 type FullBeefyBlockImport<InnerBlockImport> = beefy::import::BeefyBlockImport<
 	Block,
 	FullBackend,
@@ -194,11 +193,11 @@ pub fn new_partial(
 					FullClient,
 					FullBeefyBlockImport<FullGrandpaBlockImport>,
 				>,
-				grandpa::LinkHalf<Block, FullClient, FullSelectChain>,
+				sc_consensus_grandpa::LinkHalf<Block, FullClient, FullSelectChain>,
 				sc_consensus_babe::BabeLink<Block>,
 				beefy::BeefyVoterLinks<Block, beefy_primitives::ecdsa_crypto::AuthorityId>,
 			),
-			grandpa::SharedVoterState,
+			sc_consensus_grandpa::SharedVoterState,
 			Option<Telemetry>,
 			Arc<StatementStore>,
 			Option<sc_mixnet::ApiBackend>,
@@ -245,7 +244,7 @@ pub fn new_partial(
 		.build(),
 	);
 
-	let (grandpa_block_import, grandpa_link) = grandpa::block_import(
+	let (grandpa_block_import, grandpa_link) = sc_consensus_grandpa::block_import(
 		client.clone(),
 		GRANDPA_JUSTIFICATION_PERIOD,
 		&(client.clone() as Arc<_>),
@@ -312,10 +311,10 @@ pub fn new_partial(
 
 		let justification_stream = grandpa_link.justification_stream();
 		let shared_authority_set = grandpa_link.shared_authority_set().clone();
-		let shared_voter_state = grandpa::SharedVoterState::empty();
+		let shared_voter_state = sc_consensus_grandpa::SharedVoterState::empty();
 		let shared_voter_state2 = shared_voter_state.clone();
 
-		let finality_proof_provider = grandpa::FinalityProofProvider::new_for_service(
+		let finality_proof_provider = sc_consensus_grandpa::FinalityProofProvider::new_for_service(
 			backend.clone(),
 			Some(shared_authority_set.clone()),
 		);
@@ -461,9 +460,9 @@ pub fn new_full_base<N: NetworkBackend<Block, <Block as BlockT>::Hash>>(
 	let genesis_hash = client.block_hash(0).ok().flatten().expect("Genesis block exists; qed");
 	let peer_store_handle = net_config.peer_store_handle();
 
-	let grandpa_protocol_name = grandpa::protocol_standard_name(&genesis_hash, &config.chain_spec);
+	let grandpa_protocol_name = sc_consensus_grandpa::protocol_standard_name(&genesis_hash, &config.chain_spec);
 	let (grandpa_protocol_config, grandpa_notification_service) =
-		grandpa::grandpa_peers_set_config::<_, N>(
+		sc_consensus_grandpa::grandpa_peers_set_config::<_, N>(
 			grandpa_protocol_name.clone(),
 			metrics.clone(),
 			Arc::clone(&peer_store_handle),
@@ -514,7 +513,7 @@ pub fn new_full_base<N: NetworkBackend<Block, <Block as BlockT>::Hash>>(
 		notification_service
 	});
 
-	let warp_sync = Arc::new(grandpa::warp_proof::NetworkProvider::new(
+	let warp_sync = Arc::new(sc_consensus_grandpa::warp_proof::NetworkProvider::new(
 		backend.clone(),
 		import_setup.1.shared_authority_set().clone(),
 		Vec::default(),
@@ -724,7 +723,7 @@ pub fn new_full_base<N: NetworkBackend<Block, <Block as BlockT>::Hash>>(
 		);
 	}
 
-	let grandpa_config = grandpa::Config {
+	let grandpa_config = sc_consensus_grandpa::Config {
 		// FIXME #1578 make this available through chainspec
 		gossip_duration: std::time::Duration::from_millis(333),
 		justification_generation_period: GRANDPA_JUSTIFICATION_PERIOD,
@@ -743,14 +742,14 @@ pub fn new_full_base<N: NetworkBackend<Block, <Block as BlockT>::Hash>>(
 		// and vote data availability than the observer. The observer has not
 		// been tested extensively yet and having most nodes in a network run it
 		// could lead to finality stalls.
-		let grandpa_params = grandpa::GrandpaParams {
+		let grandpa_params = sc_consensus_grandpa::GrandpaParams {
 			config: grandpa_config,
 			link: grandpa_link,
 			network: network.clone(),
 			sync: Arc::new(sync_service.clone()),
 			notification_service: grandpa_notification_service,
 			telemetry: telemetry.as_ref().map(|x| x.handle()),
-			voting_rule: grandpa::VotingRulesBuilder::default().build(),
+			voting_rule: sc_consensus_grandpa::VotingRulesBuilder::default().build(),
 			prometheus_registry: prometheus_registry.clone(),
 			shared_voter_state,
 			offchain_tx_pool_factory: OffchainTransactionPoolFactory::new(transaction_pool.clone()),
@@ -761,7 +760,7 @@ pub fn new_full_base<N: NetworkBackend<Block, <Block as BlockT>::Hash>>(
 		task_manager.spawn_essential_handle().spawn_blocking(
 			"grandpa-voter",
 			None,
-			grandpa::run_grandpa_voter(grandpa_params)?,
+			sc_consensus_grandpa::run_grandpa_voter(grandpa_params)?,
 		);
 	}
 
@@ -861,7 +860,7 @@ pub fn new_full(config: Configuration, cli: Cli) -> Result<TaskManager, ServiceE
 //#[cfg(test)]
 //mod tests {
 //	use crate::service::{new_full_base, NewFullBase};
-//	use codec::Encode;
+//	use parity_scale_codec::Encode;
 //	use kitchensink_runtime::{
 //		constants::{currency::CENTS, time::SLOT_DURATION},
 //		Address, BalancesCall, RuntimeCall, TxExtension,
