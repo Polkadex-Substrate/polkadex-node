@@ -2,7 +2,7 @@
 name = "polkadex-node"
 version = "7.0.0"
 authors = ["Polkadex OÜ <https://polkadex.ee>"]
-description = "Polkadex main blockchain"
+description = "Polkadex Blockchain"
 edition = "2021"
 license = "GNU GPL v3"
 build = "build.rs"
@@ -13,24 +13,97 @@ repository = "https://github.com/Polkadex-Substrate/polkadex-node"
 targets = ["x86_64-unknown-linux-gnu"]
 
 [build-dependencies]
-substrate-build-script-utils = { version = "11.0.0" }
+substrate-build-script-utils = { workspace = true }
 
 [dependencies]
-# third-party dependencies
-rand = { workspace = true, default-features = false }
-array-bytes = { workspace = true, default-features = false }
-log = { workspace = true, default-features = false }
-serde_json = { workspace = true, default-features = false, features = ["alloc"] }
+log = { workspace = true }
+rand = { workspace = true }
+array-bytes = { workspace = true }
 docify = { workspace = true }
-codec = { package = "parity-scale-codec", version = "3.0.0" }
-serde = { version = "1.0.136", features = ["derive"] }
-futures = { version = "0.3.31", features = ["compat"] }
-hex-literal = "1.0.0"
-clap = { version = "4.5.47", features = ["derive"] }
-itertools = "0.14.0"
-# jsonrpsee = { version = "0.16.2", features = ["server"] }
-jsonrpsee = { features = ["server"], workspace = true }
-# local dependencies
+hex-literal = { workspace = true }
+parity-scale-codec = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
+clap = { workspace = true }
+itertools = { workspace = true }
+jsonrpsee = { workspace = true, features = ["server"] }
+staging-node-inspect = { workspace = true }
+frame-system = { workspace = true }
+frame-system-rpc-runtime-api = { workspace = true }
+frame-support = { workspace = true }
+frame-metadata-hash-extension = { workspace = true }
+frame-benchmarking-cli = { workspace = true }
+frame-try-runtime = { workspace = true, optional = true }
+pallet-im-online = { workspace = true }
+pallet-transaction-payment-rpc = { workspace = true }
+sc-basic-authorship = { workspace = true }
+sc-cli = { workspace = true }
+sc-client-api = { workspace = true }
+sc-chain-spec = { workspace = true }
+sc-consensus = { workspace = true }
+sc-consensus-slots = { workspace = true }
+sc-consensus-babe = { workspace = true }
+sc-consensus-babe-rpc = { workspace = true }
+sc-consensus-grandpa = { workspace = true }
+sc-consensus-grandpa-rpc = { workspace = true }
+sc-consensus-beefy = { workspace = true }
+sc-consensus-beefy-rpc = { workspace = true }
+sc-sync-state-rpc = { workspace = true }
+sc-authority-discovery = { workspace = true }
+sc-network = { workspace = true }
+# sc-network-types = { workspace = true }
+sc-network-sync = { workspace = true }
+sc-network-statement = { workspace = true }
+sc-mixnet = { workspace = true }
+sc-storage-monitor = { workspace = true }
+sc-sysinfo = { workspace = true }
+sc-rpc = { workspace = true }
+sc-rpc-api = { workspace = true }
+sc-transaction-pool = { workspace = true }
+sc-transaction-pool-api = { workspace = true }
+sc-offchain = { workspace = true }
+sc-telemetry = { workspace = true }
+sc-statement-store = { workspace = true }
+sc-executor = { workspace = true }
+sc-service = { workspace = true }
+sp-io = { workspace = true }
+sp-api = { workspace = true }
+sp-block-builder = { workspace = true }
+sp-blockchain = { workspace = true }
+sp-consensus = { workspace = true }
+sp-consensus-babe = { workspace = true }
+sp-consensus-grandpa = { workspace = true }
+sp-consensus-aura = { workspace = true }
+sp-consensus-beefy = { workspace = true }
+sp-core = { workspace = true }
+sp-keystore = { workspace = true }
+sp-inherents = { workspace = true }
+sp-timestamp = { workspace = true }
+sp-runtime = { workspace = true }
+sp-keyring = { workspace = true }
+sp-authority-discovery = { workspace = true }
+sp-statement-store = { workspace = true }
+sp-application-crypto = { workspace = true }
+sp-transaction-storage-proof = { workspace = true }
+sp-mixnet = { workspace = true }
+sp-mmr-primitives = { workspace = true }
+sp-genesis-builder = { workspace = true }
+pallet-beefy = { workspace = true }
+pallet-society = { workspace = true }
+pallet-skip-feeless-payment = { workspace = true }
+pallet-asset-conversion = { workspace = true }
+pallet-asset-conversion-tx-payment = { workspace = true }
+pallet-ismp-runtime-api = { workspace = true }
+substrate-state-trie-migration-rpc = { workspace = true }
+substrate-frame-rpc-system = { workspace = true }
+mmr-rpc = { workspace = true }
+mmr-gadget = { workspace = true }
+cumulus-client-service = { workspace = true }
+cumulus-client-consensus-common = { workspace = true }
+cumulus-client-consensus-aura = { workspace = true }
+
+# Local dependencies
 node-polkadex-runtime = { path = "../../runtimes/mainnet"}
 rpc-assets = { path = "../../rpc/assets" }
 ismp-rpc = { path = "../../rpc/ismp" }
@@ -40,104 +113,13 @@ polkadex-client = { path = "../../client" }
 thea = { path = "../../pallets/thea" }
 pallet-ocex-lmp = { path = "../../pallets/ocex" }
 swap-rpc = { path = "../../rpc/swap" }
-staging-node-inspect = { workspace = true, default-features = false }
-pallet-society = { workspace = true, default-features = false }
-
-# Substrate dependencies
-frame-metadata-hash-extension = { version = "0.8.0" }
-frame-support = { version = "40.1.0" }
-frame-benchmarking-cli = { version = "48.0.0" }
-pallet-im-online = { version = "39.1.0" }
-pallet-transaction-payment-rpc = { version = "43.0.0" }
-sc-basic-authorship = { version = "0.49.0" }
-sc-client-api = { version = "39.0.0" }
-sc-chain-spec = { version = "43.0.0" }
-sc-consensus = { version = "0.49.0" }
-sc-sync-state-rpc = { version = "0.50.0" }
-sc-consensus-slots = { version = "0.49.0" }
-sc-authority-discovery = { version = "0.50.0" }
-sc-consensus-babe = { version = "0.50.0" }
-sc-consensus-babe-rpc = { version = "0.50.0" }
-grandpa = { version = "0.35.0", package = "sc-consensus-grandpa" }
-sc-consensus-grandpa-rpc = { version = "0.35.0" }
-sc-network = { version = "0.50.0" }
-# sc-network-types = { version = "0.16.0" }
-sc-mixnet = { workspace = true, default-features = false }
-sc-storage-monitor = { version = "0.24.0" }
-sc-sysinfo = { version = "42.0.0" }
-sc-network-sync = { version = "0.49.0" }
-sc-rpc = { version = "45.0.0" }
-sc-rpc-api = { version = "0.49.0" }
-sc-transaction-pool = { version = "39.0.0" }
-sp-io = { workspace = true, default-features = false }
-sp-api = { version = "36.0.1" }
-sp-block-builder = { version = "36.0.0" }
-sp-blockchain = { version = "39.0.0" }
-sp-consensus = { version = "0.42.0" }
-sp-consensus-babe = { version = "0.42.1" }
-sc-offchain = { version = "45.0.0" }
-sp-core = { version = "36.1.0" }
-sp-keystore = { version = "0.42.0" }
-grandpa-primitives = { version = "23.1.0", package = "sp-consensus-grandpa" }
-sp-inherents = { version = "36.0.0" }
-sp-timestamp = { version = "36.0.0" }
-sp-runtime = { version = "41.1.0" }
-sc-telemetry = { version = "28.1.0" }
-substrate-frame-rpc-system = { version = "44.0.0" }
-sp-keyring = { version = "41.0.0" }
-frame-system = { version = "40.2.0" }
-sc-transaction-pool-api = { version = "39.0.0" }
-sp-authority-discovery = { version = "36.0.0" }
-sc-statement-store = { version = "21.0.0" }
-sp-statement-store = { version = "20.1.0" }
-sc-network-statement = { version = "0.32.0" }
-pallet-asset-conversion-tx-payment = { version = "22.0.0" }
-pallet-asset-conversion = { version = "22.0.0" }
-sp-application-crypto = { workspace = true, default-features = false }
-sp-consensus-aura = { workspace = true, default-features = false }
-sc-consensus-beefy-rpc = { workspace = true, default-features = false }
-substrate-state-trie-migration-rpc = { workspace = true, default-features = false }
-pallet-skip-feeless-payment = { workspace = true, default-features = false }
-##Primitives
 polkadex-primitives = { path = "../../primitives/polkadex" }
 bls-primitives = { path = "../../primitives/bls" }
-sc-executor = { version = "0.42.0" }
-sc-cli = { version = "0.52.0" }
-sc-service = { version = "0.51.0" }
-sc-consensus-beefy = { workspace = true, default-features = false }
-sp-consensus-beefy = { workspace = true, default-features = false }
-sp-transaction-storage-proof = { version = "36.1.0" }
-frame-try-runtime = { version = "0.46.0", optional = true }
-# try-runtime-cli = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "release-polkadot-v1.1.0", optional = true }
-# try-runtime-cli = { version = "0.42.0", default-features = false, optional = true }
-mmr-rpc = { workspace = true, default-features = false }
-mmr-gadget = { workspace = true, default-features = false }
-frame-system-rpc-runtime-api = { default-features = false, workspace = true }
-sp-mixnet = { workspace = true, default-features = false }
-sp-mmr-primitives = { workspace = true, default-features = false }
-pallet-beefy = { workspace = true, default-features = false }
-sp-genesis-builder = { workspace = true, default-features = false }
-
-# Cumulus
-cumulus-client-service = { version = "0.24.0" }
-cumulus-client-consensus-common = { version = "0.23.0" }
-cumulus-client-consensus-aura = { workspace = true, default-features = false }
-
-# ismp
-pallet-ismp-runtime-api = { workspace = true }
-# pallet-ismp-rpc = { workspace = true, default-features = false }
 
 [dev-dependencies]
-futures = "0.3.31"
-#tempfile = "3.1.0"
-#sc-consensus = { git = "https://github.com/paritytech/polkadot-sdk", branch = "release-polkadot-v1.1.0" }
-#sc-consensus-babe = { git = "https://github.com/paritytech/polkadot-sdk", branch = "release-polkadot-v1.1.0" }
-#sc-consensus-epochs = { git = "https://github.com/paritytech/polkadot-sdk", branch = "release-polkadot-v1.1.0" }
-#sp-tracing = { git = "https://github.com/paritytech/polkadot-sdk", branch = "release-polkadot-v1.1.0" }
-#sc-service-test = { git = "https://github.com/paritytech/polkadot-sdk", branch = "release-polkadot-v1.1.0"}
+futures = { workspace = true }
 
 [features]
 default = []
 runtime-benchmarks = ["node-polkadex-runtime/runtime-benchmarks", "frame-benchmarking-cli/runtime-benchmarks"]
-# try-runtime = ["node-polkadex-runtime/try-runtime", "try-runtime-cli/try-runtime", "try-runtime-cli"]
 try-runtime = ["node-polkadex-runtime/try-runtime"]
