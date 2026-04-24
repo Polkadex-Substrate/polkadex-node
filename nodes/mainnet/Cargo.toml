@@ -103,18 +103,18 @@ cumulus-client-service = { workspace = true }
 cumulus-client-consensus-common = { workspace = true }
 cumulus-client-consensus-aura = { workspace = true }
 
-# Local dependencies
-node-polkadex-runtime = { path = "../../runtimes/mainnet"}
-rpc-assets = { path = "../../rpc/assets" }
-ismp-rpc = { path = "../../rpc/ismp" }
-pallet-rewards-rpc = { path = "../../pallets/rewards/rpc" }
-pallet-ocex-rpc = { path = "../../pallets/ocex/rpc" }
-polkadex-client = { path = "../../client" }
-thea = { path = "../../pallets/thea" }
-pallet-ocex-lmp = { path = "../../pallets/ocex" }
-swap-rpc = { path = "../../rpc/swap" }
-polkadex-primitives = { path = "../../primitives/polkadex" }
-bls-primitives = { path = "../../primitives/bls" }
+# CUSTOM
+node-polkadex-runtime = { workspace = true }
+rpc-assets = { workspace = true }
+pallet-rewards-rpc = { workspace = true }
+pallet-ocex-rpc = { workspace = true }
+polkadex-client = { workspace = true }
+thea = { workspace = true }
+pallet-ocex-lmp = { workspace = true }
+swap-rpc = { workspace = true }
+ismp-rpc = { workspace =  true }
+polkadex-primitives = { workspace = true }
+bls-primitives = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }

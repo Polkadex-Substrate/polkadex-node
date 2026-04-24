@@ -442,7 +442,6 @@ where
 			.into_rpc(),
 	)?;
 
-	//io.merge(IsmpRpcHandler::new(client.clone(), backend.clone())?.into_rpc())?;
 	io.merge(StateMigration::new(client.clone(), backend.clone()).into_rpc())?;
 	io.merge(Dev::new(client.clone()).into_rpc())?;
 	let statement_store = sc_rpc::statement::StatementStore::new(statement_store).into_rpc();
