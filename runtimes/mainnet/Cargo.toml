@@ -1,195 +1,160 @@
 [package]
 name = "node-polkadex-runtime"
-version = "6.2.0"
-authors = ["Polkadex OÜ  <https://polkadex.trade>"]
+version = "7.0.0"
+authors = ["Polkadex OÜ <https://polkadex.ee>"]
+description = "Polkadex Blockchain"
 edition = "2021"
 license = "GNU GPL v3"
-homepage = "https://polkadex.trade"
-repository = "https://github.com/Polkadex-Substrate/Polkadex"
+homepage = "https://polkadex.ee"
+repository = "https://github.com/Polkadex-Substrate/polkadex-node"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
-log = { workspace = true, default-features = false }
-anyhow = { workspace = true, default-features = false }
-serde_json = { workspace = true, default-features = false }
-array-bytes = { workspace = true, default-features = false }
+log = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
 primitive-types = { workspace = true }
-parity-scale-codec = { workspace = true, default-features = false, features = ["max-encoded-len"] }
-scale-info = { workspace = true, default-features = false, features = ["derive"] }
+parity-scale-codec = { workspace = true, features = ["max-encoded-len"] }
+scale-info = { workspace = true, features = ["derive"] }
+rust_decimal = { workspace = true }
+array-bytes = { workspace = true }
 hex-literal = { workspace = true, optional = true }
 static_assertions = { workspace = true }
-rust_decimal = { workspace = true }
 
 # Pallets
-pallet-authorship = { default-features = false, workspace = true }
-pallet-babe = { default-features = false, workspace = true }
-pallet-balances = { default-features = false, workspace = true }
-pallet-grandpa = { default-features = false, workspace = true }
-pallet-aura = { default-features = false, workspace = true }
-pallet-im-online = { default-features = false, workspace = true }
-pallet-offences = { default-features = false, workspace = true }
-pallet-session = { default-features = false, workspace = true }
-pallet-staking = { default-features = false, workspace = true }
-pallet-multisig = { default-features = false, workspace = true }
+frame-system = { workspace = true }
+frame-support = { workspace = true }
+frame-executive = { workspace = true }
+frame-election-provider-support = { workspace = true }
+frame-system-rpc-runtime-api = { workspace = true }
+frame-benchmarking = { workspace = true, optional = true }
+frame-system-benchmarking = { workspace = true, optional = true }
+frame-metadata-hash-extension = { workspace = true }
+frame-try-runtime = { workspace = true, optional = true }
+pallet-aura = { workspace = true }
+pallet-assets = { workspace = true }
+pallet-authorship = { workspace = true }
+pallet-babe = { workspace = true }
+pallet-balances = { workspace = true }
+pallet-grandpa = { workspace = true }
+pallet-im-online = { workspace = true }
+pallet-offences = { workspace = true }
+pallet-session = { workspace = true }
+pallet-staking = { workspace = true }
 pallet-staking-reward-curve = { workspace = true }
-pallet-sudo = { default-features = false, workspace = true }
-pallet-utility = { default-features = false, workspace = true }
-pallet-timestamp = { default-features = false, workspace = true }
-pallet-transaction-payment = { default-features = false, workspace = true }
-pallet-transaction-payment-rpc-runtime-api = { default-features = false, workspace = true }
-pallet-treasury = { default-features = false, workspace = true }
-pallet-collective = { default-features = false, workspace = true }
-pallet-democracy = { default-features = false, workspace = true }
-pallet-elections-phragmen = { default-features = false, workspace = true }
-pallet-membership = { default-features = false, workspace = true }
-pallet-scheduler = { default-features = false, workspace = true }
-pallet-bounties = { default-features = false, workspace = true }
-pallet-preimage = { default-features = false, workspace = true }
-pallet-indices = { default-features = false, workspace = true }
-pallet-identity = { default-features = false, workspace = true }
-pallet-proxy = { default-features = false, workspace = true }
-pallet-recovery = { default-features = false, workspace = true }
-pallet-election-provider-multi-phase = { default-features = false, workspace = true }
-pallet-authority-discovery = { default-features = false, workspace = true }
-pallet-child-bounties = { default-features = false, workspace = true }
-pallet-statement = { default-features = false, workspace = true }
-pallet-asset-tx-payment = { default-features = false, workspace = true }
-pallet-society = { workspace = true, default-features = false }
-# pallet-collator-selection = { default-features = false, workspace = true }
-xcm = { workspace = true, default-features = false }
-# pallet-xcm = { workspace = true, default-features = false }
-pallet-revive = { workspace = true, default-features = false }
-pallet-skip-feeless-payment = { workspace = true, default-features = false }
-# pallet-nomination-pools = { workspace = true, default-features = false }
-pallet-contracts = { workspace = true, default-features = false }
-pallet-alliance = { workspace = true, default-features = false }
-pallet-delegated-staking = { workspace = true, default-features = false }
-pallet-insecure-randomness-collective-flip = { workspace = true, default-features = false }
-pallet-safe-mode = { workspace = true, default-features = false}
-pallet-tx-pause = { workspace = true, default-features = false }
-pallet-migrations = { workspace = true, default-features = false }
-pallet-mmr = { workspace = true, default-features = false }
-pallet-beefy = { workspace = true, default-features = false }
-pallet-beefy-mmr = { workspace = true, default-features = false }
-pallet-mixnet = { workspace = true, default-features = false }
-# pallet-nomination-pools-runtime-api = { workspace = true, default-features = false }
-pallet-staking-runtime-api = { workspace = true, default-features = false }
-
-# Assets pallet
-pallet-asset-conversion = { default-features = false, workspace = true }
-pallet-asset-conversion-tx-payment = { default-features = false, workspace = true }
-
-#frame
-frame-support = { default-features = false, workspace = true }
-frame-system = { default-features = false, workspace = true }
-frame-executive = { default-features = false, workspace = true }
-
-#sp
-sp-api = { default-features = false, workspace = true }
-sp-offchain = { default-features = false, workspace = true }
-sp-runtime = { default-features = false, workspace = true }
-sp-session = { default-features = false, workspace = true }
-sp-std = { default-features = false, workspace = true }
-sp-transaction-pool = { default-features = false, workspace = true }
-sp-version = { default-features = false, workspace = true }
-sp-io = { workspace = true, default-features = false }
-sp-statement-store = { workspace = true, default-features = false }
-sp-storage = { workspace = true, default-features = false, optional = true }
-sp-consensus-beefy = { workspace = true, default-features = false }
-sp-consensus-grandpa = { workspace = true, default-features = false }
-sp-mixnet = { workspace = true, default-features = false }
-sp-genesis-builder = { workspace = true, default-features = false }
-sp-consensus-aura = { workspace = true, default-features = false }
-sp-keyring = { workspace = true, default-features = false }
-
-#added
-sp-authority-discovery = { default-features = false, workspace = true }
-sp-block-builder = { default-features = false, workspace = true }
-sp-consensus-babe = { default-features = false, workspace = true }
-sp-core = { default-features = false, workspace = true }
-sp-inherents = { default-features = false, workspace = true }
-sp-staking = { default-features = false, workspace = true }
-sp-npos-elections = { default-features = false, workspace = true }
-frame-election-provider-support = { default-features = false, workspace = true }
-#pallet-randomness-collective-flip = { default-features = false, workspace = true }
-pallet-assets = { default-features = false, workspace = true }
-#end added
-
-# Ismp
+pallet-multisig = { workspace = true }
+pallet-sudo = { workspace = true }
+pallet-utility = { workspace = true }
+pallet-timestamp = { workspace = true }
+pallet-transaction-payment = { workspace = true }
+pallet-transaction-payment-rpc-runtime-api = { workspace = true }
+pallet-treasury = { workspace = true }
+pallet-collective = { workspace = true }
+pallet-democracy = { workspace = true }
+pallet-elections-phragmen = { workspace = true }
+pallet-membership = { workspace = true }
+pallet-scheduler = { workspace = true }
+pallet-bounties = { workspace = true }
+pallet-preimage = { workspace = true }
+pallet-indices = { workspace = true }
+pallet-identity = { workspace = true }
+pallet-proxy = { workspace = true }
+pallet-recovery = { workspace = true }
+pallet-election-provider-multi-phase = { workspace = true }
+pallet-authority-discovery = { workspace = true }
+pallet-child-bounties = { workspace = true }
+pallet-statement = { workspace = true }
+pallet-asset-tx-payment = { workspace = true }
+pallet-society = { workspace = true }
+xcm = { workspace = true }
+pallet-revive = { workspace = true }
+pallet-skip-feeless-payment = { workspace = true }
+pallet-contracts = { workspace = true }
+pallet-alliance = { workspace = true }
+pallet-delegated-staking = { workspace = true }
+pallet-insecure-randomness-collective-flip = { workspace = true }
+pallet-safe-mode = { workspace = true }
+pallet-tx-pause = { workspace = true }
+pallet-migrations = { workspace = true }
+pallet-mmr = { workspace = true }
+pallet-beefy = { workspace = true }
+pallet-beefy-mmr = { workspace = true }
+pallet-mixnet = { workspace = true }
+pallet-staking-runtime-api = { workspace = true }
+pallet-asset-conversion = { workspace = true }
+pallet-asset-conversion-tx-payment = { workspace = true }
+sp-api = { workspace = true }
+sp-offchain = { workspace = true }
+sp-runtime = { workspace = true }
+sp-session = { workspace = true }
+sp-std = { workspace = true }
+sp-transaction-pool = { workspace = true }
+sp-version = { workspace = true }
+sp-io = { workspace = true }
+sp-statement-store = { workspace = true }
+sp-storage = { workspace = true, optional = true }
+sp-consensus-aura = { workspace = true }
+sp-consensus-babe = { workspace = true }
+sp-consensus-beefy = { workspace = true }
+sp-consensus-grandpa = { workspace = true }
+sp-mixnet = { workspace = true }
+sp-genesis-builder = { workspace = true }
+sp-keyring = { workspace = true }
+sp-authority-discovery = { workspace = true }
+sp-block-builder = { workspace = true }
+sp-core = { workspace = true }
+sp-inherents = { workspace = true }
+sp-staking = { workspace = true }
+sp-npos-elections = { workspace = true }
 ismp = { workspace = true }
-pallet-ismp = { default-features = false, workspace = true, features = ["unsigned"] }
-ismp-parachain = { default-features = false, workspace = true }
-ismp-grandpa = { default-features = false, workspace = true }
-pallet-ismp-runtime-api = { default-features = false, workspace = true }
-pallet-hyperbridge = { default-features = false, workspace = true }
-pallet-token-gateway = { default-features = false, workspace = true }
+pallet-ismp = { workspace = true, features = ["unsigned"] }
+ismp-parachain = { workspace = true }
+ismp-grandpa = { workspace = true }
+pallet-ismp-runtime-api = { workspace = true }
+pallet-hyperbridge = { workspace = true }
+pallet-token-gateway = { workspace = true }
 
-# Used for the polkadex-node RPCs
-frame-system-rpc-runtime-api = { default-features = false, workspace = true }
+# CUSTOM
+polkadex-primitives = { workspace = true }
+orderbook-primitives = { workspace = true }
+pdex-migration = { workspace = true }
+pallet-ocex-lmp = { workspace = true }
+pallet-lmp = { workspace = true }
+thea = { workspace = true }
+pallet-rewards = { workspace = true }
+rpc-assets-runtime-api = { workspace = true }
+pallet-rewards-runtime-api = { workspace = true }
+pallet-ocex-runtime-api = { workspace = true }
 
-# Used for runtime benchmarking
-frame-benchmarking = { default-features = false, workspace = true, optional = true }
-frame-system-benchmarking = { default-features = false, workspace = true, optional = true }
-
-# ORML Pallets
-# orml-vesting = { workspace = true, default-features = false }
-
-# Local Dependecies
-polkadex-primitives = { workspace = true, default-features = false }
-orderbook-primitives = { path = "../../primitives/orderbook", default-features = false }
-pdex-migration = { path = "../../pallets/pdex-migration", default-features = false }
-
-# Orderbook
-pallet-ocex-lmp = { path = "../../pallets/ocex", default-features = false }
-pallet-lmp = { path = "../../pallets/liquidity-mining", default-features = false }
-
-# Thea
-thea = { path = "../../pallets/thea", default-features = false }
-# thea-executor = { path = "../../pallets/thea-executor", default-features = false }
-# thea-message-handler = { path = "../../pallets/thea-message-handler", default-features = false, optional = true }
-
-# Parachain Rewards
-pallet-rewards = { path = "../../pallets/rewards", default-features = false }
-# Try Runtime
-frame-try-runtime = { workspace = true, optional = true, default-features = false }
-
-rpc-assets-runtime-api = { path = "../../rpc/assets/runtime-api", default-features = false }
-pallet-rewards-runtime-api = { path = "../../pallets/rewards/rpc/runtime-api", default-features = false }
-pallet-ocex-runtime-api = { path = "../../pallets/ocex/rpc/runtime-api", default-features = false }
-frame-metadata-hash-extension = { workspace = true, default-features = false }
 [build-dependencies]
-# substrate-wasm-builder = { workspace = true , features = ["frame-metadata"]}
 substrate-wasm-builder = { workspace = true }
 docify = { workspace = true }
-
 
 [features]
 default = ["std"]
 # Enable the metadata hash generation.
-#
 # This is hidden behind a feature because it increases the compile time.
 # The wasm binary needs to be compiled twice, once to fetch the metadata,
 # generate the metadata hash and then a second time with the
 # `RUNTIME_METADATA_HASH` environment variable set for the `CheckMetadataHash`
 # extension.
 metadata-hash = ["substrate-wasm-builder/metadata-hash"]
-
 # A convenience feature for enabling things when doing a build
 # for an on-chain release.
 on-chain-release-build = ["metadata-hash"]
 
 std = [
+	"log/std",
 	"anyhow/std",
 	"serde_json/std",
-	"rust_decimal/std",
-	"frame-metadata-hash-extension/std",
-	# "assets-common/std",
-	# "parachains-common/std",
+	"primitive-types/serde",
+	"primitive-types/std",
 	"parity-scale-codec/std",
 	"scale-info/std",
-	"log/std",
+	"rust_decimal/std",
+	"frame-metadata-hash-extension/std",
 	"pallet-authorship/std",
 	"pallet-babe/std",
 	"pallet-balances/std",
@@ -239,10 +204,8 @@ std = [
 	"sp-staking/std",
 	"sp-npos-elections/std",
 	"frame-election-provider-support/std",
-#"pallet-randomness-collective-flip/std",
 	"pallet-assets/std",
 	"frame-system-rpc-runtime-api/std",
-# "orml-vesting/std",
 	"polkadex-primitives/std",
 	"pdex-migration/std",
 	"pallet-ocex-lmp/std",
@@ -251,9 +214,7 @@ std = [
 	"pallet-rewards-runtime-api/std",
 	"thea/std",
 	"pallet-rewards/std",
-# "thea-executor/std",
 	"frame-try-runtime?/std",
-# "thea-message-handler?/std",
 	"orderbook-primitives/std",
 	"pallet-asset-conversion/std",
 	"pallet-asset-conversion-tx-payment/std",
@@ -263,10 +224,8 @@ std = [
 	"sp-statement-store/std",
 	"sp-storage?/std",
 	"xcm/std",
-	# "pallet-xcm/std",
 	"pallet-revive/std",
 	"pallet-skip-feeless-payment/std",
-	# "pallet-nomination-pools/std",
 	"pallet-contracts/std",
 	"pallet-alliance/std",
 	"pallet-delegated-staking/std",
@@ -280,7 +239,6 @@ std = [
 	"sp-consensus-grandpa/std",
 	"pallet-mixnet/std",
 	"sp-mixnet/std",
-	# "pallet-nomination-pools-runtime-api/std",
 	"pallet-staking-runtime-api/std",
 	"sp-genesis-builder/std",
 	"sp-consensus-aura/std",
@@ -293,83 +251,68 @@ std = [
 	"pallet-ismp-runtime-api/std",
 	"pallet-hyperbridge/std",
 	"pallet-token-gateway/std",
-	"primitive-types/serde",
-	"primitive-types/std",
 ]
 runtime-benchmarks = [
-  #theirs
-  "sp-storage",
-  "frame-support/runtime-benchmarks",
-  "frame-system/runtime-benchmarks",
-  "frame-benchmarking/runtime-benchmarks",
-  "frame-system-benchmarking/runtime-benchmarks",
-  "sp-runtime/runtime-benchmarks",
-  "hex-literal",
-  "pallet-assets/runtime-benchmarks",
-  "pallet-collective/runtime-benchmarks",
-  #our
-  "pallet-ocex-lmp/runtime-benchmarks",
-  "pdex-migration/runtime-benchmarks",
-  "pallet-rewards/runtime-benchmarks",
-  # "thea/runtime-benchmarks",
-  # "thea-executor/runtime-benchmarks",
-  "pallet-lmp/runtime-benchmarks",
-  # "thea-message-handler/runtime-benchmarks",
-  "pallet-asset-conversion/runtime-benchmarks",
-  "pallet-asset-tx-payment/runtime-benchmarks",
-  # "pallet-xcm/runtime-benchmarks",
-  "pallet-migrations/runtime-benchmarks",
+	"sp-storage",
+	"frame-support/runtime-benchmarks",
+	"frame-system/runtime-benchmarks",
+	"frame-benchmarking/runtime-benchmarks",
+	"frame-system-benchmarking/runtime-benchmarks",
+	"sp-runtime/runtime-benchmarks",
+	"hex-literal",
+	"pallet-assets/runtime-benchmarks",
+	"pallet-collective/runtime-benchmarks",
+	"pallet-ocex-lmp/runtime-benchmarks",
+	"pdex-migration/runtime-benchmarks",
+	"pallet-rewards/runtime-benchmarks",
+	"pallet-lmp/runtime-benchmarks",
+	"pallet-asset-conversion/runtime-benchmarks",
+	"pallet-asset-tx-payment/runtime-benchmarks",
+	"pallet-migrations/runtime-benchmarks",
 ]
 
 try-runtime = [
-  "frame-executive/try-runtime",
-  "frame-try-runtime/try-runtime",
-  "frame-system/try-runtime",
-  "pallet-utility/try-runtime",
-  "pallet-babe/try-runtime",
-  "pallet-timestamp/try-runtime",
-  "pallet-authorship/try-runtime",
-  "pallet-indices/try-runtime",
-  "pallet-balances/try-runtime",
-  "pallet-transaction-payment/try-runtime",
-  "pallet-election-provider-multi-phase/try-runtime",
-  "pallet-staking/try-runtime",
-  "pallet-session/try-runtime",
-  "pallet-collective/try-runtime",
-  "pallet-elections-phragmen/try-runtime",
-  "pallet-membership/try-runtime",
-  "pallet-grandpa/try-runtime",
-  "pallet-aura/try-runtime",
-  "pallet-treasury/try-runtime",
-  "pallet-sudo/try-runtime",
-  "pallet-im-online/try-runtime",
-  "pallet-authority-discovery/try-runtime",
-  "pallet-offences/try-runtime",
-  "pallet-session/try-runtime",
-  "pallet-identity/try-runtime",
-  "pallet-recovery/try-runtime",
-  "pallet-scheduler/try-runtime",
-  "pallet-proxy/try-runtime",
-  "pallet-multisig/try-runtime",
-  "pallet-bounties/try-runtime",
-  # "orml-vesting/try-runtime",
-  "pdex-migration/try-runtime",
-  "pallet-democracy/try-runtime",
-  "pallet-preimage/try-runtime",
-  #"pallet-randomness-collective-flip/try-runtime",
-  "pallet-child-bounties/try-runtime",
-  "pallet-assets/try-runtime",
-  "pallet-ocex-lmp/try-runtime",
-  "pallet-lmp/try-runtime",
-  "pallet-collective/try-runtime",
-  # "thea/try-runtime",
-  "pallet-rewards/try-runtime",
-  # "thea-executor/try-runtime",
-  "pallet-asset-conversion/try-runtime",
-  "pallet-asset-conversion-tx-payment/try-runtime",
-  "pallet-statement/try-runtime",
-  "pallet-asset-tx-payment/try-runtime",
-  # "pallet-xcm/try-runtime",
-  "pallet-migrations/try-runtime",
-  "pallet-revive/try-runtime",
+	"frame-executive/try-runtime",
+	"frame-try-runtime/try-runtime",
+	"frame-system/try-runtime",
+	"pallet-utility/try-runtime",
+	"pallet-babe/try-runtime",
+	"pallet-timestamp/try-runtime",
+	"pallet-authorship/try-runtime",
+	"pallet-indices/try-runtime",
+	"pallet-balances/try-runtime",
+	"pallet-transaction-payment/try-runtime",
+	"pallet-election-provider-multi-phase/try-runtime",
+	"pallet-staking/try-runtime",
+	"pallet-session/try-runtime",
+	"pallet-collective/try-runtime",
+	"pallet-elections-phragmen/try-runtime",
+	"pallet-membership/try-runtime",
+	"pallet-grandpa/try-runtime",
+	"pallet-aura/try-runtime",
+	"pallet-treasury/try-runtime",
+	"pallet-sudo/try-runtime",
+	"pallet-im-online/try-runtime",
+	"pallet-authority-discovery/try-runtime",
+	"pallet-offences/try-runtime",
+	"pallet-identity/try-runtime",
+	"pallet-recovery/try-runtime",
+	"pallet-scheduler/try-runtime",
+	"pallet-proxy/try-runtime",
+	"pallet-multisig/try-runtime",
+	"pallet-bounties/try-runtime",
+	"pdex-migration/try-runtime",
+	"pallet-democracy/try-runtime",
+	"pallet-preimage/try-runtime",
+	"pallet-child-bounties/try-runtime",
+	"pallet-assets/try-runtime",
+	"pallet-ocex-lmp/try-runtime",
+	"pallet-lmp/try-runtime",
+	"pallet-rewards/try-runtime",
+	"pallet-asset-conversion/try-runtime",
+	"pallet-asset-conversion-tx-payment/try-runtime",
+	"pallet-statement/try-runtime",
+	"pallet-asset-tx-payment/try-runtime",
+	"pallet-migrations/try-runtime",
+	"pallet-revive/try-runtime",
 ]
