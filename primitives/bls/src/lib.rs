@@ -64,11 +64,15 @@ use sp_core::crypto::SecretStringError;
 #[cfg(feature = "std")]
 use sp_core::DeriveJunction;
 
-use sp_runtime_interface::pass_by::PassByInner;
+// use sp_runtime_interface::pass_by::PassByInner;
 #[cfg(feature = "std")]
 use substrate_bip39::seed_from_entropy;
 
 use sp_std::vec::Vec;
+
+pub use sp_core::proof_of_possession::{
+	NonAggregatable, ProofOfPossessionGenerator, ProofOfPossessionVerifier,
+};
 
 /// An identifier used to match public keys against bls keys.
 pub const CRYPTO_ID: CryptoTypeId = CryptoTypeId(*b"blss");
@@ -85,7 +89,7 @@ pub const DST: &str = "BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_";
 	Decode,
 	DecodeWithMemTracking,
 	MaxEncodedLen,
-	PassByInner,
+	// PassByInner,
 	TypeInfo,
 	Eq,
 	PartialEq,
@@ -98,9 +102,16 @@ pub struct Public(pub [u8; 96]);
 /// BLS signature definition.
 #[cfg_attr(feature = "std", derive(Hash))]
 #[derive(
-	Encode, Decode, DecodeWithMemTracking, MaxEncodedLen, TypeInfo, PassByInner, PartialEq, Eq, Clone, Copy, Debug,
+	Encode, Decode, DecodeWithMemTracking, MaxEncodedLen, TypeInfo, PartialEq, Eq, Clone, Copy, Debug,
 )]
 pub struct Signature(pub [u8; 48]);
+
+/// BLS proof of possession (same encoding as Signature).
+#[cfg_attr(feature = "std", derive(Hash))]
+#[derive(
+	Encode, Decode, DecodeWithMemTracking, MaxEncodedLen, TypeInfo, PartialEq, Eq, Clone, Copy, Debug,
+)]
+pub struct ProofOfPossession(pub [u8; 48]);
 
 impl Signature {
 	/// Aggregates two signatures.
@@ -157,6 +168,40 @@ impl Signature {
 }
 
 impl AppSignature for Signature {}
+
+impl ByteArray for ProofOfPossession {
+	const LEN: usize = 48;
+}
+
+impl AsRef<[u8]> for ProofOfPossession {
+	fn as_ref(&self) -> &[u8] {
+		self.0.as_ref()
+	}
+}
+
+impl AsMut<[u8]> for ProofOfPossession {
+	fn as_mut(&mut self) -> &mut [u8] {
+		self.0.as_mut()
+	}
+}
+
+impl TryFrom<&[u8]> for ProofOfPossession {
+	type Error = ();
+
+	fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+		if value.len() != 48 {
+			return Err(());
+		}
+		Ok(ProofOfPossession(value.try_into().unwrap()))
+	}
+}
+
+impl CryptoType for ProofOfPossession {
+	#[cfg(feature = "std")]
+	type Pair = Pair;
+}
+
+impl AppSignature for ProofOfPossession {}
 
 /// Seed type.
 type Seed = [u8; 32];
@@ -327,10 +372,14 @@ use sp_core::crypto::Public as TraitPublic;
 impl TraitPublic for Public {}
 
 #[cfg(feature = "std")]
+impl NonAggregatable for Pair {}
+
+#[cfg(feature = "std")]
 impl sp_core::crypto::Pair for Pair {
 	type Public = Public;
 	type Seed = Seed;
 	type Signature = Signature;
+	type ProofOfPossession = Signature;
 
 	fn generate_with_phrase(password: Option<&str>) -> (Self, String, Self::Seed) {
 		let mnemonic = Mnemonic::new(MnemonicType::Words24, Language::English);
@@ -418,6 +467,39 @@ pub fn hash_to_curve_g1(message: &[u8]) -> Result<G1Projective, HashToCurveError
 	>::new(DST.as_ref())?;
 	Ok(wb_to_curve_hasher.hash(message)?.into())
 }
+
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! app_crypto_proof_of_possession_full_crypto {
+	($sig:ty, $key_type:expr, $crypto_type:expr) => {
+		$crate::wrap! {
+			/// A generic `AppPublic` wrapper type over $public crypto; this has no specific App.
+			#[derive(Clone, Eq, PartialEq, Hash,
+				$crate::codec::Encode,
+				$crate::codec::Decode,
+				$crate::codec::DecodeWithMemTracking,
+				$crate::RuntimeDebug,
+				$crate::scale_info::TypeInfo,
+			)]
+			pub struct ProofOfPossession($sig);
+		}
+
+		impl $crate::CryptoType for ProofOfPossession {
+			type Pair = Pair;
+		}
+
+		impl $crate::AppCrypto for ProofOfPossession {
+			type Public = Public;
+			type Pair = Pair;
+			type Signature = Signature;
+			type ProofOfPossession = ProofOfPossession;
+			const ID: $crate::KeyTypeId = $key_type;
+			const CRYPTO_ID: $crate::CryptoTypeId = $crypto_type;
+		}
+	};
+}
+
 
 #[cfg(test)]
 mod tests {

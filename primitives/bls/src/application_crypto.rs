@@ -41,6 +41,7 @@ pub mod app {
 
 impl RuntimePublic for Public {
 	type Signature = Signature;
+	type ProofOfPossession = ProofOfPossession;
 
 	fn all(_: KeyTypeId) -> Vec<Self> {
 		unimplemented!(
@@ -71,6 +72,28 @@ impl RuntimePublic for Public {
 
 	fn verify<M: AsRef<[u8]>>(&self, msg: &M, signature: &Self::Signature) -> bool {
 		signature.verify(&[*self], msg.as_ref())
+	}
+
+	fn generate_proof_of_possession(
+		&mut self,
+		_: KeyTypeId,
+		_: &[u8],
+	) -> Option<Self::ProofOfPossession> {
+		unimplemented!(
+			"BLS12-381 Host functions are not yet available in Polkadot,\
+		 so this will not work"
+		)
+	}
+
+	fn verify_proof_of_possession(
+		&self,
+		_: &[u8],
+		_: &Self::ProofOfPossession,
+	) -> bool {
+		unimplemented!(
+			"BLS12-381 Host functions are not yet available in Polkadot,\
+		 so this will not work"
+		)
 	}
 
 	fn to_raw_vec(&self) -> Vec<u8> {

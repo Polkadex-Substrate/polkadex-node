@@ -25,17 +25,24 @@ use sp_core::crypto::KeyTypeId;
 use sp_core::Pair;
 #[cfg(feature = "std")]
 use sp_keystore::{Keystore, KeystoreExt};
+use sp_runtime_interface::{
+	pass_by::{AllocateAndReturnPointer, PassFatPointerAndDecode, PassPointerAndReadCopy},
+	runtime_interface,
+};
 use sp_std::vec::Vec;
 
 use crate::Public;
-use sp_runtime_interface::runtime_interface;
 
 #[cfg(feature = "std")]
 use sp_externalities::ExternalitiesExt;
 
 #[runtime_interface]
 pub trait BLSCryptoExt {
-	fn bls_generate_pair(&mut self, id: KeyTypeId, seed: Option<Vec<u8>>) -> Public {
+	fn bls_generate_pair(
+		&mut self,
+		id: PassPointerAndReadCopy<KeyTypeId, 4>,
+		seed: PassFatPointerAndDecode<Option<Vec<u8>>>,
+	) -> AllocateAndReturnPointer<Public, 96> {
 		let (pair, seed) = match seed {
 			None => {
 				let (pair, seed_string, _) = crate::Pair::generate_with_phrase(None);
