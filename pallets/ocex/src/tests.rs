@@ -53,12 +53,11 @@ pub fn register_offchain_ext(ext: &mut sp_io::TestExternalities) {
 
 pub const KEY_TYPE: sp_application_crypto::KeyTypeId = sp_application_crypto::KeyTypeId(*b"ocex");
 
-fn assert_last_event<T: Config>(generic_event: <T as Config>::RuntimeEvent) {
+fn assert_last_event<T: Config>(generic_event: <T as frame_system::Config>::RuntimeEvent) {
 	let events = frame_system::Pallet::<T>::events();
-	let system_event: <T as frame_system::Config>::RuntimeEvent = generic_event.into();
 	// compare to the last event record
 	let EventRecord { event, .. } = &events[events.len() - 1];
-	assert_eq!(event, &system_event);
+	assert_eq!(event, &generic_event);
 }
 
 //Alice Account
@@ -2951,7 +2950,7 @@ fn create_account_id() -> AccountId32 {
 	const PHRASE: &str =
 		"news slush supreme milk chapter athlete soap sausage put clutch what kitten";
 	let keystore = MemoryKeystore::new();
-	let account_id: AccountId32 = <(dyn Keystore + 'static)>::sr25519_generate_new(
+	let account_id: AccountId32 = <dyn Keystore + 'static>::sr25519_generate_new(
 		&keystore,
 		KEY_TYPE,
 		Some(&format!("{}/hunter1", PHRASE)),
@@ -2967,7 +2966,7 @@ fn create_proxy_account(path: &str) -> AccountId32 {
 	const PHRASE: &str =
 		"news slush supreme milk chapter athlete soap sausage put clutch what kitten";
 	let keystore = MemoryKeystore::new();
-	let account_id: AccountId32 = <(dyn Keystore + 'static)>::sr25519_generate_new(
+	let account_id: AccountId32 = <dyn Keystore + 'static>::sr25519_generate_new(
 		&keystore,
 		KEY_TYPE,
 		Some(&format!("{}/{}", PHRASE, path)),
