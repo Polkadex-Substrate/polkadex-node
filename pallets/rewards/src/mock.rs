@@ -74,6 +74,13 @@ impl system::Config for Test {
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
 	type Nonce = u32;
 	type Block = Block;
+	type RuntimeTask = ();
+	type ExtensionsWeightInfo = ();
+	type SingleBlockMigrations = ();
+	type MultiBlockMigrator = ();
+	type PreInherents = ();
+	type PostInherents = ();
+	type PostTransactions = ();
 }
 
 pub const PDEX: Balance = 1_000_000_000_000;
@@ -93,11 +100,12 @@ impl pallet_balances::Config for Test {
 	type AccountStore = frame_system::Pallet<Test>;
 	type ReserveIdentifier = [u8; 8];
 	type RuntimeHoldReason = ();
+	type RuntimeFreezeReason = ();
 	type FreezeIdentifier = ();
 	type MaxLocks = MaxLocks;
 	type MaxReserves = MaxReserves;
-	type MaxHolds = ();
 	type MaxFreezes = ();
+	type DoneSlashHandler = ();
 }
 
 parameter_types! {
@@ -127,6 +135,8 @@ impl pallet_assets::Config for Test {
 	type Extra = ();
 	type CallbackHandle = ();
 	type WeightInfo = ();
+	type Holder = ();
+	type ReserveData = ();
 }
 
 use sp_std::cell::RefCell;
@@ -146,7 +156,6 @@ parameter_types! {
 }
 
 impl rewards::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
 	type PalletId = RewardsPalletId;
 	type NativeCurrency = Balances;
 	type Public = <Signature as sp_runtime::traits::Verify>::Signer;

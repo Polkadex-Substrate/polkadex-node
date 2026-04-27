@@ -32,7 +32,7 @@ use sp_std::cell::RefCell;
 // or public keys. `u64` is used as the `AccountId` and no `Signature`s are required.
 use pallet_ocex_lmp as ocex;
 use sp_runtime::{
-	traits::{BlakeTwo256, IdentityLookup},
+	traits::IdentityLookup,
 	BuildStorage,
 };
 use frame_support::derive_impl;
@@ -165,7 +165,6 @@ parameter_types! {
 }
 
 impl crate::pallet::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
 	type OCEX = OCEX;
 	type PalletId = LMPRewardsPalletId;
 	type NativeCurrency = Balances;
@@ -173,7 +172,6 @@ impl crate::pallet::Config for Test {
 }
 
 impl ocex::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
 	type PalletId = OcexPalletId;
 	type TreasuryPalletId = TresuryPalletId;
 	type LMPRewardsPalletId = LMPRewardsPalletId;
@@ -211,6 +209,7 @@ impl pallet_assets::Config for Test {
     type ApprovalDeposit = ApprovalDeposit;
     type StringLimit = StringLimit;
     type Holder = ();
+    type ReserveData = ();
     type Freezer = ();
     type Extra = ();
     type CallbackHandle = ();
@@ -248,12 +247,8 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 	ext
 }
 
-use sp_runtime::{
-	testing::TestXt,
-	traits::{Extrinsic as ExtrinsicT, IdentifyAccount, Verify},
-};
+use sp_runtime::traits::{IdentifyAccount, Verify};
 
-type Extrinsic = TestXt<RuntimeCall, ()>;
 type AccountId = <<Signature as Verify>::Signer as IdentifyAccount>::AccountId;
 
 impl frame_system::offchain::SigningTypes for Test {
@@ -293,7 +288,7 @@ where
         call: RuntimeCall,
         _public: <Signature as Verify>::Signer,
         _account: AccountId,
-        nonce: u64,
+        _nonce: u64,
     ) -> Option<UncheckedExtrinsic> {
         Some(UncheckedExtrinsic::new_bare(call))
     }

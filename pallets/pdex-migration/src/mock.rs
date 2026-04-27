@@ -63,6 +63,13 @@ impl system::Config for Test {
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
 	type Nonce = u32;
 	type Block = Block;
+	type RuntimeTask = ();
+	type ExtensionsWeightInfo = ();
+	type SingleBlockMigrations = ();
+	type MultiBlockMigrator = ();
+	type PreInherents = ();
+	type PostInherents = ();
+	type PostTransactions = ();
 }
 pub const PDEX: Balance = 1000_000_000_000;
 
@@ -80,11 +87,12 @@ impl pallet_balances::Config for Test {
 	type AccountStore = frame_system::Pallet<Test>;
 	type ReserveIdentifier = [u8; 8];
 	type RuntimeHoldReason = ();
+	type RuntimeFreezeReason = ();
 	type FreezeIdentifier = ();
 	type MaxLocks = MaxLocks;
 	type MaxReserves = MaxReserves;
-	type MaxHolds = ();
 	type MaxFreezes = ();
+	type DoneSlashHandler = ();
 }
 parameter_types! {
 	pub const LockPeriod: u64 = 201600;
@@ -92,7 +100,6 @@ parameter_types! {
 }
 
 impl pdex_migration::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
 	type MaxRelayers = MaxRelayers;
 	type LockPeriod = LockPeriod;
 }
