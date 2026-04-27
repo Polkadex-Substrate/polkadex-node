@@ -28,8 +28,12 @@ ark-ff = { version = "0.4.2", default-features = false }
 ark-serialize = { version = "0.4.2", default-features = false }
 sha2 = { version = "0.10.6", default-features = false }
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(substrate_runtime)'] }
+
 [features]
 default = ["std"]
+parachain = []
 std = [
   "sha2/std",
   "ark-bls12-381/std",

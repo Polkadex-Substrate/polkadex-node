@@ -248,13 +248,12 @@
 //! be placed here or imported from corresponding FRAME RPC definitions.
 
 #![warn(missing_docs)]
-#![warn(unused_crate_dependencies)]
 
 use std::sync::Arc;
 
 use frame_support::traits::fungible::NativeOrWithId;
 use jsonrpsee::RpcModule;
-use polkadex_primitives::{AccountId, AssetId, Balance, Block, BlockNumber, Hash, Nonce};
+use polkadex_primitives::{AccountId, Balance, Block, BlockNumber, Hash, Nonce};
 use sc_client_api::{AuxStore, ProofProvider};
 use sc_consensus_babe::BabeWorkerHandle;
 use sc_consensus_beefy::communication::notification::{
