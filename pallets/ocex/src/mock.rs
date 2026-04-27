@@ -25,7 +25,7 @@ use frame_support::{
 	PalletId,
 };
 use frame_system::{EnsureRoot, EnsureSigned};
-use polkadex_primitives::{Moment, Signature, AccountIndex};
+use polkadex_primitives::{Moment, Signature};
 use sp_application_crypto::sp_core::H256;
 use sp_core::offchain::testing::TestOffchainExt;
 use sp_core::offchain::{OffchainDbExt, OffchainWorkerExt};
@@ -36,10 +36,8 @@ use sp_std::cell::RefCell;
 // The testing primitives are very useful for avoiding having to work with signatures
 // or public keys. `u64` is used as the `AccountId` and no `Signature`s are required.
 use sp_runtime::{
-	traits::{BlakeTwo256, IdentityLookup},
+	traits::IdentityLookup,
 	BuildStorage,
-	MultiAddress,
-	MultiSignature,
 };
 use frame_support::derive_impl;
 // Reexport crate as its pallet name for construct_runtime.
@@ -171,7 +169,6 @@ parameter_types! {
 }
 
 impl pallet_lmp::pallet::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
 	type PalletId = OcexPalletId;
 	type NativeCurrency = Balances;
 	type OtherAssets = Assets;
@@ -179,7 +176,6 @@ impl pallet_lmp::pallet::Config for Test {
 }
 
 impl Config for Test {
-	type RuntimeEvent = RuntimeEvent;
 	type PalletId = OcexPalletId;
 	type TreasuryPalletId = TreasuryPalletId;
 	type LMPRewardsPalletId = OcexPalletId;
@@ -217,6 +213,7 @@ impl pallet_assets::Config for Test {
     type ApprovalDeposit = ApprovalDeposit;
     type StringLimit = StringLimit;
     type Holder = ();
+    type ReserveData = ();
     type Freezer = ();
     type Extra = ();
     type CallbackHandle = ();
@@ -225,27 +222,6 @@ impl pallet_assets::Config for Test {
     #[cfg(feature = "runtime-benchmarks")]
     type BenchmarkHelper = ();
 }
-
-// impl pallet_assets::Config for Test {
-// 	type RuntimeEvent = RuntimeEvent;
-// 	type Balance = u128;
-// 	type RemoveItemsLimit = ();
-// 	type AssetId = u128;
-// 	type AssetIdParameter = parity_scale_codec::Compact<u128>;
-// 	type Currency = Balances;
-// 	type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<sp_runtime::AccountId32>>;
-// 	type ForceOrigin = EnsureRoot<sp_runtime::AccountId32>;
-// 	type AssetDeposit = AssetDeposit;
-// 	type AssetAccountDeposit = AssetDeposit;
-// 	type MetadataDepositBase = MetadataDepositBase;
-// 	type MetadataDepositPerByte = MetadataDepositPerByte;
-// 	type ApprovalDeposit = ApprovalDeposit;
-// 	type StringLimit = StringLimit;
-// 	type Freezer = ();
-// 	type Extra = ();
-// 	type CallbackHandle = ();
-// 	type WeightInfo = ();
-// }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
 	let t = frame_system::GenesisConfig::<Test>::default().build_storage().unwrap();
@@ -276,12 +252,8 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 	ext
 }
 
-use sp_runtime::{
-	testing::TestXt,
-	traits::{Extrinsic as ExtrinsicT, IdentifyAccount, Verify},
-};
+use sp_runtime::traits::{IdentifyAccount, Verify};
 
-type Extrinsic = TestXt<RuntimeCall, ()>;
 type AccountId = <<Signature as Verify>::Signer as IdentifyAccount>::AccountId;
 
 impl frame_system::offchain::SigningTypes for Test {
@@ -321,7 +293,7 @@ where
         call: RuntimeCall,
         _public: <Signature as Verify>::Signer,
         _account: AccountId,
-        nonce: u64,
+        _nonce: u64,
     ) -> Option<UncheckedExtrinsic> {
         Some(UncheckedExtrinsic::new_bare(call))
     }

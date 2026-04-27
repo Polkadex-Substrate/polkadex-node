@@ -325,7 +325,7 @@ use frame_support::{
 	assert_noop,
 	traits::{fungible::MutateHold, tokens::Precision},
 };
-use thea_primitives::types::{AssetMetadata, IncomingMessage, SignedMessage, THEA_HOLD_REASON};
+use thea_primitives::types::{AssetMetadata, IncomingMessage, SignedMessage};
 
 #[test]
 fn test_report_misbehaviour_not_enough_stake() {
@@ -519,7 +519,7 @@ fn test_on_initialize_happy_path() {
 		let _ = Balances::deposit_creating(&relayer, 100 * UNIT_BALANCE);
 		let stake = 1 * UNIT_BALANCE;
 		// Reserve balance
-		Balances::hold(&THEA_HOLD_REASON, &relayer, stake).unwrap();
+		Balances::hold(&MockHoldReason::Relayer, &relayer, stake).unwrap();
 		// Add message to IncomingMessagesQueue
 		let message = Message {
 			block_no: 0,
@@ -755,12 +755,12 @@ fn test_locks() {
 		let _ = Balances::deposit_creating(&relayer, 100 * UNIT_BALANCE);
 		let stake = 1 * UNIT_BALANCE;
 		// Reserve balance
-		Balances::hold(&THEA_HOLD_REASON, &relayer, stake).unwrap();
-		Balances::hold(&THEA_HOLD_REASON, &relayer, stake).unwrap();
+		Balances::hold(&MockHoldReason::Relayer, &relayer, stake).unwrap();
+		Balances::hold(&MockHoldReason::Relayer, &relayer, stake).unwrap();
 		assert_eq!(Balances::reserved_balance(&relayer), 2 * UNIT_BALANCE);
-		Balances::release(&THEA_HOLD_REASON, &relayer, stake, Precision::BestEffort).unwrap();
+		Balances::release(&MockHoldReason::Relayer, &relayer, stake, Precision::BestEffort).unwrap();
 		assert_eq!(Balances::reserved_balance(&relayer), 1 * UNIT_BALANCE);
-		Balances::release(&THEA_HOLD_REASON, &relayer, stake, Precision::BestEffort).unwrap();
+		Balances::release(&MockHoldReason::Relayer, &relayer, stake, Precision::BestEffort).unwrap();
 		assert_eq!(Balances::reserved_balance(&relayer), 0);
 	})
 }

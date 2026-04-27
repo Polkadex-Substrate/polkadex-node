@@ -17,19 +17,18 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{pallet as thea, *};
-use frame_support::{parameter_types, traits::AsEnsureOriginWithArg, PalletId};
+use frame_support::{parameter_types, traits::AsEnsureOriginWithArg};
 use frame_system as system;
 use frame_system::{EnsureRoot, EnsureSigned};
-use polkadex_primitives::AssetId;
 use sp_core::{Pair, H256};
 use sp_keystore::{testing::MemoryKeystore, Keystore, KeystoreExt};
 use sp_runtime::{
 	traits::{BlakeTwo256, IdentityLookup},
-	BuildStorage, Permill,
+	BuildStorage,
 };
 
-type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlock<Test>;
+type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Balance = u128;
 
 // Configure a mock runtime to test the pallet.
@@ -39,8 +38,6 @@ frame_support::construct_runtime!(
 		Balances: pallet_balances,
 		Assets: pallet_assets,
 		Thea: thea,
-		TheaExecutor: thea_executor,
-		AssetConversion: pallet_asset_conversion
 	}
 );
 
@@ -73,6 +70,13 @@ impl system::Config for Test {
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
 	type Nonce = u32;
 	type Block = Block;
+	type RuntimeTask = ();
+	type ExtensionsWeightInfo = ();
+	type SingleBlockMigrations = ();
+	type MultiBlockMigrator = ();
+	type PreInherents = ();
+	type PostInherents = ();
+	type PostTransactions = ();
 }
 
 parameter_types! {
@@ -89,12 +93,13 @@ impl pallet_balances::Config for Test {
 	type ExistentialDeposit = ExistentialDeposit;
 	type AccountStore = frame_system::Pallet<Test>;
 	type ReserveIdentifier = [u8; 8];
-	type RuntimeHoldReason = [u8; 8];
+	type RuntimeHoldReason = MockHoldReason;
+	type RuntimeFreezeReason = ();
 	type FreezeIdentifier = ();
 	type MaxLocks = MaxLocks;
 	type MaxReserves = MaxReserves;
-	type MaxHolds = MaxLocks;
 	type MaxFreezes = ();
+	type DoneSlashHandler = ();
 }
 
 parameter_types! {
@@ -129,6 +134,8 @@ impl pallet_assets::Config for Test {
 	type Extra = ();
 	type CallbackHandle = ();
 	type WeightInfo = ();
+	type Holder = ();
+	type ReserveData = ();
 }
 
 parameter_types! {
@@ -136,88 +143,52 @@ parameter_types! {
 }
 
 impl crate::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
 	type TheaId = crate::ecdsa::AuthorityId;
 	type Signature = crate::ecdsa::AuthoritySignature;
 	type MaxAuthorities = MaxAuthorities;
-	type Executor = TheaExecutor;
+	type Executor = ();
+	type RuntimeHoldReason = MockHoldReason;
 	type NativeCurrency = Balances;
 	type TheaGovernanceOrigin = EnsureRoot<u64>;
 	type WeightInfo = crate::weights::WeightInfo<Test>;
 
 	#[cfg(feature = "runtime-benchmarks")]
-	type TheaBenchmarkHelper = TheaExecutor;
+	type TheaBenchmarkHelper = ();
 }
 
-frame_support::ord_parameter_types! {
-	pub const AssetConversionOrigin: u32 = 1;
+#[derive(
+	parity_scale_codec::Encode,
+	parity_scale_codec::Decode,
+	parity_scale_codec::MaxEncodedLen,
+	scale_info::TypeInfo,
+	Clone,
+	Copy,
+	PartialEq,
+	Eq,
+	Debug,
+)]
+pub enum MockHoldReason {
+	Relayer,
 }
 
-parameter_types! {
-	pub const AssetConversionPalletId: PalletId = PalletId(*b"py/ascon");
-	pub AllowMultiAssetPools: bool = true;
-	pub const PoolSetupFee: Balance = 1000000000000; // should be more or equal to the existential deposit
-	pub const MintMinLiquidity: Balance = 100;  // 100 is good enough when the main currency has 10-12 decimals.
-	pub const LiquidityWithdrawalFee: Permill = Permill::from_percent(0);  // should be non-zero if AllowMultiAssetPools is true, otherwise can be zero.
-}
-impl pallet_asset_conversion::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
-	type Currency = Balances;
-	type Balance = <Self as pallet_balances::Config>::Balance;
-	type AssetBalance = u128;
-	type HigherPrecisionBalance = u128;
-	type AssetId = u128;
-	type MultiAssetId = polkadex_primitives::AssetId;
-	type MultiAssetIdConverter = polkadex_primitives::AssetIdConverter;
-	type PoolAssetId = u128;
-	type Assets = Assets;
-	type PoolAssets = Assets;
-	type LPFee = ConstU32<3>; // means 0.3%
-	type PoolSetupFee = PoolSetupFee;
-	type PoolSetupFeeReceiver = AssetConversionOrigin;
-	type LiquidityWithdrawalFee = LiquidityWithdrawalFee;
-	type MintMinLiquidity = MintMinLiquidity;
-	type MaxSwapPathLength = ConstU32<4>;
-	type PalletId = AssetConversionPalletId;
-	type AllowMultiAssetPools = AllowMultiAssetPools;
-	type WeightInfo = pallet_asset_conversion::weights::SubstrateWeight<Test>;
-	// #[cfg(feature = "runtime-benchmarks")]
-	// type BenchmarkHelper = AssetU128;
+impl frame_support::traits::VariantCount for MockHoldReason {
+	const VARIANT_COUNT: u32 = 1;
 }
 
-parameter_types! {
-	pub const TheaPalletId: PalletId = PalletId(*b"th/accnt");
-	pub const WithdrawalSize: u32 = 10;
-	pub const PolkadexAssetId: u128 = 0;
-	pub const ParaId: u32 = 2040;
+impl parity_scale_codec::DecodeWithMemTracking for MockHoldReason {}
+
+impl From<crate::pallet::HoldReason> for MockHoldReason {
+	fn from(_: crate::pallet::HoldReason) -> Self {
+		MockHoldReason::Relayer
+	}
 }
 
-impl thea_executor::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
-	type Currency = Balances;
-	type Assets = Assets;
-	type AssetId = u128;
-	type AssetCreateUpdateOrigin = EnsureRoot<Self::AccountId>;
-	type Executor = Thea;
-	type NativeAssetId = PolkadexAssetId;
-	type TheaPalletId = TheaPalletId;
-	type WithdrawalSize = WithdrawalSize;
-	type ParaId = ParaId;
-	type TheaExecWeightInfo = thea_executor::weights::WeightInfo<Test>;
-	type Swap = AssetConversion;
-	type MultiAssetIdAdapter = AssetId;
-	type AssetBalanceAdapter = u128;
-	type GovernanceOrigin = EnsureRoot<Self::AccountId>;
-	type ExistentialDeposit = ExistentialDeposit;
-	type Orderbook = ();
-}
-
-impl<C> frame_system::offchain::SendTransactionTypes<C> for Test
+impl<C> frame_system::offchain::CreateTransactionBase<C> for Test
 where
 	RuntimeCall: From<C>,
 {
 	type Extrinsic = UncheckedExtrinsic;
-	type OverarchingCall = RuntimeCall;
+	type RuntimeCall = RuntimeCall;
 }
 
 // Build genesis storage according to the mock runtime.

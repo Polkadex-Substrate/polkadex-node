@@ -27,12 +27,11 @@ use polkadex_primitives::{AccountId, UNIT_BALANCE};
 use sp_runtime::{AccountId32, DispatchError::BadOrigin, WeakBoundedVec};
 pub const STACK_SIZE: usize = 8388608;
 
-fn assert_last_event<T: Config>(generic_event: <T as Config>::RuntimeEvent) {
+fn assert_last_event<T: Config>(generic_event: <T as frame_system::Config>::RuntimeEvent) {
 	let events = frame_system::Pallet::<T>::events();
-	let system_event: <T as frame_system::Config>::RuntimeEvent = generic_event.into();
 	// compare to the last event record
 	let EventRecord { event, .. } = &events[events.len() - 1];
-	assert_eq!(event, &system_event);
+	assert_eq!(event, &generic_event);
 }
 
 //Bob account id

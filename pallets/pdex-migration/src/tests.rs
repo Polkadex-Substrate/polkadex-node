@@ -252,7 +252,7 @@ pub fn mint_works() {
 		);
 		// Ensure the user cannot move the funds until unlocked
 		assert_noop!(
-			pallet_balances::Pallet::<Test>::transfer(
+			pallet_balances::Pallet::<Test>::transfer_allow_death(
 				RuntimeOrigin::signed(beneficiary),
 				100,
 				valid_amount - 1 * PDEX
@@ -268,7 +268,7 @@ pub fn mint_works() {
 		// Unlock tokens
 		assert_ok!(PDEXMigration::unlock(RuntimeOrigin::signed(beneficiary)));
 		// check if it is transferable
-		assert_ok!(pallet_balances::Pallet::<Test>::transfer(
+		assert_ok!(pallet_balances::Pallet::<Test>::transfer_allow_death(
 			RuntimeOrigin::signed(beneficiary),
 			100,
 			valid_amount - 1 * PDEX
