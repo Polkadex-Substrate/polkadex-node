@@ -472,6 +472,9 @@ parameter_types! {
     pub const DefaultDepositLimit: Balance = deposit(1024, 1024 * 1024);
     pub Schedule: pallet_contracts::Schedule<Runtime> = Default::default();
     pub CodeHashLockupDepositPercent: Perbill = Perbill::from_percent(30);
+    pub const ReviveDepositPerChildTrieItem: Balance = deposit(1, 0) / 100;
+    pub const ReviveMaxEthExtrinsicWeight: FixedU128 = FixedU128::from_rational(9, 10);
+    pub const ReviveGasScale: u32 = 10u32;
     pub const AllianceMotionDuration: BlockNumber = ALLIANCE_MOTION_DURATION_IN_BLOCKS;
     pub const AllianceMaxProposals: u32 = 100;
     pub const AllianceMaxMembers: u32 = 100;
@@ -564,12 +567,10 @@ const_assert!(DesiredMembers::get() <= CouncilMaxMembers::get());
 //}
 
 impl pallet_hyperbridge::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
 	type IsmpHost = Ismp;
 }
 
 impl ismp_grandpa::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
 	type IsmpHost = Ismp;
 	type WeightInfo = ismp_grandpa_weight::WeightInfo<Runtime>;
 	// type RootOrigin = EnsureRoot<AccountId>;
@@ -586,7 +587,6 @@ impl Get<AccountId> for AssetAdmin {
 }
 
 impl pallet_token_gateway::Config for Runtime {
-    type RuntimeEvent = RuntimeEvent;
     type Dispatcher = Hyperbridge;
     type NativeCurrency = Balances;
     type AssetAdmin = AssetAdmin;
@@ -600,8 +600,6 @@ impl pallet_token_gateway::Config for Runtime {
 }
 
 impl pallet_ismp::Config for Runtime {
-    // configure the runtime event
-    type RuntimeEvent = RuntimeEvent;
     // Permissioned origin who can create or update consensus clients
     // type AdminOrigin = EnsureRoot<AccountId>;
 	type AdminOrigin = EnsureRootOrHalfCouncil;
@@ -618,15 +616,16 @@ impl pallet_ismp::Config for Runtime {
     // Optional coprocessor for incoming requests/responses
     type Coprocessor = Coprocessor;
     // Supported consensus clients
-	  //type ConsensusClients = (ismp_parachain::ParachainConsensusClient<Runtime, IsmpParachain>,);
-	  type ConsensusClients = (
+	//type ConsensusClients = (ismp_parachain::ParachainConsensusClient<Runtime, IsmpParachain>,);
+	type ConsensusClients = (
         ismp_grandpa::consensus::GrandpaConsensusClient<Runtime>,
     );
     // Offchain database implementation. Outgoing requests and responses are
     // inserted in this database, while their commitments are stored onchain.
     type OffchainDB = ();
     // The fee handler implementation
-    type FeeHandler = WeightFeeHandler<()>;
+    type FeeHandler = ();
+    type MigrationWeightInfo = ();
 }
 
 #[derive(Default)]
@@ -1097,7 +1096,6 @@ impl pallet_authorship::Config for Runtime {
 	type EventHandler = (Staking, ImOnline);
 }
 
-
 impl_opaque_keys! {
 	pub struct SessionKeys {
 		pub grandpa: Grandpa,
@@ -1110,13 +1108,10 @@ impl_opaque_keys! {
 	}
 }
 
-
-
-
 impl pallet_session::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type ValidatorId = <Self as frame_system::Config>::AccountId;
-	type ValidatorIdOf = pallet_staking::StashOf<Self>;
+	type ValidatorIdOf = sp_runtime::traits::ConvertInto;
 	type ShouldEndSession = Babe;
 	type NextSessionRotation = Babe;
 	type SessionManager = pallet_session::historical::NoteHistoricalRoot<Self, Staking>;
@@ -1124,11 +1119,32 @@ impl pallet_session::Config for Runtime {
 	type Keys = SessionKeys;
 	type DisablingStrategy = pallet_session::disabling::UpToLimitWithReEnablingDisablingStrategy;
 	type WeightInfo = pallet_session::weights::SubstrateWeight<Runtime>;
+	type Currency = Balances;
+	type KeyDeposit = ();
 }
 
+// impl pallet_session::Config for Runtime {
+// 	type RuntimeEvent = RuntimeEvent;
+// 	type ValidatorId = <Self as frame_system::Config>::AccountId;
+// 	type ValidatorIdOf = pallet_staking::StashOf<Self>;
+// 	type ShouldEndSession = Babe;
+// 	type NextSessionRotation = Babe;
+// 	type SessionManager = pallet_session::historical::NoteHistoricalRoot<Self, Staking>;
+// 	type SessionHandler = <SessionKeys as OpaqueKeys>::KeyTypeIdProviders;
+// 	type Keys = SessionKeys;
+// 	type DisablingStrategy = pallet_session::disabling::UpToLimitWithReEnablingDisablingStrategy;
+// 	type WeightInfo = pallet_session::weights::SubstrateWeight<Runtime>;
+// }
+
+// impl pallet_session::historical::Config for Runtime {
+//     type FullIdentification = ();
+//     type FullIdentificationOf = pallet_staking::NullIdentity;
+// }
+
 impl pallet_session::historical::Config for Runtime {
-    type FullIdentification = ();
-    type FullIdentificationOf = pallet_staking::NullIdentity;
+	type RuntimeEvent = RuntimeEvent;
+	type FullIdentification = ();
+	type FullIdentificationOf = pallet_staking::UnitIdentificationOf<Self>;
 }
 
 pallet_staking_reward_curve::build! {
@@ -1150,16 +1166,29 @@ impl pallet_staking::BenchmarkingConfig for StakingBenchmarkingConfig {
 }
 
 pub struct OnChainSeqPhragmen;
+// impl onchain::Config for OnChainSeqPhragmen {
+//     type System = Runtime;
+//     type Solver = SequentialPhragmen<
+//         AccountId,
+//         pallet_election_provider_multi_phase::SolutionAccuracyOf<Runtime>,
+//     >;
+//     type DataProvider = <Runtime as pallet_election_provider_multi_phase::Config>::DataProvider;
+//     type WeightInfo = frame_election_provider_support::weights::SubstrateWeight<Runtime>;
+//     type MaxWinners = <Runtime as pallet_election_provider_multi_phase::Config>::MaxWinners;
+//     type Bounds = ElectionBoundsOnChain;
+// }
 impl onchain::Config for OnChainSeqPhragmen {
-    type System = Runtime;
+	type Sort = ConstBool<true>;
+	type System = Runtime;
     type Solver = SequentialPhragmen<
         AccountId,
         pallet_election_provider_multi_phase::SolutionAccuracyOf<Runtime>,
     >;
-    type DataProvider = <Runtime as pallet_election_provider_multi_phase::Config>::DataProvider;
-    type WeightInfo = frame_election_provider_support::weights::SubstrateWeight<Runtime>;
-    type MaxWinners = <Runtime as pallet_election_provider_multi_phase::Config>::MaxWinners;
-    type Bounds = ElectionBoundsOnChain;
+	type DataProvider = Staking;
+	type WeightInfo = frame_election_provider_support::weights::SubstrateWeight<Runtime>;
+	type Bounds = ElectionBoundsOnChain;
+	type MaxBackersPerWinner = MaxElectingVotersSolution;
+	type MaxWinnersPerPage = MaxActiveValidators;
 }
 
 impl pallet_staking::Config for Runtime {
@@ -1200,6 +1229,7 @@ impl pallet_staking::Config for Runtime {
     type WeightInfo = pallet_staking::weights::SubstrateWeight<Runtime>;
     type BenchmarkingConfig = StakingBenchmarkingConfig;
     type Filter = Nothing;
+    type MaxValidatorSet = ConstU32<256>;
 }
 
 //impl pallet_staking::Config for Runtime {
@@ -1303,6 +1333,7 @@ impl pallet_election_provider_multi_phase::MinerConfig for Runtime {
 	type MaxLength = MinerMaxLength;
 	type MaxWeight = MinerMaxWeight;
 	type MaxWinners = MaxActiveValidators;
+	type MaxBackersPerWinner = MaxElectingVotersSolution;
 
 	// The unsigned submissions have to respect the weight of the submit_unsigned call, thus their
 	// weight estimate function is wired to this call's weight.
@@ -1345,6 +1376,7 @@ impl pallet_election_provider_multi_phase::Config for Runtime {
 	type SignedDepositByte = SignedDepositByte;
 	type SignedDepositWeight = ();
 	type MaxWinners = MaxActiveValidators;
+	type MaxBackersPerWinner = MaxElectingVotersSolution;
 	type ElectionBounds = ElectionBoundsOld;
 	type SlashHandler = ();
 	// burn slashes
@@ -1685,7 +1717,7 @@ impl<LocalCall> frame_system::offchain::CreateInherent<LocalCall> for Runtime
 where
 	RuntimeCall: From<LocalCall>,
 {
-	fn create_inherent(call: RuntimeCall) -> UncheckedExtrinsic {
+	fn create_bare(call: RuntimeCall) -> UncheckedExtrinsic {
 		generic::UncheckedExtrinsic::new_bare(call).into()
 	}
 }
@@ -2128,6 +2160,7 @@ impl pallet_assets::Config<Instance1> for Runtime {
     type CallbackHandle = ();
     type WeightInfo = pallet_assets::weights::SubstrateWeight<Runtime>;
     type RemoveItemsLimit = ConstU32<1000>;
+    type ReserveData = ();
     #[cfg(feature = "runtime-benchmarks")]
     type BenchmarkHelper = ();
 }
@@ -2154,6 +2187,7 @@ impl pallet_assets::Config<Instance2> for Runtime {
     type CallbackHandle = ();
     type WeightInfo = pallet_assets::weights::SubstrateWeight<Runtime>;
     type RemoveItemsLimit = ConstU32<1000>;
+    type ReserveData = ();
     #[cfg(feature = "runtime-benchmarks")]
     type BenchmarkHelper = ();
 }
@@ -2338,28 +2372,32 @@ impl pallet_delegated_staking::Config for Runtime {
 
 impl pallet_revive::Config for Runtime {
 	type Time = Timestamp;
+	type Balance = Balance;
 	type Currency = Balances;
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
-	type CallFilter = Nothing;
+	type RuntimeOrigin = RuntimeOrigin;
 	type DepositPerItem = DepositPerItem;
 	type DepositPerByte = DepositPerByte;
-	type WeightPrice = pallet_transaction_payment::Pallet<Self>;
+	type DepositPerChildTrieItem = ReviveDepositPerChildTrieItem;
 	type WeightInfo = pallet_revive::weights::SubstrateWeight<Self>;
-	type ChainExtension = ();
 	type AddressMapper = pallet_revive::AccountId32Mapper<Self>;
 	type RuntimeMemory = ConstU32<{ 128 * 1024 * 1024 }>;
 	type PVFMemory = ConstU32<{ 512 * 1024 * 1024 }>;
 	type UnsafeUnstableInterface = ConstBool<false>;
+	type AllowEVMBytecode = ConstBool<false>;
 	type UploadOrigin = EnsureSigned<Self::AccountId>;
 	type InstantiateOrigin = EnsureSigned<Self::AccountId>;
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type CodeHashLockupDepositPercent = CodeHashLockupDepositPercent;
-	type Xcm = ();
 	type ChainId = ConstU64<420_420_420>;
 	type NativeToEthRatio = ConstU32<1_000_000>; // 10^(18 - 12) Eth is 10^18, Native is 10^12.
-	type EthGasEncoder = ();
 	type FindAuthor = <Runtime as pallet_authorship::Config>::FindAuthor;
+	type Precompiles = ();
+	type FeeInfo = ();
+	type MaxEthExtrinsicWeight = ReviveMaxEthExtrinsicWeight;
+	type DebugEnabled = ConstBool<false>;
+	type GasScale = ReviveGasScale;
 }
 
 impl TryFrom<RuntimeCall> for pallet_revive::Call<Runtime> {
@@ -2868,6 +2906,14 @@ impl EthExtra for EthExtraImpl {
 	}
 }
 
+// RuntimeCall must implement SetWeightLimit for pallet_revive::evm::runtime::UncheckedExtrinsic
+// Revive is not included in construct_runtime, so this is a no-op impl.
+impl pallet_revive::evm::runtime::SetWeightLimit for RuntimeCall {
+	fn set_weight_limit(&mut self, _: Weight) -> Weight {
+		Weight::zero()
+	}
+}
+
 /// Unchecked extrinsic type as expected by this runtime.
 //pub type UncheckedExtrinsic = generic::UncheckedExtrinsic<Address, RuntimeCall, Signature, TxExtension>;
 pub type UncheckedExtrinsic = pallet_revive::evm::runtime::UncheckedExtrinsic<Address, Signature, EthExtraImpl>;
@@ -2941,7 +2987,7 @@ impl_runtime_apis! {
 			VERSION
 		}
 
-		fn execute_block(block: Block) {
+		fn execute_block(block: <Block as BlockT>::LazyBlock) {
 			Executive::execute_block(block);
 		}
 
@@ -2983,7 +3029,7 @@ impl_runtime_apis! {
 			data.create_extrinsics()
 		}
 
-		fn check_inherents(block: Block, data: InherentData) -> CheckInherentsResult {
+		fn check_inherents(block: <Block as BlockT>::LazyBlock, data: InherentData) -> CheckInherentsResult {
 			data.check_extrinsics(&block)
 		}
 	}
@@ -3471,7 +3517,7 @@ impl_runtime_apis! {
 		}
 	}
 
-	#[api_version(5)]
+	#[api_version(6)]
 	impl sp_consensus_beefy::BeefyApi<Block, BeefyId> for Runtime {
 		fn beefy_genesis() -> Option<BlockNumber> {
 			pallet_beefy::GenesisBlock::<Runtime>::get()
@@ -3530,17 +3576,6 @@ impl_runtime_apis! {
 				.map(|p| p.encode())
 				.map(sp_consensus_beefy::OpaqueKeyOwnershipProof::new)
 		}
-
-		fn generate_ancestry_proof(
-			prev_block_number: BlockNumber,
-			best_known_block_number: Option<BlockNumber>,
-		) -> Option<sp_runtime::OpaqueValue> {
-			use sp_consensus_beefy::AncestryHelper;
-
-			MmrLeaf::generate_proof(prev_block_number, best_known_block_number)
-				.map(|p| p.encode())
-				.map(sp_runtime::OpaqueValue::new)
-		}
 	}
 
 	impl pallet_mmr::primitives::MmrApi<
@@ -3590,6 +3625,13 @@ impl_runtime_apis! {
 		) -> Result<(), mmr::Error> {
 			let nodes = leaves.into_iter().map(|leaf|mmr::DataOrHash::Data(leaf.into_opaque_leaf())).collect();
 			pallet_mmr::verify_leaves_proof::<mmr::Hashing, _>(root, nodes, proof)
+		}
+
+		fn generate_ancestry_proof(
+			prev_block_number: BlockNumber,
+			best_known_block_number: Option<BlockNumber>,
+		) -> Result<mmr::AncestryProof<mmr::Hash>, mmr::Error> {
+			Mmr::generate_ancestry_proof(prev_block_number, best_known_block_number)
 		}
 	}
 

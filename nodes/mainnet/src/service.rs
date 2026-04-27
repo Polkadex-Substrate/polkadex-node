@@ -83,6 +83,14 @@ type FullBeefyBlockImport<InnerBlockImport> = beefy::import::BeefyBlockImport<
 	beefy_primitives::ecdsa_crypto::AuthorityId,
 >;
 
+type FullBabeBlockImport = sc_consensus_babe::BabeBlockImport<
+	Block,
+	FullClient,
+	FullBeefyBlockImport<FullGrandpaBlockImport>,
+	sp_consensus_babe::inherents::BabeCreateInherentDataProviders<Block>,
+	FullSelectChain,
+>;
+
 /// The transaction pool type definition.
 pub type TransactionPool = sc_transaction_pool::TransactionPoolHandle<Block, FullClient>;
 
@@ -188,11 +196,7 @@ pub fn new_partial(
 				sc_rpc::SubscriptionTaskExecutor,
 			) -> Result<jsonrpsee::RpcModule<()>, sc_service::Error>,
 			(
-				sc_consensus_babe::BabeBlockImport<
-					Block,
-					FullClient,
-					FullBeefyBlockImport<FullGrandpaBlockImport>,
-				>,
+				FullBabeBlockImport,
 				sc_consensus_grandpa::LinkHalf<Block, FullClient, FullSelectChain>,
 				sc_consensus_babe::BabeLink<Block>,
 				beefy::BeefyVoterLinks<Block, beefy_primitives::ecdsa_crypto::AuthorityId>,
@@ -261,10 +265,25 @@ pub fn new_partial(
 			config.prometheus_registry().cloned(),
 		);
 
+	let babe_config = sc_consensus_babe::configuration(&*client)?;
+	let slot_duration_for_import = babe_config.slot_duration();
+	let import_cidp: sp_consensus_babe::inherents::BabeCreateInherentDataProviders<Block> =
+		Arc::new(move |_parent, ()| async move {
+			let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
+			let slot =
+				sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_slot_duration(
+					*timestamp,
+					slot_duration_for_import,
+				);
+			Ok((slot, timestamp))
+		});
 	let (block_import, babe_link) = sc_consensus_babe::block_import(
-		sc_consensus_babe::configuration(&*client)?,
+		babe_config,
 		beefy_block_import,
 		client.clone(),
+		import_cidp,
+		select_chain.clone(),
+		OffchainTransactionPoolFactory::new(transaction_pool.clone()),
 	)?;
 
 	let slot_duration = babe_link.config().slot_duration();
@@ -274,22 +293,10 @@ pub fn new_partial(
 			block_import: block_import.clone(),
 			justification_import: Some(Box::new(justification_import)),
 			client: client.clone(),
-			select_chain: select_chain.clone(),
-			create_inherent_data_providers: move |_, ()| async move {
-				let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
-
-				let slot =
-				sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_slot_duration(
-					*timestamp,
-					slot_duration,
-				);
-
-				Ok((slot, timestamp))
-			},
+			slot_duration,
 			spawner: &task_manager.spawn_essential_handle(),
 			registry: config.prometheus_registry(),
 			telemetry: telemetry.as_ref().map(|x| x.handle()),
-			offchain_tx_pool_factory: OffchainTransactionPoolFactory::new(transaction_pool.clone()),
 		})?;
 
 	let import_setup = (block_import, grandpa_link, babe_link, beefy_voter_links);
@@ -405,14 +412,7 @@ pub fn new_full_base<N: NetworkBackend<Block, <Block as BlockT>::Hash>>(
 	config: Configuration,
 	mixnet_config: Option<sc_mixnet::Config>,
 	disable_hardware_benchmarks: bool,
-	with_startup_data: impl FnOnce(
-		&sc_consensus_babe::BabeBlockImport<
-			Block,
-			FullClient,
-			FullBeefyBlockImport<FullGrandpaBlockImport>,
-		>,
-		&sc_consensus_babe::BabeLink<Block>,
-	),
+	with_startup_data: impl FnOnce(&FullBabeBlockImport, &sc_consensus_babe::BabeLink<Block>),
 ) -> Result<NewFullBase, ServiceError> {
 	let is_offchain_indexing_enabled = config.offchain_worker.indexing_enabled;
 	let role = config.role;
@@ -562,6 +562,7 @@ pub fn new_full_base<N: NetworkBackend<Block, <Block as BlockT>::Hash>>(
 		tx_handler_controller,
 		sync_service: sync_service.clone(),
 		telemetry: telemetry.as_mut(),
+		tracing_execute_block: None,
 	})?;
 
 	if let Some(hwbench) = hwbench {
@@ -668,6 +669,7 @@ pub fn new_full_base<N: NetworkBackend<Block, <Block as BlockT>::Hash>>(
 				Box::pin(dht_event_stream),
 				authority_discovery_role,
 				prometheus_registry.clone(),
+				task_manager.spawn_handle(),
 			);
 
 		task_manager.spawn_handle().spawn(
