@@ -233,9 +233,6 @@ pub mod pallet {
 	pub trait Config:
 		frame_system::Config + timestamp::Config + CreateTransactionBase<Call<Self>>
 	{
-		/// The overarching event type.
-		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
-
 		/// Address which holds the customer funds.
 		#[pallet::constant]
 		type PalletId: Get<PalletId>;

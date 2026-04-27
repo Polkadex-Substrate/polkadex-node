@@ -39,22 +39,19 @@ use frame_support::ord_parameter_types;
 use frame_support::derive_impl;
 use frame_support::traits::fungible;
 //use pallet_xcm::{EnsureXcm, IsVoiceOfBody};
-use sp_runtime::{
-    traits::{Convert, MaybeEquivalence},
-    generic::Era
-};
+use sp_runtime::generic::Era;
 use constants::{currency::*, time::*};
 use frame_election_provider_support::{
 	bounds::{ElectionBounds, ElectionBoundsBuilder}, onchain, ElectionDataProvider, SequentialPhragmen,
 };
 use frame_support::{
 	//construct_runtime,
-	dispatch::{DispatchClass, DispatchInfo},
+	dispatch::DispatchClass,
 	pallet_prelude::RuntimeDebug,
 	parameter_types,
 	traits::{
-		fungible::{HoldConsideration, Inspect}, AsEnsureOriginWithArg, Currency, EitherOfDiverse, EnsureOrigin,
-		EqualPrivilegeOnly, Get, InstanceFilter, KeyOwnerProofSystem, LockIdentifier, Consideration, tokens::fungible::hold::DoneSlash,
+		fungible::{HoldConsideration, Inspect}, AsEnsureOriginWithArg, EitherOfDiverse, EnsureOrigin,
+		EqualPrivilegeOnly, Get, InstanceFilter, KeyOwnerProofSystem, LockIdentifier,
 		tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId}, ConstU128, ConstU64, ConstU32, ConstU16, ConstBool,
 		VariantCountOf, tokens::imbalance::{ResolveAssetTo, ResolveTo, OnUnbalanced}, Imbalance, Nothing, InsideBoth,
 		Contains
@@ -76,8 +73,6 @@ use frame_system::{
 	EnsureRoot, EnsureSigned, RawOrigin, EnsureSignedBy, EnsureRootWithSuccess
 };
 
-use frame_support::pallet_prelude::TypedGet;
-
 use orderbook_primitives::types::TradingPair;
 #[cfg(any(feature = "std", test))]
 pub use pallet_balances::Call as BalancesCall;
@@ -87,7 +82,7 @@ use pallet_session::historical as pallet_session_historical;
 #[cfg(any(feature = "std", test))]
 pub use pallet_staking::StakerStatus;
 use pallet_transaction_payment::{FeeDetails, RuntimeDispatchInfo};
-use parity_scale_codec::{Decode, Encode, MaxEncodedLen, DecodeWithMemTracking, FullCodec};
+use parity_scale_codec::{Decode, Encode, MaxEncodedLen, DecodeWithMemTracking};
 pub use polkadex_primitives::{
 	AccountId, AccountIndex, Balance, BlockNumber, Hash, Index, Moment, Signature
 };
@@ -95,7 +90,7 @@ use polkadex_primitives::{AssetId, Nonce};
 use rust_decimal::Decimal;
 use sp_api::impl_runtime_apis;
 use sp_authority_discovery::AuthorityId as AuthorityDiscoveryId;
-use sp_core::{crypto::KeyTypeId, OpaqueMetadata, H160, H256};
+use sp_core::{crypto::KeyTypeId, OpaqueMetadata, H256};
 use sp_inherents::{CheckInherentsResult, InherentData};
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -113,12 +108,11 @@ use sp_std::{prelude::*, vec};
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 use static_assertions::const_assert;
-use frame_support::pallet_prelude::Member;
-use frame_system::offchain::CreateTransactionBase;
 use scale_info::TypeInfo;
 use sp_npos_elections::ExtendedBalance;
-use pallet_revive::{evm::runtime::EthExtra, AddressMapper};
+use pallet_revive::evm::runtime::EthExtra;
 //pub use pallet_transaction_payment::{FungibleAdapter, Multiplier, TargetedFeeAdjustment};
+#[allow(deprecated)]
 pub use pallet_transaction_payment::{CurrencyAdapter, Multiplier, TargetedFeeAdjustment};
 //use pallet_nomination_pools::PoolId;
 use pallet_tx_pause::RuntimeCallNameOf;
@@ -126,14 +120,11 @@ use sp_consensus_beefy::{
 	ecdsa_crypto::{AuthorityId as BeefyId, Signature as BeefySignature},
 	mmr::MmrLeafVersion,
 };
-use sp_runtime::traits::TransactionExtension;
-
 use ismp::Error as IsmpError;
 use ismp::host::StateMachine;
 use ismp::module::IsmpModule;
-use ismp::router::{IsmpRouter, PostRequest, Request, Response, Timeout};
+use ismp::router::{IsmpRouter, Request, Response};
 use ismp::consensus::{ConsensusClientId, StateMachineHeight, StateMachineId};
-use pallet_ismp::fee_handler::WeightFeeHandler;
 //use weights::{ismp_parachain as ismp_parachain_weight};
 use weights::{ismp_grandpa as ismp_grandpa_weight};
 
@@ -1027,7 +1018,7 @@ impl pallet_balances::Config for Runtime {
 //	//type DoneSlashHandler = DoneSlash<Self::RuntimeHoldReason, AccountId, Self::Balance>;
 //	type DoneSlashHandler = ();
 //}
-use sp_runtime::traits::{Bounded, ConvertInto};
+use sp_runtime::traits::Bounded;
 
 #[allow(deprecated)]
 impl pallet_transaction_payment::Config for Runtime {
@@ -1931,7 +1922,6 @@ impl EnsureOrigin<RuntimeOrigin> for EnsureRootOrTreasury {
 //}
 
 impl pdex_migration::pallet::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
 	type MaxRelayers = MaxRelayers;
 	type LockPeriod = LockPeriod;
 }
@@ -1944,7 +1934,6 @@ impl pdex_migration::pallet::Config for Runtime {
 //}
 
 impl pallet_ocex_lmp::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
 	type PalletId = OcexPalletId;
 	type TreasuryPalletId = TreasuryPalletId;
 	type LMPRewardsPalletId = LMPRewardsPalletId;
@@ -1962,7 +1951,6 @@ impl pallet_ocex_lmp::Config for Runtime {
 
 //Install rewards Pallet
 impl pallet_rewards::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
 	type PalletId = RewardsPalletId;
 	type NativeCurrency = Balances;
 	type Public = <Signature as traits::Verify>::Signer;
@@ -1972,7 +1960,6 @@ impl pallet_rewards::Config for Runtime {
 }
 
 impl pallet_lmp::pallet::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
 	type OCEX = OCEX;
 	type PalletId = CrowdSourcingRewardsPalletId;
 	type NativeCurrency = Balances;

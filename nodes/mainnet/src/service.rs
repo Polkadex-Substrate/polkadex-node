@@ -22,7 +22,6 @@
 
 use sc_consensus_beefy as beefy;
 use sp_consensus_beefy as beefy_primitives;
-use sp_consensus_beefy::*;
 use crate::{cli::Cli, node_rpc};
 use parity_scale_codec::Encode;
 use frame_benchmarking_cli::SUBSTRATE_REFERENCE_HARDWARE;
@@ -44,7 +43,6 @@ use sp_core::crypto::Pair;
 use sp_runtime::{generic, traits::Block as BlockT, SaturatedConversion};
 use std::{path::Path, sync::Arc};
 use node_polkadex_runtime::RuntimeApi;
-use polkadex_client::ExecutorDispatch;
 use polkadex_primitives::Block;
 
 /// Host functions required for node pokadex runtime and Substrate node.
@@ -92,6 +90,7 @@ type FullBabeBlockImport = sc_consensus_babe::BabeBlockImport<
 >;
 
 /// The transaction pool type definition.
+#[allow(dead_code)]
 pub type TransactionPool = sc_transaction_pool::TransactionPoolHandle<Block, FullClient>;
 
 /// The minimum period of blocks on which justifications will be
@@ -392,6 +391,7 @@ pub fn new_partial(
 }
 
 /// Result of [`new_full_base`].
+#[allow(dead_code)]
 pub struct NewFullBase {
 	/// The task manager of the node.
 	pub task_manager: TaskManager,
