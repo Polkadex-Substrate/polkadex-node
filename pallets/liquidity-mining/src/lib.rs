@@ -83,8 +83,6 @@ pub mod pallet {
 	pub trait Config: frame_system::Config + CreateTransactionBase<Call<Self>> {
 		//type RuntimeCall: frame_support::Parameter + sp_runtime::traits::Dispatchable<RuntimeOrigin = Self::RuntimeOrigin> + frame_support::dispatch::GetDispatchInfo + From<Call<Self>>;
 
-		type RuntimeEvent: IsType<<Self as frame_system::Config>::RuntimeEvent> + From<Event<Self>>;
-
 		/// Some type that implements the LiquidityMining traits
 		type OCEX: LiquidityMining<Self::AccountId, BalanceOf<Self>>;
 

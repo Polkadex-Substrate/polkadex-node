@@ -92,9 +92,6 @@ pub mod pallet {
 	/// `frame_system::Config` should always be included.
 	#[pallet::config]
 	pub trait Config: frame_system::Config + timestamp::Config {
-		/// The overarching event type.
-		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
-
 		/// Address which holds the customer funds.
 		#[pallet::constant]
 		type PalletId: Get<PalletId>;

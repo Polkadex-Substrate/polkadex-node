@@ -37,8 +37,7 @@ use sp_consensus_grandpa::AuthorityId as GrandpaId;
 use sp_core::crypto::UncheckedInto;
 use sp_mixnet::types::AuthorityId as MixnetId;
 
-pub use node_polkadex_runtime::RuntimeGenesisConfig;
-pub use polkadex_primitives::{AccountId, Balance, Signature};
+pub use polkadex_primitives::{AccountId, Balance};
 use pallet_ocex_lmp::sr25519::AuthorityId as OrderbookId;
 
 const STAGING_TELEMETRY_URL: &str = "wss://telemetry.polkadot.io/submit/";
