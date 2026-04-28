@@ -122,6 +122,8 @@ impl OnRuntimeUpgrade for UpgradeSessionKeys {
 
     #[cfg(feature = "try-runtime")]
     fn pre_upgrade() -> Result<sp_std::vec::Vec<u8>, sp_runtime::TryRuntimeError> {
+        use frame_support::ensure;
+        use sp_runtime::traits::OpaqueKeys;
         use sp_std::vec::Vec;
 
         if crate::System::last_runtime_upgrade_spec_version() > UPGRADE_SESSION_KEYS_FROM_SPEC {
@@ -154,6 +156,8 @@ impl OnRuntimeUpgrade for UpgradeSessionKeys {
 
     #[cfg(feature = "try-runtime")]
     fn post_upgrade(state: sp_std::vec::Vec<u8>) -> Result<(), sp_runtime::TryRuntimeError> {
+        use frame_support::ensure;
+        use sp_runtime::traits::OpaqueKeys;
 
         if crate::System::last_runtime_upgrade_spec_version() > UPGRADE_SESSION_KEYS_FROM_SPEC {
             log::warn!("Skipping session keys migration post-upgrade check: already applied");
@@ -279,4 +283,89 @@ impl<T: pallet_child_bounties::Config> OnRuntimeUpgrade for ChildBountiesStorage
     }
 }
 
+/// Migration to convert `TokenGateway::LocalAssets` values from `u32` to `u128`.
+///
+/// This is required because `pallet_assets::Config<Instance1>::AssetId` changed from `u32` to
+/// `u128` in the new runtime, while the on-chain entries were stored as 4-byte SCALE-LE u32.
+pub struct TokenGatewayLocalAssetsMigration;
 
+impl OnRuntimeUpgrade for TokenGatewayLocalAssetsMigration {
+    fn on_runtime_upgrade() -> Weight {
+        use sp_io::hashing::twox_128;
+        use sp_runtime::codec::Encode;
+
+        let prefix: sp_std::vec::Vec<u8> = [twox_128(b"TokenGateway").as_ref(), twox_128(b"LocalAssets").as_ref()].concat();
+
+        let mut count = 0u32;
+        let mut key = prefix.clone();
+
+        loop {
+            match sp_io::storage::next_key(&key) {
+                Some(next) if next.starts_with(&prefix) => {
+                    if let Some(raw_val) = sp_io::storage::get(&next) {
+                        if raw_val.len() == 4 {
+                            // Old encoding: u32 little-endian (SCALE)
+                            let old = u32::from_le_bytes(raw_val[..4].try_into().unwrap_or([0u8; 4]));
+                            let new: u128 = old as u128;
+                            sp_io::storage::set(&next, &new.encode());
+                            count += 1;
+                        }
+                    }
+                    key = next;
+                }
+                _ => break,
+            }
+        }
+
+        log::info!("🔧 Migrated {} TokenGateway::LocalAssets entries (u32 → u128)", count);
+
+        <crate::Runtime as frame_system::Config>::DbWeight::get().reads_writes(count as u64 + 1, count as u64)
+    }
+
+    #[cfg(feature = "try-runtime")]
+    fn pre_upgrade() -> Result<sp_std::vec::Vec<u8>, sp_runtime::TryRuntimeError> {
+        use sp_io::hashing::twox_128;
+        use sp_runtime::codec::Encode;
+
+        let prefix: sp_std::vec::Vec<u8> = [twox_128(b"TokenGateway").as_ref(), twox_128(b"LocalAssets").as_ref()].concat();
+        let mut count = 0u32;
+        let mut key = prefix.clone();
+        loop {
+            match sp_io::storage::next_key(&key) {
+                Some(next) if next.starts_with(&prefix) => { count += 1; key = next; }
+                _ => break,
+            }
+        }
+        log::info!("🔍 TokenGateway::LocalAssets pre-upgrade: {} entries", count);
+        Ok(count.encode())
+    }
+
+    #[cfg(feature = "try-runtime")]
+    fn post_upgrade(state: sp_std::vec::Vec<u8>) -> Result<(), sp_runtime::TryRuntimeError> {
+        use frame_support::ensure;
+        use sp_io::hashing::twox_128;
+
+        let pre_count: u32 = Decode::decode(&mut &state[..])
+            .map_err(|_| "Failed to decode pre-upgrade state")?;
+
+        let prefix: sp_std::vec::Vec<u8> = [twox_128(b"TokenGateway").as_ref(), twox_128(b"LocalAssets").as_ref()].concat();
+        let mut post_count = 0u32;
+        let mut key = prefix.clone();
+        loop {
+            match sp_io::storage::next_key(&key) {
+                Some(next) if next.starts_with(&prefix) => {
+                    if let Some(raw_val) = sp_io::storage::get(&next) {
+                        ensure!(raw_val.len() == 16, "TokenGateway::LocalAssets value is not u128 after migration");
+                    }
+                    post_count += 1;
+                    key = next;
+                }
+                _ => break,
+            }
+        }
+
+        ensure!(pre_count == post_count, "TokenGateway::LocalAssets entry count changed after migration");
+        log::info!("✅ TokenGateway::LocalAssets post-upgrade: {} entries all u128", post_count);
+        Ok(())
+    }
+}

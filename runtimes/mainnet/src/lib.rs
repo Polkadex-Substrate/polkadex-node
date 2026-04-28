@@ -170,7 +170,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 378,
+    spec_version: 380,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 2,
@@ -2935,6 +2935,8 @@ type Migrations = (
     migrations::GrandpaStorageVersionMigration<Runtime>,
     migrations::IdentityStorageVersionMigration<Runtime>,
     migrations::ChildBountiesStorageVersionMigration<Runtime>,
+	// NOTE: Can be removed for mainnet upgrade, because 
+    migrations::TokenGatewayLocalAssetsMigration,
     // Existing migrations
     // pallet_nomination_pools::migration::versioned::V6ToV7<Runtime>,
     pallet_alliance::migration::Migration<Runtime>,
@@ -3781,7 +3783,7 @@ impl_runtime_apis! {
 		}
 
 		fn execute_block(
-			block: Block,
+			block: <Block as sp_runtime::traits::Block>::LazyBlock,
 			state_root_check: bool,
 			signature_check: bool,
 			select: frame_try_runtime::TryStateSelect
