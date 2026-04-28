@@ -587,7 +587,7 @@ impl pallet_token_gateway::Config for Runtime {
     type NativeAssetId = NativeAssetId;
     type Decimals = Decimals;
     type EvmToSubstrate = ();
-    type WeightInfo = ();
+    type WeightInfo = weights::pallet_token_gateway::WeightInfo<Runtime>;
 }
 
 impl pallet_ismp::Config for Runtime {
@@ -1560,6 +1560,8 @@ impl pallet_treasury::Config for Runtime {
 	type BalanceConverter = frame_support::traits::tokens::UnityAssetBalanceConversion;
 	type PayoutPeriod = SpendPeriod;
 	type BlockNumberProvider = SubstrateBlockNumberProvider;
+	#[cfg(feature = "runtime-benchmarks")]
+	type BenchmarkHelper = ();
 	//type ApproveOrigin = EitherOfDiverse<
 	//	EnsureRoot<AccountId>,
 	//	pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 3, 5>,
@@ -1804,21 +1806,27 @@ use pallet_assets::BenchmarkHelper;
 use sp_staking::currency_to_vote::U128CurrencyToVote;
 
 #[cfg(feature = "runtime-benchmarks")]
-impl BenchmarkHelper<parity_scale_codec::Compact<u128>> for AssetU128 {
+impl BenchmarkHelper<parity_scale_codec::Compact<u128>, ()> for AssetU128 {
 	fn create_asset_id_parameter(id: u32) -> parity_scale_codec::Compact<u128> {
 		parity_scale_codec::Compact::from(id as u128)
+	}
+	fn create_reserve_id_parameter(_id: u32) -> () {
+		()
 	}
 }
 
 #[cfg(feature = "runtime-benchmarks")]
-impl pallet_asset_conversion::BenchmarkHelper<u128, AssetId> for AssetU128 {
-	fn asset_id(id: u32) -> u128 {
-		id as u128
+pub struct AssetConversionTxHelper;
+#[cfg(feature = "runtime-benchmarks")]
+impl pallet_asset_conversion_tx_payment::BenchmarkHelperTrait<
+	AccountId,
+	NativeOrWithId<u128>,
+	NativeOrWithId<u128>,
+> for AssetConversionTxHelper {
+	fn create_asset_id_parameter(id: u32) -> (NativeOrWithId<u128>, NativeOrWithId<u128>) {
+		(NativeOrWithId::WithId(id as u128), NativeOrWithId::WithId(id as u128))
 	}
-
-	fn multiasset_id(id: u32) -> AssetId {
-		AssetId::Asset(id as u128)
-	}
+	fn setup_balances_and_pool(_asset_id: NativeOrWithId<u128>, _account: AccountId) {}
 }
 
 impl pallet_identity::Config for Runtime {
@@ -1844,6 +1852,8 @@ impl pallet_identity::Config for Runtime {
 	type MaxSuffixLength = MaxSuffixLength;
 	type MaxUsernameLength = MaxUsernameLength;
 	type WeightInfo = pallet_identity::weights::SubstrateWeight<Runtime>;
+	#[cfg(feature = "runtime-benchmarks")]
+	type BenchmarkHelper = ();
 	//type FieldDeposit = FieldDeposit;
 	//type MaxAdditionalFields = MaxAdditionalFields;
 }
@@ -2149,7 +2159,7 @@ impl pallet_assets::Config<Instance1> for Runtime {
     type RemoveItemsLimit = ConstU32<1000>;
     type ReserveData = ();
     #[cfg(feature = "runtime-benchmarks")]
-    type BenchmarkHelper = ();
+    type BenchmarkHelper = AssetU128;
 }
 
 // pallet_assets: Instance1 config implementation
@@ -2176,7 +2186,7 @@ impl pallet_assets::Config<Instance2> for Runtime {
     type RemoveItemsLimit = ConstU32<1000>;
     type ReserveData = ();
     #[cfg(feature = "runtime-benchmarks")]
-    type BenchmarkHelper = ();
+    type BenchmarkHelper = AssetU128;
 }
 
 // pallet_asset_conversion config implementation
@@ -2214,7 +2224,7 @@ impl pallet_asset_conversion::Config for Runtime {
     type MaxSwapPathLength = ConstU32<4>;
     type MintMinLiquidity = MintMinLiquidity;
     #[cfg(feature = "runtime-benchmarks")]
-    type BenchmarkHelper = ();
+    type BenchmarkHelper = pallet_asset_conversion::NativeOrWithIdFactory<u128>;
 }
 
 impl pallet_contracts::Config for Runtime {
@@ -2969,6 +2979,17 @@ impl HandleCredit<AccountId, Assets> for CreditToBlockAuthor {
 }
 
 use orderbook_primitives::ObCheckpointRaw;
+
+#[cfg(feature = "runtime-benchmarks")]
+mod benches {
+	frame_benchmarking::define_benchmarks!(
+		[pallet_token_gateway, TokenGateway]
+		[pallet_ocex_lmp, OCEX]
+		[pdex_migration, PDEXMigration]
+		[pallet_rewards, Rewards]
+	);
+}
+
 impl_runtime_apis! {
 
 	impl sp_api::Core<Block> for Runtime {
@@ -3795,61 +3816,38 @@ impl_runtime_apis! {
 	}
 
 
-	//#[cfg(feature = "runtime-benchmarks")]
-	//impl frame_benchmarking::Benchmark<Block> for Runtime {
-	//	fn benchmark_metadata(extra: bool) -> (
-	//		Vec<frame_benchmarking::BenchmarkList>,
-	//		Vec<frame_support::traits::StorageInfo>) {
-	//		use frame_benchmarking::{list_benchmark, Benchmarking, BenchmarkList};
-	//		use frame_support::traits::StorageInfoTrait;
-	//
-	//		let mut list = Vec::<BenchmarkList>::new();
-	//		list_benchmark!(list, extra, pallet_ocex_lmp, OCEX);
-	//		list_benchmark!(list, extra, pdex_migration, PDEXMigration);
-	//		list_benchmark!(list, extra, pallet_rewards, Rewards);
-	//		//list_benchmark!(list, extra, thea_executor, TheaExecutor);
-	//		list_benchmark!(list, extra, thea, Thea);
-	//		//list_benchmark!(list, extra, thea_message_handler, TheaMH);
-	//
-	//		let storage_info = AllPalletsWithSystem::storage_info();
-	//
-	//		return (list, storage_info)
-	//	}
-	//	fn dispatch_benchmark(
-	//		config: frame_benchmarking::BenchmarkConfig
-	//	) -> Result<Vec<frame_benchmarking::BenchmarkBatch>, sp_runtime::RuntimeString> {
-	//		use frame_benchmarking::{Benchmarking, BenchmarkBatch, add_benchmark};
-	//		use sp_storage::TrackedStorageKey;
-	//		impl frame_system_benchmarking::Config for Runtime {}
-	//
-	//		let allowlist: Vec<TrackedStorageKey> = vec![
-	//			// Block Number
-	//			hex_literal::hex!("26aa394eea5630e07c48ae0c9558cef702a5c1b19ab7a04f536c519aca4983ac").to_vec().into(),
-	//			// Total Issuance
-	//			hex_literal::hex!("c2261276cc9d1f8598ea4b6a74b15c2f57c875e4cff74148e4628f264b974c80").to_vec().into(),
-	//			// Execution Phase
-	//			hex_literal::hex!("26aa394eea5630e07c48ae0c9558cef7ff553b5a9862a516939d82b3d3d8661a").to_vec().into(),
-	//			// Event Count
-	//			hex_literal::hex!("26aa394eea5630e07c48ae0c9558cef70a98fdbe9ce6c55837576c60c7af3850").to_vec().into(),
-	//			// System Events
-	//			hex_literal::hex!("26aa394eea5630e07c48ae0c9558cef780d41e5e16056765bc8461851072c9d7").to_vec().into(),
-	//			// Treasury Account
-	//			hex_literal::hex!("26aa394eea5630e07c48ae0c9558cef7b99d880ec681799c0cf30e8886371da95ecffd7b6c0f78751baa9d281e0bfa3a6d6f646c70792f74727372790000000000000000000000000000000000000000").to_vec().into(),
-	//		];
-	//
-	//		let mut batches = Vec::<BenchmarkBatch>::new();
-	//		let params = (&config, &allowlist);
-	//
-	//		add_benchmark!(params, batches, pallet_ocex_lmp, OCEX);
-	//		add_benchmark!(params, batches, pdex_migration, PDEXMigration);
-	//		add_benchmark!(params, batches, pallet_rewards, Rewards);
-	//		//add_benchmark!(params, batches, thea_executor, TheaExecutor); //TheaExecutor: thea_executor
-	//		add_benchmark!(params, batches, thea, Thea);
-	//		//add_benchmark!(params, batches, thea_message_handler, TheaMH);
-	//		if batches.is_empty() { return Err("Benchmark not found for this pallet.".into()) }
-	//		Ok(batches)
-	//	}
-	//}
+	#[cfg(feature = "runtime-benchmarks")]
+	impl frame_benchmarking::Benchmark<Block> for Runtime {
+		fn benchmark_metadata(extra: bool) -> (
+			Vec<frame_benchmarking::BenchmarkList>,
+			Vec<frame_support::traits::StorageInfo>,
+		) {
+			use frame_benchmarking::BenchmarkList;
+			use frame_support::traits::StorageInfoTrait;
+
+			let mut list = Vec::<BenchmarkList>::new();
+			list_benchmarks!(list, extra);
+
+			let storage_info = AllPalletsWithSystem::storage_info();
+			(list, storage_info)
+		}
+
+		#[allow(non_local_definitions)]
+		fn dispatch_benchmark(
+			config: frame_benchmarking::BenchmarkConfig,
+		) -> Result<Vec<frame_benchmarking::BenchmarkBatch>, alloc::string::String> {
+			use frame_benchmarking::BenchmarkBatch;
+			use sp_storage::TrackedStorageKey;
+			use frame_support::traits::WhitelistedStorageKeys;
+
+			let whitelist: Vec<TrackedStorageKey> = AllPalletsWithSystem::whitelisted_storage_keys();
+
+			let mut batches = Vec::<BenchmarkBatch>::new();
+			let params = (&config, &whitelist);
+			add_benchmarks!(params, batches);
+			Ok(batches)
+		}
+	}
 }
 
 #[cfg(test)]
