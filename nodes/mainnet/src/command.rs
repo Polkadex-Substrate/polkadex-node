@@ -146,7 +146,7 @@ pub fn run() -> Result<()> {
 						let db = partial.backend.expose_db();
 						let storage = partial.backend.expose_storage();
 
-						cmd.run(config, partial.client, db, storage)
+						cmd.run(config, partial.client, db, storage, None)
 					},
 					BenchmarkCmd::Overhead(cmd) => {
 						// ensure that we keep the task manager alive
