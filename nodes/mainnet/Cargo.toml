@@ -100,9 +100,6 @@ substrate-state-trie-migration-rpc = { workspace = true }
 substrate-frame-rpc-system = { workspace = true }
 mmr-rpc = { workspace = true }
 mmr-gadget = { workspace = true }
-cumulus-client-service = { workspace = true }
-cumulus-client-consensus-common = { workspace = true }
-cumulus-client-consensus-aura = { workspace = true }
 
 # CUSTOM
 node-polkadex-runtime = { workspace = true }
