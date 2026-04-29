@@ -52,7 +52,7 @@ use frame_support::{
 	traits::{
 		fungible::{HoldConsideration, Inspect}, AsEnsureOriginWithArg, EitherOfDiverse, EnsureOrigin,
 		EqualPrivilegeOnly, Get, InstanceFilter, KeyOwnerProofSystem, LockIdentifier,
-		tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId}, ConstU128, ConstU64, ConstU32, ConstU16, ConstBool,
+		tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId}, ConstU64, ConstU32, ConstU16, ConstBool,
 		VariantCountOf, tokens::imbalance::{ResolveAssetTo, ResolveTo, OnUnbalanced}, Imbalance, Nothing, InsideBoth,
 		Contains
 	},
@@ -70,7 +70,7 @@ genesis_builder_helper::{build_state, get_preset},
 pub use frame_system::Call as SystemCall;
 use frame_system::{
 	limits::{BlockLength, BlockWeights},
-	EnsureRoot, EnsureSigned, RawOrigin, EnsureSignedBy, EnsureRootWithSuccess
+	EnsureRoot, EnsureSigned, RawOrigin, EnsureRootWithSuccess
 };
 
 use orderbook_primitives::types::TradingPair;
@@ -170,7 +170,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 380,
+    spec_version: 381,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 2,
@@ -442,6 +442,7 @@ parameter_types! {
     pub const Native: NativeOrWithId<u128> = NativeOrWithId::Native;
     pub TreasuryAccount: AccountId = Treasury::account_id();
     pub const AssetDeposit: Balance = 100 * DOLLARS;
+	pub const AssetAccountDeposit: Balance = DOLLARS;
     pub const ApprovalDeposit: Balance = 1 * DOLLARS;
     pub const StringLimit: u32 = 50;
     pub const MetadataDepositBase: Balance = 10 * DOLLARS;
@@ -2143,10 +2144,10 @@ impl pallet_assets::Config<Instance1> for Runtime {
     type AssetId = u128;
     type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
-    type CreateOrigin = AsEnsureOriginWithArg<EnsureSignedBy<AssetConversionOrigin, AccountId>>;
-    type ForceOrigin = EnsureRoot<AccountId>;
+    type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
+    type ForceOrigin = EnsureRootOrHalfCouncil;
     type AssetDeposit = AssetDeposit;
-    type AssetAccountDeposit = ConstU128<DOLLARS>;
+    type AssetAccountDeposit = AssetAccountDeposit;
     type MetadataDepositBase = MetadataDepositBase;
     type MetadataDepositPerByte = MetadataDepositPerByte;
     type ApprovalDeposit = ApprovalDeposit;
@@ -2170,10 +2171,10 @@ impl pallet_assets::Config<Instance2> for Runtime {
     type AssetId = u128;
     type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
-    type CreateOrigin = AsEnsureOriginWithArg<EnsureSignedBy<AssetConversionOrigin, AccountId>>;
-    type ForceOrigin = EnsureRoot<AccountId>;
+    type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
+    type ForceOrigin = EnsureRootOrHalfCouncil;
     type AssetDeposit = AssetDeposit;
-    type AssetAccountDeposit = ConstU128<DOLLARS>;
+    type AssetAccountDeposit = AssetAccountDeposit;
     type MetadataDepositBase = MetadataDepositBase;
     type MetadataDepositPerByte = MetadataDepositPerByte;
     type ApprovalDeposit = ApprovalDeposit;
@@ -2945,8 +2946,8 @@ type Migrations = (
     migrations::GrandpaStorageVersionMigration<Runtime>,
     migrations::IdentityStorageVersionMigration<Runtime>,
     migrations::ChildBountiesStorageVersionMigration<Runtime>,
-	// NOTE: Can be removed for mainnet upgrade, because 
     migrations::TokenGatewayLocalAssetsMigration,
+    migrations::AssetsStorageMigration,
     // Existing migrations
     // pallet_nomination_pools::migration::versioned::V6ToV7<Runtime>,
     pallet_alliance::migration::Migration<Runtime>,
