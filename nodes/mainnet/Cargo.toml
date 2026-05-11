@@ -67,7 +67,7 @@ sc-offchain = { workspace = true }
 sc-telemetry = { workspace = true }
 sc-statement-store = { workspace = true }
 sc-executor = { workspace = true }
-sc-service = { workspace = true }
+sc-service = { workspace = true, features = ["rocksdb"] }
 sp-io = { workspace = true }
 sp-api = { workspace = true }
 sp-block-builder = { workspace = true }
