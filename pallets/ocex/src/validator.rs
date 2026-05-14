@@ -118,11 +118,21 @@ impl<T: Config> Pallet<T> {
                 // Check if last processed snapshot id root from on-chain is same as our offchain root
                 if let Some(summary) = <Snapshots<T>>::get(info.snapshot_id) {
                     if summary.state_hash != root_clone {
-                        log::error!(target:"ocex","Last processed snapshot root is not same as on-chain root");
+                        // Trie state doesn't match on-chain snapshot — off-chain state is stale or
+                        // corrupted (e.g. node restarted, aggregator was down). Reset trie and
+                        // force checkpoint recovery regardless of snapshot gap.
+                        log::warn!(target:"ocex","Trie state mismatch with on-chain snapshot {:?}, triggering checkpoint recovery", info.snapshot_id);
                         store_trie_root(H256::zero());
-                        return Err("Last processed snapshot root is not same as on-chain root");
+                        let mut reset_info = info;
+                        reset_info.last_block = 0;
+                        // Force checkpoint loading by making the gap appear >= CHECKPOINT_BLOCKS
+                        reset_info.snapshot_id =
+                            next_nonce.saturating_sub(CHECKPOINT_BLOCKS);
+                        Self::store_state_info(reset_info, &mut state);
+                        reset_info
+                    } else {
+                        info
                     }
-                    info
                 } else if info.snapshot_id != 0 && info.snapshot_id != next_nonce {
                     log::error!(target:"ocex","Unable to load last processed snapshot summary from on-chain: {:?}",info.snapshot_id);
                     return Err("Unable to load last processed snapshot summary from on-chain");
@@ -136,6 +146,13 @@ impl<T: Config> Pallet<T> {
                 return Err(err);
             },
         };
+
+        // If no snapshot has ever been finalized, stale last_block from a previous chain run
+        // (e.g. mainnet) may be stored in off-chain storage. Reset it so import_blk
+        // accepts the first block from the aggregator's batch.
+        if state_info.snapshot_id == 0 {
+            state_info.last_block = 0;
+        }
 
         let mut last_processed_nonce = state_info.snapshot_id;
         // Check if we already processed this snapshot and updated our offchain state.
@@ -335,7 +352,7 @@ impl<T: Config> Pallet<T> {
         engine_messages: &BTreeMap<IngressMessages<T::AccountId>, EgressMessages<T::AccountId>>,
     ) -> Result<Vec<EgressMessages<T::AccountId>>, &'static str> {
         log::debug!(target:"ocex","Importing block: {:?}",blk);
-        if blk != state_info.last_block.saturating_add(1).into() {
+        if state_info.last_block != 0 && blk != state_info.last_block.saturating_add(1).into() {
             log::error!(target:"ocex","Last processed blk: {:?},  given: {:?}",state_info.last_block, blk);
             return Err("BlockOutofSequence");
         }
