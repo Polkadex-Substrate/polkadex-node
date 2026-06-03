@@ -39,6 +39,7 @@ members = [
   "primitives/thea",
   "primitives/bls",
   "pallets/thea",
+  "pallets/eth-bridge",
   "pallets/rewards/rpc",
   "pallets/rewards/rpc/runtime-api",
   "misc/load-testing",
@@ -249,6 +250,7 @@ pdex-migration = { path = "pallets/pdex-migration", default-features = false }
 pallet-ocex-lmp = { path = "pallets/ocex", default-features = false }
 pallet-lmp = { path = "pallets/liquidity-mining", default-features = false }
 thea = { path = "pallets/thea", default-features = false }
+pallet-eth-bridge = { path = "pallets/eth-bridge", default-features = false }
 thea-primitives = { path = "primitives/thea", default-features = false }
 pallet-rewards = { path = "pallets/rewards", default-features = false }
 rpc-assets-runtime-api = { path = "rpc/assets/runtime-api", default-features = false }

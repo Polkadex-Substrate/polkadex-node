@@ -591,6 +591,36 @@ impl pallet_token_gateway::Config for Runtime {
     type WeightInfo = weights::pallet_token_gateway::WeightInfo<Runtime>;
 }
 
+// ── Ethereum ↔ Polkadex WETH bridge ───────────────────────────────────────
+//
+// Uses PalletAssetsBridge which delegates mint/burn directly to pallet-assets
+// (Instance1, AssetId = u128). No secondary registry needed in the runtime —
+// the pallet's TokenRegistry maps Ethereum addresses to pallet-assets IDs.
+//
+// Setup after deployment (via sudo or governance):
+//   1. EthBridge::set_authorized_relayer(relayer_account)
+//   2. EthBridge::set_bridge_contract([PolkadexBridge.sol address on Sepolia])
+//   3. Create WETH asset in pallet-assets:
+//        Assets::force_create(origin, weth_asset_id, admin, true, 1)
+//   4. EthBridge::register_token(
+//        [WETH Sepolia address],  // 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14
+//        weth_asset_id,           // the u128 created above
+//        1,                       // must match TokenRegistry.sol's assetId
+//        18,                      // WETH has 18 Ethereum decimals
+//      )
+//   5. Grant this pallet admin rights over the WETH asset:
+//        Assets::transfer_ownership(origin, weth_asset_id, EthBridge::account_id())
+impl pallet_eth_bridge::Config for Runtime {
+    /// Routes mint/burn through pallet-assets Instance1.
+    /// PalletAssetsBridge<Assets> satisfies BridgeAssets<AccountId> because:
+    ///   - AccountId32: Eq  ✓
+    ///   - pallet_assets::Pallet<Runtime, Instance1>: Mutate<AccountId, AssetId=u128, Balance=u128> ✓
+    type BridgeAssets = pallet_eth_bridge::PalletAssetsBridge<Assets>;
+
+    /// Use placeholder weights until runtime benchmarks are run.
+    type WeightInfo = pallet_eth_bridge::pallet::TestWeightInfo;
+}
+
 impl pallet_ismp::Config for Runtime {
     // Permissioned origin who can create or update consensus clients
     // type AdminOrigin = EnsureRoot<AccountId>;
@@ -2652,6 +2682,9 @@ mod runtime {
 
     #[runtime::pallet_index(71)]
     pub type TokenGateway = pallet_token_gateway::Pallet<Runtime>;
+
+    #[runtime::pallet_index(72)]
+    pub type EthBridge = pallet_eth_bridge::Pallet<Runtime>;
 }
 
 //#[cfg(not(feature = "runtime-benchmarks"))]
