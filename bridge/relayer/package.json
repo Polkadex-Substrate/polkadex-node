@@ -1,0 +1,28 @@
+{
+  "name": "polkadex-eth-bridge-relayer",
+  "version": "1.0.0",
+  "description": "Off-chain relayer connecting the Polkadex Ethereum bridge contracts with the pallet-eth-bridge Substrate pallet",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ethereumjs/rlp": "^5.0.2",
+    "@ethereumjs/trie": "^6.2.0",
+    "@ethereumjs/util": "^9.1.0",
+    "@polkadot/api": "^14.3.1",
+    "@polkadot/keyring": "^13.2.3",
+    "@polkadot/util": "^13.2.3",
+    "@polkadot/util-crypto": "^13.2.3",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0"
+  }
+}

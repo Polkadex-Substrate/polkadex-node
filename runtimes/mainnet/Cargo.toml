@@ -124,6 +124,7 @@ pdex-migration = { workspace = true }
 pallet-ocex-lmp = { workspace = true }
 pallet-lmp = { workspace = true }
 thea = { workspace = true }
+pallet-eth-bridge = { workspace = true }
 pallet-rewards = { workspace = true }
 rpc-assets-runtime-api = { workspace = true }
 pallet-rewards-runtime-api = { workspace = true }
@@ -214,6 +215,7 @@ std = [
 	"rpc-assets-runtime-api/std",
 	"pallet-rewards-runtime-api/std",
 	"thea/std",
+	"pallet-eth-bridge/std",
 	"pallet-rewards/std",
 	"frame-try-runtime?/std",
 	"orderbook-primitives/std",
@@ -301,6 +303,7 @@ runtime-benchmarks = [
 	"pdex-migration/runtime-benchmarks",
 	"pallet-rewards/runtime-benchmarks",
 	"pallet-lmp/runtime-benchmarks",
+	"pallet-eth-bridge/runtime-benchmarks",
 	"pallet-asset-conversion/runtime-benchmarks",
 	"pallet-asset-conversion-tx-payment/runtime-benchmarks",
 	"pallet-asset-tx-payment/runtime-benchmarks",
@@ -345,6 +348,7 @@ try-runtime = [
 	"pallet-ocex-lmp/try-runtime",
 	"pallet-lmp/try-runtime",
 	"pallet-rewards/try-runtime",
+	"pallet-eth-bridge/try-runtime",
 	"pallet-asset-conversion/try-runtime",
 	"pallet-asset-conversion-tx-payment/try-runtime",
 	"pallet-statement/try-runtime",

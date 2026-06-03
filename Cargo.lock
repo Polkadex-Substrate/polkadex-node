@@ -8261,6 +8261,7 @@ dependencies = [
  "pallet-democracy",
  "pallet-election-provider-multi-phase",
  "pallet-elections-phragmen",
+ "pallet-eth-bridge",
  "pallet-grandpa",
  "pallet-hyperbridge",
  "pallet-identity",
@@ -9542,6 +9543,25 @@ dependencies = [
  "sp-npos-elections",
  "sp-runtime",
  "sp-staking",
+]
+
+[[package]]
+name = "pallet-eth-bridge"
+version = "1.0.0"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "log",
+ "pallet-assets",
+ "pallet-balances",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-keystore",
+ "sp-runtime",
+ "sp-std",
 ]
 
 [[package]]

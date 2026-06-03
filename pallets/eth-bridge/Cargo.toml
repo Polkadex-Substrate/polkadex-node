@@ -1,0 +1,45 @@
+[package]
+name = "pallet-eth-bridge"
+version = "1.0.0"
+edition = "2021"
+description = "Ethereum → Polkadex bridge pallet. Verifies Ethereum deposit events via MPT receipt proofs and credits bridged WETH to Polkadex accounts."
+
+[dependencies]
+log                  = { workspace = true, default-features = false }
+parity-scale-codec   = { workspace = true, default-features = false, features = ["derive"] }
+scale-info           = { workspace = true, default-features = false, features = ["derive"] }
+frame-support        = { workspace = true, default-features = false }
+frame-system         = { workspace = true, default-features = false }
+sp-runtime           = { workspace = true, default-features = false }
+sp-std               = { workspace = true, default-features = false }
+sp-io                = { workspace = true, default-features = false }
+sp-core              = { workspace = true, default-features = false }
+frame-benchmarking   = { workspace = true, default-features = false, optional = true }
+
+[dev-dependencies]
+pallet-balances = { workspace = true, features = ["std"] }
+pallet-assets   = { workspace = true, features = ["std"] }
+sp-io           = { workspace = true, features = ["std"] }
+sp-keystore     = { workspace = true }
+
+[features]
+default = ["std"]
+std = [
+  "log/std",
+  "parity-scale-codec/std",
+  "scale-info/std",
+  "frame-support/std",
+  "frame-system/std",
+  "sp-runtime/std",
+  "sp-std/std",
+  "sp-io/std",
+  "sp-core/std",
+  "frame-benchmarking?/std",
+]
+runtime-benchmarks = [
+  "frame-benchmarking/runtime-benchmarks",
+  "frame-support/runtime-benchmarks",
+  "frame-system/runtime-benchmarks",
+  "sp-runtime/runtime-benchmarks",
+]
+try-runtime = ["frame-support/try-runtime"]
