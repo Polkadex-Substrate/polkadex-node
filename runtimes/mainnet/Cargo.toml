@@ -114,8 +114,7 @@ pallet-ismp = { workspace = true }
 ismp-parachain = { workspace = true }
 ismp-grandpa = { workspace = true }
 pallet-ismp-runtime-api = { workspace = true }
-pallet-hyperbridge = { workspace = true }
-pallet-token-gateway = { workspace = true }
+pallet-hyper-fungible-token = { workspace = true }
 
 # CUSTOM
 polkadex-primitives = { workspace = true }
@@ -250,8 +249,7 @@ std = [
 	"ismp-parachain/std",
 	"ismp-grandpa/std",
 	"pallet-ismp-runtime-api/std",
-	"pallet-hyperbridge/std",
-	"pallet-token-gateway/std",
+	"pallet-hyper-fungible-token/std",
 ]
 runtime-benchmarks = [
 	"sp-storage",
@@ -293,7 +291,7 @@ runtime-benchmarks = [
 	"pallet-society/runtime-benchmarks",
 	"pallet-staking/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
-	"pallet-token-gateway/runtime-benchmarks",
+	"pallet-hyper-fungible-token/runtime-benchmarks",
 	"pallet-treasury/runtime-benchmarks",
 	"pallet-tx-pause/runtime-benchmarks",
 	"pallet-utility/runtime-benchmarks",
