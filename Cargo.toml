@@ -234,13 +234,12 @@ cumulus-client-consensus-aura = { version = "0.28.1", default-features = false }
 polkadot-parachain = { version = "20.0.0", package = "polkadot-parachain-primitives", default-features = false }
 polkadot-runtime-common = { version = "24.0.0", default-features = false }
 # ISMP
-ismp = { version = "=2512.0.0", default-features = false }
-pallet-ismp = { version = "=2512.1.0", default-features = false }
+ismp = { version = "=2512.1.0", default-features = false }
+pallet-ismp = { version = "=2512.2.0", default-features = false }
 ismp-parachain = { version = "=2512.1.0", default-features = false }
-ismp-grandpa = { version = "=2512.0.0", default-features = false }
-pallet-ismp-runtime-api = { version = "=2512.0.0", default-features = false }
-pallet-hyperbridge = { version = "=2512.0.0", default-features = false }
-pallet-token-gateway = { version = "=2512.0.0", default-features = false }
+ismp-grandpa = { version = "=2512.1.0", default-features = false }
+pallet-ismp-runtime-api = { version = "=2512.1.0", default-features = false }
+pallet-hyper-fungible-token = { version = "=2512.0.0", default-features = false }
 # CUSTOM
 polkadex-primitives = { path = "primitives/polkadex", default-features = false }
 orderbook-primitives = { path = "primitives/orderbook", default-features = false }
