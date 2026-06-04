@@ -123,8 +123,9 @@ use sp_consensus_beefy::{
 use ismp::Error as IsmpError;
 use ismp::host::StateMachine;
 use ismp::module::IsmpModule;
-use ismp::router::{IsmpRouter, Request, Response};
+use ismp::router::{GetResponse, IsmpRouter, Request};
 use ismp::consensus::{ConsensusClientId, StateMachineHeight, StateMachineId};
+use pallet_ismp::ModuleId;
 //use weights::{ismp_parachain as ismp_parachain_weight};
 use weights::{ismp_grandpa as ismp_grandpa_weight};
 
@@ -170,7 +171,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 383,
+    spec_version: 384,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 2,
@@ -558,9 +559,9 @@ const_assert!(DesiredMembers::get() <= CouncilMaxMembers::get());
 //	type RootOrigin = EnsureRoot<AccountId>;
 //}
 
-impl pallet_hyperbridge::Config for Runtime {
-	type IsmpHost = Ismp;
-}
+// impl pallet_hyperbridge::Config for Runtime {
+// 	type IsmpHost = Ismp;
+// }
 
 impl ismp_grandpa::Config for Runtime {
 	type IsmpHost = Ismp;
@@ -578,17 +579,16 @@ impl Get<AccountId> for AssetAdmin {
 	}
 }
 
-impl pallet_token_gateway::Config for Runtime {
-    type Dispatcher = Hyperbridge;
-    type NativeCurrency = Balances;
-    type AssetAdmin = AssetAdmin;
-    // type CreateOrigin = EnsureRoot<AccountId>;
-	type CreateOrigin = EnsureRootOrHalfCouncil;
+
+impl pallet_hyper_fungible_token::Config for Runtime {
+    type Dispatcher = Ismp;
     type Assets = Assets;
-    type NativeAssetId = NativeAssetId;
+    type NativeCurrency = Balances;
+    type NativeAssetId = PolkadexAssetId;
+    type CreateOrigin = EnsureRootOrHalfCouncil;
     type Decimals = Decimals;
     type EvmToSubstrate = ();
-    type WeightInfo = weights::pallet_token_gateway::WeightInfo<Runtime>;
+    type WeightInfo = ();
 }
 
 impl pallet_ismp::Config for Runtime {
@@ -624,21 +624,35 @@ impl pallet_ismp::Config for Runtime {
 pub struct Router;
 impl IsmpRouter for Router {
     fn module_for_id(&self, id: Vec<u8>) -> Result<Box<dyn IsmpModule>, anyhow::Error> {
-        //let module = match id.as_slice() {
-        //    YOUR_MODULE_ID => Box::new(YourModule::default()),
-        //    _ => Err(IsmpError::ModuleNotFound(id))?
-        //};
-        match id.as_slice() {
-            pallet_hyperbridge::PALLET_HYPERBRIDGE_ID => {
-                Ok(Box::new(pallet_hyperbridge::Pallet::<Runtime>::default()))
-            }
-            id if TokenGateway::is_token_gateway(id) => {
-                Ok(Box::new(pallet_token_gateway::Pallet::<Runtime>::default()))
-            }
-            _ => Err(IsmpError::ModuleNotFound(id))?,
-        }
+        let module_id = ModuleId::from_bytes(&id).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let module = match module_id {
+            pallet_hyper_fungible_token::PALLET_ID =>
+                Box::new(pallet_hyper_fungible_token::Pallet::<Runtime>::default()),
+            _ => Err(IsmpError::ModuleNotFound(id))?
+        };
+        Ok(module)
     }
 }
+
+// #[derive(Default)]
+// pub struct Router;
+// impl IsmpRouter for Router {
+//     fn module_for_id(&self, id: Vec<u8>) -> Result<Box<dyn IsmpModule>, anyhow::Error> {
+//         //let module = match id.as_slice() {
+//         //    YOUR_MODULE_ID => Box::new(YourModule::default()),
+//         //    _ => Err(IsmpError::ModuleNotFound(id))?
+//         //};
+//         match id.as_slice() {
+//             // pallet_hyperbridge::PALLET_HYPERBRIDGE_ID => {
+//             //     Ok(Box::new(pallet_hyperbridge::Pallet::<Runtime>::default()))
+//             // }
+// 			pallet_hyper_fungible_token::PALLET_ID => {
+//                 Ok(Box::new(pallet_hyper_fungible_token::Pallet::<Runtime>::default()))
+// 			}
+//             _ => Err(IsmpError::ModuleNotFound(id))?,
+//         }
+//     }
+// }
 
 /// Some custom module capable of processing some incoming/request or response.
 /// This could also be a pallet itself.
@@ -2647,11 +2661,15 @@ mod runtime {
     #[runtime::pallet_index(69)]
     pub type IsmpGrandpa = ismp_grandpa::Pallet<Runtime>;
 
-    #[runtime::pallet_index(70)]
-    pub type Hyperbridge = pallet_hyperbridge::Pallet<Runtime>;
+    // #[runtime::pallet_index(70)]
+    // pub type Hyperbridge = pallet_hyperbridge::Pallet<Runtime>;
 
-    #[runtime::pallet_index(71)]
-    pub type TokenGateway = pallet_token_gateway::Pallet<Runtime>;
+    // #[runtime::pallet_index(71)]
+	// pub type TokenGateway = pallet_token_gateway::Pallet<Runtime>;
+
+    #[runtime::pallet_index(72)]
+    pub type HyperFungibleToken = pallet_hyper_fungible_token::Pallet<Runtime>;
+
 }
 
 //#[cfg(not(feature = "runtime-benchmarks"))]
@@ -2946,8 +2964,6 @@ type Migrations = (
     migrations::GrandpaStorageVersionMigration<Runtime>,
     migrations::IdentityStorageVersionMigration<Runtime>,
     migrations::ChildBountiesStorageVersionMigration<Runtime>,
-    migrations::TokenGatewayLocalAssetsMigration,
-    migrations::TokenGatewayStorageKeyMigration,
     migrations::AssetsStorageMigration,
     // Existing migrations
     // pallet_nomination_pools::migration::versioned::V6ToV7<Runtime>,
@@ -2985,7 +3001,7 @@ use orderbook_primitives::ObCheckpointRaw;
 #[cfg(feature = "runtime-benchmarks")]
 mod benches {
 	frame_benchmarking::define_benchmarks!(
-		[pallet_token_gateway, TokenGateway]
+		[pallet_hyper_fungible_token, HyperFungibleToken]
 		[pallet_ocex_lmp, OCEX]
 		[pdex_migration, PDEXMigration]
 		[pallet_rewards, Rewards]
@@ -3789,7 +3805,7 @@ impl_runtime_apis! {
         }
 
         /// Get actual requests
-        fn responses(commitments: Vec<H256>) -> Vec<Response> {
+        fn responses(commitments: Vec<H256>) -> Vec<GetResponse> {
           pallet_ismp::Pallet::<Runtime>::responses(commitments)
         }
     }
