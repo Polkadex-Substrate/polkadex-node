@@ -3,6 +3,7 @@ use frame_support::{
     traits::{OnRuntimeUpgrade, Get, GetStorageVersion},
     weights::Weight
 };
+use sp_core::storage::ChildInfo;
 use sp_std::marker::PhantomData;
 use polkadex_primitives::auction::FeeDistribution;
 use sp_runtime::{BoundToRuntimeAppPublic, KeyTypeId, RuntimeAppPublic};
@@ -457,5 +458,26 @@ fn rekey_assets_map(pallet_name: &[u8], storage_name: &[u8], old_key_len: usize)
     }
 
     (reads, writes)
+}
+
+/// Clears all stale GET request commitments left by the old pallet-token-gateway from
+/// pallet-ismp's ISMPv2 child trie. These requests use a StateMachine variant encoding
+/// that no longer exists, causing IsmpRuntimeApi_block_events to fail in current blocks
+/// whenever a timeout event is emitted for them.
+pub struct ClearIsmpStaleRequests;
+impl OnRuntimeUpgrade for ClearIsmpStaleRequests {
+    fn on_runtime_upgrade() -> Weight {
+        // ISMPv2 is the child trie prefix used by pallet-ismp
+        let child_key = ChildInfo::new_default(b"ISMPv2");
+        let child_key = child_key.storage_key();
+
+        sp_io::default_child_storage::clear_prefix(child_key, b"RequestCommitments", None);
+        sp_io::default_child_storage::clear_prefix(child_key, b"ResponseCommitments", None);
+
+        log::info!("🧹 ClearIsmpStaleRequests: cleared old pallet-token-gateway request/response commitments");
+
+        // Generous fixed weight — we're clearing an unknown number of items
+        <Runtime as frame_system::Config>::DbWeight::get().writes(1000)
+    }
 }
 
