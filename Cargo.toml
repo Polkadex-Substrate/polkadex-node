@@ -236,7 +236,8 @@ polkadot-runtime-common = { version = "24.0.0", default-features = false }
 # ISMP
 ismp = { version = "=2512.1.0", default-features = false }
 pallet-ismp = { version = "=2512.2.0", default-features = false }
-ismp-parachain = { version = "=2512.1.0", default-features = false }
+ismp-rpc = { version = "=2512.1.0", default-features = false, package = "pallet-ismp-rpc"}
+ismp-parachain = { version = "=2512.3.0", default-features = false }
 ismp-grandpa = { version = "=2512.1.0", default-features = false }
 pallet-ismp-runtime-api = { version = "=2512.1.0", default-features = false }
 pallet-hyper-fungible-token = { version = "=2512.0.0", default-features = false }
@@ -255,7 +256,6 @@ pallet-rewards-runtime-api = { path = "pallets/rewards/rpc/runtime-api", default
 pallet-ocex-runtime-api = { path = "pallets/ocex/rpc/runtime-api", default-features = false }
 node-polkadex-runtime = { path = "runtimes/mainnet", default-features = false }
 rpc-assets = { path = "rpc/assets", default-features = false }
-ismp-rpc = { path = "rpc/ismp", default-features = false }
 swap-rpc = { path = "rpc/swap", default-features = false }
 pallet-rewards-rpc = { path = "pallets/rewards/rpc", default-features = false }
 pallet-ocex-rpc = { path = "pallets/ocex/rpc", default-features = false }

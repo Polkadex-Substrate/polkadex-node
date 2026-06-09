@@ -6880,9 +6880,9 @@ dependencies = [
 
 [[package]]
 name = "ismp-parachain"
-version = "2512.1.0"
+version = "2512.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "602ed18564433b37463de5e8dab1c665f3b410c6d38a136c25bd6d6cae8bca7f"
+checksum = "7c4e20f51a845adb788cce8972c751819f847d0f06d15f744c3cfd446ccba02d"
 dependencies = [
  "hex",
  "hex-literal 0.4.1",
@@ -6895,39 +6895,6 @@ dependencies = [
  "scale-info",
  "serde",
  "substrate-state-machine",
-]
-
-[[package]]
-name = "ismp-rpc"
-version = "5.4.1"
-dependencies = [
- "anyhow",
- "frame-support",
- "hash-db",
- "hex",
- "ismp",
- "jsonrpsee",
- "orderbook-primitives",
- "pallet-asset-conversion",
- "pallet-ismp",
- "pallet-ismp-runtime-api",
- "parity-scale-codec",
- "parking_lot 0.12.4",
- "polkadex-primitives",
- "sc-client-api",
- "sc-rpc",
- "sc-rpc-api",
- "serde",
- "serde_json",
- "sp-api",
- "sp-blockchain",
- "sp-core",
- "sp-offchain",
- "sp-rpc",
- "sp-runtime",
- "sp-trie",
- "tokio",
- "trie-db",
 ]
 
 [[package]]
@@ -10150,6 +10117,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-ismp-rpc"
+version = "2512.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65815cfddc05c2505b58b39bc90088334f18768eccc9c4cf607edc092d335590"
+dependencies = [
+ "anyhow",
+ "hash-db",
+ "hex",
+ "hex-literal 0.4.1",
+ "ismp",
+ "jsonrpsee",
+ "pallet-ismp",
+ "pallet-ismp-runtime-api",
+ "parity-scale-codec",
+ "polkadot-sdk",
+ "serde",
+ "serde_json",
+ "tower 0.4.13",
+ "trie-db",
+]
+
+[[package]]
 name = "pallet-ismp-runtime-api"
 version = "2512.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12045,7 +12034,6 @@ dependencies = [
  "frame-try-runtime",
  "futures 0.3.31",
  "hex-literal 1.1.0",
- "ismp-rpc",
  "itertools 0.14.0",
  "jsonrpsee",
  "log",
@@ -12056,6 +12044,7 @@ dependencies = [
  "pallet-asset-conversion-tx-payment",
  "pallet-beefy",
  "pallet-im-online",
+ "pallet-ismp-rpc",
  "pallet-ismp-runtime-api",
  "pallet-ocex-lmp",
  "pallet-ocex-rpc",
@@ -13384,8 +13373,10 @@ dependencies = [
  "polkadot-runtime-parachains",
  "polkadot-sdk-frame",
  "polkadot-service",
+ "sc-client-api",
  "sc-client-db",
  "sc-executor",
+ "sc-rpc",
  "sc-service",
  "slot-range-helper",
  "sp-api",
@@ -13394,6 +13385,7 @@ dependencies = [
  "sp-arithmetic",
  "sp-authority-discovery",
  "sp-block-builder",
+ "sp-blockchain",
  "sp-consensus-aura",
  "sp-consensus-babe",
  "sp-consensus-beefy",
