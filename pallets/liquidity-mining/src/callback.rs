@@ -182,7 +182,9 @@ impl<T: Config> LiquidityMiningCrowdSourcePallet<T::AccountId> for Pallet<T> {
 			.to_u128()
 			.ok_or(Error::<T>::ConversionError)?
 			.saturated_into();
-		//FIXME: What are we doing with base_freed and quote_freed?
+		// C-39: base_freed and quote_freed remain in the pool account (pool_id).
+		// LPs reclaim their proportional share by calling `claim_force_closed_pool_funds`.
+		// The amounts are reported in the event for frontend visibility.
 		Self::deposit_event(Event::<T>::PoolForceClosed {
 			market,
 			pool: market_maker.clone(),

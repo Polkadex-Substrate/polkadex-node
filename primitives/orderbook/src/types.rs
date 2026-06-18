@@ -260,11 +260,14 @@ pub enum UserActions<AccountId: Ord + Codec + Clone + TypeInfo> {
 	Reset,
 	/// Withdraw operation requested.( request, stid)
 	WithdrawV1(WithdrawalRequest<AccountId>, u64),
-	/// One min LMP Report ( market, epoch, index, total_score, Q_scores)
+	/// One min LMP Report ( market, total_score, q_scores, maker_volume, uptime_present)
+	/// maker_volume and uptime_present were added to unblock TR-02/TR-03 (orderbook M2).
 	OneMinLMPReport(
 		TradingPair,
 		Decimal,
 		#[serde_as(as = "Vec<(_, _)>")] BTreeMap<AccountId, Decimal>,
+		#[serde_as(as = "Vec<(_, _)>")] BTreeMap<AccountId, Decimal>,
+		#[serde_as(as = "Vec<(_, _)>")] BTreeMap<AccountId, bool>,
 	),
 }
 

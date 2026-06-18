@@ -53,14 +53,14 @@ use sp_std::{ops::Div, prelude::*};
 // Re-export pallet items so that they can be accessed from the crate namespace.
 use frame_support::traits::fungible::Inspect as InspectNative;
 use frame_system::pallet_prelude::BlockNumberFor;
-use orderbook_primitives::lmp::LMPMarketConfig;
+use orderbook_primitives::lmp::{DMMCommitment, LMPMarketConfig, MarketTier};
 use orderbook_primitives::ocex::TradingPairConfig;
 use orderbook_primitives::traits::OrderbookOperations;
 use orderbook_primitives::{
 	types::{AccountAsset, TradingPair},
 	SnapshotSummary, ValidatorSet, GENESIS_AUTHORITY_SET_ID,
 };
-use sp_core::H160;
+use sp_core::{H160, H256};
 use sp_std::vec::Vec;
 
 #[cfg(test)]
@@ -101,6 +101,7 @@ pub mod aggregator;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 mod lmp;
+pub mod migrations;
 pub mod rpc;
 mod session;
 mod settlement;
@@ -283,14 +284,27 @@ pub mod pallet {
 		/// CrossChain Withdrawal
 		type CrossChainGadget: CrossChainWithdraw<Self::AccountId>;
 
+		/// Maximum number of DMM commitments per trading pair per epoch.
+		#[pallet::constant]
+		type MaxDMMsPerPair: Get<u32>;
+
 		/// Type representing the weight of this pallet
 		type WeightInfo: OcexWeightInfo;
 	}
 
+	/// Approx blocks per day at 12-second block time.
+	pub(crate) const BLOCKS_PER_DAY: u32 = 7200;
+
 	// Simple declaration of the `Pallet` type. It is placeholder we use to implement traits and
 	// method.
+	/// Current storage version. Increment when a migration is added.
+	/// V0 → V1: adds `tier: MarketTier` field to `LMPMarketConfig` inside `LMPConfig` / `ExpectedLMPConfig`.
+	const STORAGE_VERSION: frame_support::traits::StorageVersion =
+		frame_support::traits::StorageVersion::new(1);
+
 	#[pallet::pallet]
 	#[pallet::without_storage_info]
+	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
 	#[pallet::error]
@@ -401,6 +415,34 @@ pub mod pallet {
 		WithdrawalFeeBurnFailed,
 		/// Trading fees burn failed
 		TradingFeesBurnFailed,
+		/// Market config not found for the given pair in the LMP epoch config
+		MarketConfigNotFound,
+		// P7
+		/// Demote target tier must be lower than the current tier
+		InvalidTierDemotion,
+		// P4
+		/// Daily volatility trigger cap (6) reached for this pair
+		DailyVolatilityCapReached,
+		// P5
+		/// DMM registration is only allowed for future epochs
+		EpochAlreadyStarted,
+		/// committed_uptime must be in range 0–100
+		InvalidUptimeCommitment,
+		/// DMMRegistry is full for this pair/epoch (MaxDMMsPerPair reached)
+		TooManyDMMs,
+		/// DMM's actual uptime did not meet its committed threshold
+		DMMUptimeNotMet,
+		/// No DMM commitment found for the caller in the registry
+		DMMCommitmentNotFound,
+		/// No DMM performance record found for this epoch/pair/account
+		DMMPerformanceNotFound,
+		// P6
+		/// No Merkle root stored for this epoch/pair
+		MerkleRootNotFound,
+		/// Merkle proof verification failed
+		InvalidMerkleProof,
+		/// Merkle-based reward already claimed for this account/epoch
+		MerkleRewardAlreadyClaimed,
 	}
 
 	#[pallet::hooks]
@@ -784,6 +826,38 @@ pub mod pallet {
 			Ok(())
 		}
 
+		/// Sets the market tier for an LMP-enabled trading pair.
+		/// Updates both `ExpectedLMPConfig` (next epoch) and the current epoch's `LMPConfig`.
+		/// Callable by governance only.
+		#[pallet::call_index(9)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 2))]
+		pub fn set_pair_tier(
+			origin: OriginFor<T>,
+			pair: TradingPair,
+			tier: MarketTier,
+		) -> DispatchResult {
+			T::GovernanceOrigin::ensure_origin(origin)?;
+			// Update next epoch config
+			<ExpectedLMPConfig<T>>::try_mutate(|maybe_config| {
+				let config = maybe_config.as_mut().ok_or(Error::<T>::LMPConfigNotFound)?;
+				if let Some(market_config) = config.config.get_mut(&pair) {
+					market_config.tier = tier;
+				}
+				Ok::<(), DispatchError>(())
+			})?;
+			// Also update the current epoch config if the pair exists there
+			let current_epoch = <LMPEpoch<T>>::get();
+			<LMPConfig<T>>::mutate(current_epoch, |maybe_config| {
+				if let Some(config) = maybe_config {
+					if let Some(market_config) = config.config.get_mut(&pair) {
+						market_config.tier = tier;
+					}
+				}
+			});
+			Self::deposit_event(Event::<T>::MarketTierSet { pair, tier });
+			Ok(())
+		}
+
 		/// This extrinsic will pause/resume the exchange according to flag.
 		/// If flag is set to false it will stop the exchange.
 		/// If flag is set to true it will resume the exchange.
@@ -997,6 +1071,7 @@ pub mod pallet {
 						min_maker_volume: Decimal::from(market_config.min_maker_volume).div(unit),
 						max_spread: Decimal::from(market_config.max_spread).div(unit),
 						min_depth: Decimal::from(market_config.min_depth).div(unit),
+						tier: market_config.tier,
 					},
 				);
 			}
@@ -1069,6 +1144,271 @@ pub mod pallet {
 			<SnapshotNonce<T>>::put(id);
 			<Snapshots<T>>::insert(id, summary);
 			Self::deposit_event(crate::pallet::Event::<T>::SnapshotProcessed(id));
+			Ok(())
+		}
+
+		// ── P7: Governance Extrinsics ─────────────────────────────────────────
+
+		/// Suspends LMP rewards for a trading pair (P7).
+		/// Suspended pairs are skipped in Q-score computation and emit no rewards.
+		/// To re-enable, call `set_lmp_epoch_config` with the pair included again.
+		#[pallet::call_index(28)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
+		pub fn suspend_lmp_rewards(origin: OriginFor<T>, pair: TradingPair) -> DispatchResult {
+			T::GovernanceOrigin::ensure_origin(origin)?;
+			<SuspendedLMPPairs<T>>::insert(pair, true);
+			// Also remove the pair from ExpectedLMPConfig so the next epoch won't include it
+			<ExpectedLMPConfig<T>>::mutate(|maybe_config| {
+				if let Some(config) = maybe_config {
+					config.config.remove(&pair);
+				}
+			});
+			Self::deposit_event(Event::<T>::LMPRewardsSuspended { pair });
+			Ok(())
+		}
+
+		/// Demotes a trading pair to a lower market tier (P7).
+		/// Validates that `new_tier < current_tier` before applying.
+		#[pallet::call_index(29)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 2))]
+		pub fn demote_pair_tier(
+			origin: OriginFor<T>,
+			pair: TradingPair,
+			new_tier: MarketTier,
+		) -> DispatchResult {
+			T::GovernanceOrigin::ensure_origin(origin)?;
+			// Verify it is actually a demotion (new_tier must be < current_tier)
+			let current_tier = <ExpectedLMPConfig<T>>::get()
+				.and_then(|c| c.config.get(&pair).map(|m| m.tier))
+				.unwrap_or(MarketTier::Tier3);
+			ensure!(new_tier < current_tier, Error::<T>::InvalidTierDemotion);
+			// Reuse set_pair_tier logic
+			<ExpectedLMPConfig<T>>::try_mutate(|maybe_config| {
+				let config = maybe_config.as_mut().ok_or(Error::<T>::LMPConfigNotFound)?;
+				if let Some(market_config) = config.config.get_mut(&pair) {
+					market_config.tier = new_tier;
+				}
+				Ok::<(), DispatchError>(())
+			})?;
+			let current_epoch = <LMPEpoch<T>>::get();
+			<LMPConfig<T>>::mutate(current_epoch, |maybe_config| {
+				if let Some(config) = maybe_config {
+					if let Some(market_config) = config.config.get_mut(&pair) {
+						market_config.tier = new_tier;
+					}
+				}
+			});
+			Self::deposit_event(Event::<T>::MarketTierDemoted { pair, new_tier });
+			Ok(())
+		}
+
+		// ── P4: Volatility Multiplier ─────────────────────────────────────────
+
+		/// Records a volatility multiplier trigger for a trading pair (P4).
+		/// Capped at 6 triggers per pair per day. Sets `VolatilityActive[pair] = true`.
+		/// Callable by governance or the orderbook operator (EnclaveOrigin).
+		#[pallet::call_index(25)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 2))]
+		pub fn trigger_volatility_multiplier(
+			origin: OriginFor<T>,
+			pair: TradingPair,
+		) -> DispatchResult {
+			// Accept governance root OR enclave/operator origin
+			let is_governance = T::GovernanceOrigin::ensure_origin(origin.clone()).is_ok();
+			if !is_governance {
+				T::EnclaveOrigin::ensure_origin(origin)?;
+			}
+			let current_block: u32 =
+				frame_system::Pallet::<T>::current_block_number().saturated_into();
+			let day_index: u32 = current_block / BLOCKS_PER_DAY;
+			let epoch = <LMPEpoch<T>>::get();
+			let count = <VolatilityTriggerCount<T>>::get((epoch, pair, day_index));
+			ensure!(count < 6, Error::<T>::DailyVolatilityCapReached);
+			<VolatilityTriggerCount<T>>::insert((epoch, pair, day_index), count + 1);
+			<VolatilityActive<T>>::insert(pair, true);
+			Self::deposit_event(Event::<T>::VolatilityMultiplierTriggered { pair, epoch });
+			Ok(())
+		}
+
+		// ── P5: DMM System ────────────────────────────────────────────────────
+
+		/// Register a DMM commitment for a future epoch (P5).
+		/// Only callable before the target epoch starts (epoch > current).
+		#[pallet::call_index(10)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
+		pub fn register_dmm(
+			origin: OriginFor<T>,
+			epoch: u16,
+			pair: TradingPair,
+			max_spread: u128,
+			min_depth: u128,
+			committed_uptime: u8,
+			stipend: u128,
+		) -> DispatchResult {
+			let account = ensure_signed(origin)?;
+			let current_epoch = <LMPEpoch<T>>::get();
+			ensure!(epoch > current_epoch, Error::<T>::EpochAlreadyStarted);
+			ensure!(committed_uptime <= 100, Error::<T>::InvalidUptimeCommitment);
+			let commitment = DMMCommitment {
+				account: account.clone(),
+				max_spread,
+				min_depth,
+				committed_uptime,
+				stipend,
+			};
+			<DMMRegistry<T>>::try_mutate(epoch, pair, |vec| {
+				vec.try_push(commitment).map_err(|_| Error::<T>::TooManyDMMs)
+			})?;
+			Self::deposit_event(Event::<T>::DMMRegistered { epoch, pair, account });
+			Ok(())
+		}
+
+		/// Governance confirms the winning DMM bids for an epoch/pair (P5).
+		/// Filters `DMMRegistry` to only retain entries in `accounts`.
+		#[pallet::call_index(11)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
+		pub fn confirm_dmm_selection(
+			origin: OriginFor<T>,
+			epoch: u16,
+			pair: TradingPair,
+			accounts: BoundedVec<T::AccountId, T::MaxDMMsPerPair>,
+		) -> DispatchResult {
+			T::GovernanceOrigin::ensure_origin(origin)?;
+			<DMMRegistry<T>>::mutate(epoch, pair, |registry| {
+				registry.retain(|c| accounts.contains(&c.account));
+			});
+			Self::deposit_event(Event::<T>::DMMSelected { epoch, pair });
+			Ok(())
+		}
+
+		/// Engine operator records actual uptime for each DMM at epoch end (P5).
+		#[pallet::call_index(13)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(0, 1))]
+		pub fn submit_dmm_performance(
+			origin: OriginFor<T>,
+			epoch: u16,
+			pair: TradingPair,
+			performance: BoundedVec<(T::AccountId, u8), T::MaxDMMsPerPair>,
+		) -> DispatchResult {
+			T::EnclaveOrigin::ensure_origin(origin)?;
+			for (account, uptime_pct) in performance.iter() {
+				<DMMPerformance<T>>::insert((epoch, pair, account.clone()), uptime_pct);
+			}
+			Ok(())
+		}
+
+		/// DMM claims their stipend if actual uptime >= committed uptime (P5).
+		#[pallet::call_index(22)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(3, 2))]
+		pub fn claim_dmm_stipend(
+			origin: OriginFor<T>,
+			epoch: u16,
+			pair: TradingPair,
+		) -> DispatchResult {
+			let account = ensure_signed(origin)?;
+			let actual_uptime = <DMMPerformance<T>>::get((epoch, pair, account.clone()))
+				.ok_or(Error::<T>::DMMPerformanceNotFound)?;
+			let registry = <DMMRegistry<T>>::get(epoch, pair);
+			let commitment = registry
+				.iter()
+				.find(|c| c.account == account)
+				.ok_or(Error::<T>::DMMCommitmentNotFound)?;
+			ensure!(actual_uptime >= commitment.committed_uptime, Error::<T>::DMMUptimeNotMet);
+			let stipend: BalanceOf<T> = commitment.stipend.saturated_into();
+			// Stipend was reserved from rewards_account → pallet_account in reserve_dmm_stipends.
+			// Transfer from pallet_account to the claiming DMM.
+			let pallet_account = Self::get_pallet_account();
+			T::NativeCurrency::transfer(
+				&pallet_account,
+				&account,
+				stipend,
+				ExistenceRequirement::KeepAlive,
+			)?;
+			Self::deposit_event(Event::<T>::DMMStipendClaimed {
+				epoch,
+				pair,
+				account: account.clone(),
+				amount: stipend,
+			});
+			let _ = pallet_account; // suppress unused warning
+			Ok(())
+		}
+
+		// ── P6: Merkle Snapshot & Claim ───────────────────────────────────────
+
+		/// Engine operator submits the Merkle root for an epoch/pair (P6).
+		/// Sets the claim unlock block to `current_block + claim_safety_period`.
+		#[pallet::call_index(26)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 2))]
+		pub fn submit_lmp_snapshot(
+			origin: OriginFor<T>,
+			epoch: u16,
+			pair: TradingPair,
+			merkle_root: H256,
+		) -> DispatchResult {
+			T::EnclaveOrigin::ensure_origin(origin)?;
+			<LMPMerkleRoot<T>>::insert(epoch, pair, merkle_root);
+			// Set claim unlock block using the epoch's safety period
+			if let Some(config) = <LMPConfig<T>>::get(epoch) {
+				let current_blk = frame_system::Pallet::<T>::current_block_number();
+				let unlock_blk = current_blk
+					.saturating_add(config.claim_safety_period.saturated_into());
+				<LMPClaimBlk<T>>::insert(epoch, unlock_blk);
+			}
+			Self::deposit_event(Event::<T>::LMPMerkleRootSubmitted {
+				epoch,
+				pair,
+				root: merkle_root,
+			});
+			Ok(())
+		}
+
+		/// User claims LMP rewards by submitting a Merkle proof (P6).
+		/// Leaf = Blake2b256(account_bytes ++ epoch_le_u16 ++ amount_le_u128).
+		#[pallet::call_index(27)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(4, 2))]
+		pub fn claim_rewards_merkle(
+			origin: OriginFor<T>,
+			epoch: u16,
+			pair: TradingPair,
+			#[pallet::compact] amount: u128,
+			proof: sp_std::vec::Vec<H256>,
+		) -> DispatchResult {
+			let account = ensure_signed(origin)?;
+			// Safety period check
+			let claim_blk =
+				<LMPClaimBlk<T>>::get(epoch).ok_or(Error::<T>::RewardsNotReady)?;
+			let current_blk = frame_system::Pallet::<T>::current_block_number();
+			ensure!(current_blk >= claim_blk.saturated_into(), Error::<T>::RewardsNotReady);
+			// Double-claim guard
+			let already_claimed = <MerkleRewardsClaimed<T>>::get(account.clone(), epoch);
+			ensure!(already_claimed.is_zero(), Error::<T>::MerkleRewardAlreadyClaimed);
+			// Merkle root lookup
+			let root =
+				<LMPMerkleRoot<T>>::get(epoch, pair).ok_or(Error::<T>::MerkleRootNotFound)?;
+			// Build leaf hash and verify proof
+			let leaf_hash = Self::build_merkle_leaf(&account, epoch, amount);
+			ensure!(
+				Self::verify_merkle_proof(leaf_hash, &proof, root),
+				Error::<T>::InvalidMerkleProof
+			);
+			// Transfer reward
+			let amount_balance: BalanceOf<T> = amount.saturated_into();
+			let rewards_account: T::AccountId =
+				T::LMPRewardsPalletId::get().into_account_truncating();
+			T::NativeCurrency::transfer(
+				&rewards_account,
+				&account,
+				amount_balance,
+				ExistenceRequirement::AllowDeath,
+			)?;
+			<MerkleRewardsClaimed<T>>::insert(account.clone(), epoch, amount_balance);
+			Self::deposit_event(Event::<T>::MerkleRewardClaimed {
+				account,
+				epoch,
+				pair,
+				amount: amount_balance,
+			});
 			Ok(())
 		}
 	}
@@ -1163,6 +1503,57 @@ pub mod pallet {
 			market: TradingPair,
 			main: T::AccountId,
 			reward: u128,
+		},
+		/// Market tier updated by governance (P2)
+		MarketTierSet {
+			pair: TradingPair,
+			tier: MarketTier,
+		},
+		// P7
+		/// Governance suspended LMP rewards for a pair
+		LMPRewardsSuspended { pair: TradingPair },
+		/// Governance demoted a pair to a lower market tier
+		MarketTierDemoted { pair: TradingPair, new_tier: MarketTier },
+		/// Maker rebate paid on a Tier1 fill within 5bps of BBO
+		MakerRebatePaid { maker: T::AccountId, pair: TradingPair, amount: BalanceOf<T> },
+		// P4
+		/// Volatility multiplier triggered for a pair in the current epoch
+		VolatilityMultiplierTriggered {
+			pair: TradingPair,
+			epoch: u16,
+		},
+		// P5
+		/// New DMM commitment registered
+		DMMRegistered {
+			epoch: u16,
+			pair: TradingPair,
+			account: T::AccountId,
+		},
+		/// Governance confirmed DMM selection for an epoch/pair
+		DMMSelected {
+			epoch: u16,
+			pair: TradingPair,
+		},
+		/// DMM claimed their stipend
+		DMMStipendClaimed {
+			epoch: u16,
+			pair: TradingPair,
+			account: T::AccountId,
+			amount: BalanceOf<T>,
+		},
+		// P6
+		/// Epoch Merkle root submitted by the engine operator
+		LMPMerkleRootSubmitted {
+			epoch: u16,
+			pair: TradingPair,
+			root: H256,
+		},
+		/// User claimed LMP rewards via Merkle proof
+		MerkleRewardClaimed {
+			account: T::AccountId,
+			epoch: u16,
+			pair: TradingPair,
+			amount: BalanceOf<T>,
 		},
 	}
 
@@ -1313,6 +1704,97 @@ pub mod pallet {
 	pub(super) type LMPClaimBlk<T: Config> =
 		StorageMap<_, Identity, u16, BlockNumberFor<T>, OptionQuery>;
 
+	/// Accumulated taker fees per epoch per trading pair (P3).
+	/// Populated by `update_lmp_scores` from snapshot `total_fees_paid`.
+	/// 25% of this is transferred to the LMP rewards account at epoch boundary.
+	#[pallet::storage]
+	#[pallet::getter(fn fees_collected)]
+	pub(super) type FeesCollected<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat, u16,         // epoch
+		Blake2_128Concat, TradingPair, // pair
+		BalanceOf<T>, ValueQuery,
+	>;
+
+	// ── P4: Volatility Multiplier ────────────────────────────────────────────
+
+	/// Number of times volatility multiplier was triggered per (epoch, pair, day_index) (P4).
+	/// Capped at 6 per pair per day.
+	#[pallet::storage]
+	#[pallet::getter(fn volatility_trigger_count)]
+	pub(super) type VolatilityTriggerCount<T: Config> = StorageNMap<
+		_,
+		(
+			NMapKey<Blake2_128Concat, u16>,         // epoch
+			NMapKey<Blake2_128Concat, TradingPair>, // pair
+			NMapKey<Blake2_128Concat, u32>,         // day_index
+		),
+		u8, ValueQuery,
+	>;
+
+	/// Whether the volatility multiplier is currently active for a pair (P4).
+	/// Set to true on trigger, cleared at epoch boundary.
+	#[pallet::storage]
+	#[pallet::getter(fn volatility_active)]
+	pub(super) type VolatilityActive<T: Config> =
+		StorageMap<_, Blake2_128Concat, TradingPair, bool, ValueQuery>;
+
+	// ── P5: DMM System ───────────────────────────────────────────────────────
+
+	/// DMM commitments per (epoch, pair) — bounded by `T::MaxDMMsPerPair` (P5).
+	#[pallet::storage]
+	#[pallet::getter(fn dmm_registry)]
+	pub(super) type DMMRegistry<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat, u16,         // epoch
+		Blake2_128Concat, TradingPair, // pair
+		BoundedVec<DMMCommitment<T::AccountId>, T::MaxDMMsPerPair>, ValueQuery,
+	>;
+
+	/// Actual uptime percentage (0–100) recorded at epoch end per (epoch, pair, account) (P5).
+	#[pallet::storage]
+	#[pallet::getter(fn dmm_performance)]
+	pub(super) type DMMPerformance<T: Config> = StorageNMap<
+		_,
+		(
+			NMapKey<Blake2_128Concat, u16>,              // epoch
+			NMapKey<Blake2_128Concat, TradingPair>,      // pair
+			NMapKey<Blake2_128Concat, T::AccountId>,     // account
+		),
+		u8, OptionQuery,
+	>;
+
+	// ── P7: Governance ───────────────────────────────────────────────────────
+
+	/// Pairs with LMP rewards suspended by governance (P7).
+	/// Suspended pairs are skipped in `compute_all_scores`.
+	#[pallet::storage]
+	#[pallet::getter(fn lmp_suspended_pairs)]
+	pub(super) type SuspendedLMPPairs<T: Config> =
+		StorageMap<_, Blake2_128Concat, TradingPair, bool, ValueQuery>;
+
+	// ── P6: Merkle Snapshot & Claim ──────────────────────────────────────────
+
+	/// Merkle root submitted by the engine operator per (epoch, pair) (P6).
+	#[pallet::storage]
+	#[pallet::getter(fn lmp_merkle_root)]
+	pub(super) type LMPMerkleRoot<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat, u16,         // epoch
+		Blake2_128Concat, TradingPair, // pair
+		H256, OptionQuery,
+	>;
+
+	/// Double-claim guard: balance already claimed via Merkle proof per (account, epoch) (P6).
+	#[pallet::storage]
+	#[pallet::getter(fn merkle_rewards_claimed)]
+	pub(super) type MerkleRewardsClaimed<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat, T::AccountId, // account
+		Blake2_128Concat, u16,          // epoch
+		BalanceOf<T>, ValueQuery,
+	>;
+
 	/// Price Map showing the average prices ( value = (avg_price, ticks)
 	#[pallet::storage]
 	pub type PriceOracle<T: Config> =
@@ -1330,6 +1812,35 @@ pub mod pallet {
 		StorageValue<_, AuctionInfo<T::AccountId, BalanceOf<T>>, OptionQuery>;
 
 	impl<T: crate::pallet::Config> crate::pallet::Pallet<T> {
+		/// P6: Build the Merkle leaf hash for `(account, epoch, amount)`.
+		/// Format: Blake2b256(account_bytes ++ epoch_le_u16 ++ amount_le_u128).
+		/// Must match `EpochAggregator` leaf construction in the orderbook repo.
+		pub fn build_merkle_leaf(account: &T::AccountId, epoch: u16, amount: u128) -> [u8; 32] {
+			let mut data = sp_std::vec::Vec::new();
+			data.extend_from_slice(&account.encode());
+			data.extend_from_slice(&epoch.to_le_bytes());
+			data.extend_from_slice(&amount.to_le_bytes());
+			sp_io::hashing::blake2_256(&data)
+		}
+
+		/// P6: Verify a Merkle proof. Siblings are hashed in canonical order (smaller first).
+		pub fn verify_merkle_proof(leaf_hash: [u8; 32], proof: &[H256], root: H256) -> bool {
+			let mut current = leaf_hash;
+			for sibling in proof {
+				let sibling_bytes = sibling.as_fixed_bytes();
+				let (left, right) = if &current <= sibling_bytes {
+					(current, *sibling_bytes)
+				} else {
+					(*sibling_bytes, current)
+				};
+				let mut combined = [0u8; 64];
+				combined[..32].copy_from_slice(&left);
+				combined[32..].copy_from_slice(&right);
+				current = sp_io::hashing::blake2_256(&combined);
+			}
+			H256::from(current) == root
+		}
+
 		pub fn new_random_id(prefix: Option<[u8; 4]>) -> H160 {
 			let mut entropy: [u8; 20] = [0u8; 20];
 			if let Some(prefix) = prefix {
@@ -1500,6 +2011,16 @@ pub mod pallet {
 						pair,
 						(total_score, total_fees_paid),
 					);
+					// P3: Accumulate fees in balance units for epoch-boundary fee split.
+					if let Some(fees_u128) = total_fees_paid
+						.saturating_mul(Decimal::from(UNIT_BALANCE))
+						.to_u128()
+					{
+						let fees_balance: BalanceOf<T> = fees_u128.saturated_into();
+						<FeesCollected<T>>::mutate(finalizing_epoch, pair, |acc| {
+							*acc = acc.saturating_add(fees_balance);
+						});
+					}
 				}
 				let current_blk = frame_system::Pallet::<T>::current_block_number();
 				<LMPClaimBlk<T>>::insert(
@@ -2122,8 +2643,13 @@ pub mod pallet {
 			let current_epoch = <LMPEpoch<T>>::get();
 			if epoch <= current_epoch {
 				let main_concrete: AccountId = Decode::decode(&mut &main.encode()[..]).unwrap();
+				// Read market config for tier-aware exponents; fall back to default if missing.
+				let default_config = LMPMarketConfig::default();
+				let market_config = <LMPConfig<T>>::get(epoch)
+					.and_then(|c| c.config.get(&market).cloned())
+					.unwrap_or(default_config);
 				// Read from offchain storage
-				let current_score = Self::compute_score(state, &main_concrete, market, epoch)
+				let current_score = Self::compute_score(state, &main_concrete, market, epoch, &market_config)
 					.map_err(
 						|err| log::error!(target:"ocex","Error while computing score for RPC call: {:?}",err),
 					)

@@ -42,7 +42,7 @@ use sp_core::{
 	ByteArray, Pair, H256,
 };
 use sp_keystore::{testing::MemoryKeystore, Keystore};
-use sp_runtime::{AccountId32, DispatchError::BadOrigin, SaturatedConversion, TokenError};
+use sp_runtime::{AccountId32, DispatchError, DispatchError::BadOrigin, SaturatedConversion, TokenError};
 use sp_std::default::Default;
 
 pub fn register_offchain_ext(ext: &mut sp_io::TestExternalities) {
@@ -2328,6 +2328,7 @@ fn test_set_lmp_epoch_config_happy_path() {
 			min_maker_volume: UNIT_BALANCE,
 			max_spread: UNIT_BALANCE,
 			min_depth: UNIT_BALANCE,
+			tier: orderbook_primitives::lmp::MarketTier::Tier3,
 		};
 		assert_ok!(OCEX::set_lmp_epoch_config(
 			RuntimeOrigin::root(),
@@ -2361,6 +2362,7 @@ fn test_set_lmp_epoch_config_invalid_market_weightage() {
 			min_maker_volume: UNIT_BALANCE,
 			max_spread: UNIT_BALANCE,
 			min_depth: UNIT_BALANCE,
+			tier: orderbook_primitives::lmp::MarketTier::Tier3,
 		};
 		assert_noop!(
 			OCEX::set_lmp_epoch_config(
@@ -2397,6 +2399,7 @@ fn test_set_lmp_epoch_config_invalid_invalid_lmpconfig() {
 			min_maker_volume: UNIT_BALANCE,
 			max_spread: UNIT_BALANCE,
 			min_depth: UNIT_BALANCE,
+			tier: orderbook_primitives::lmp::MarketTier::Tier3,
 		};
 		assert_noop!(
 			OCEX::set_lmp_epoch_config(
@@ -2876,6 +2879,7 @@ pub fn add_lmp_config() {
 		min_maker_volume: UNIT_BALANCE,
 		max_spread: UNIT_BALANCE,
 		min_depth: UNIT_BALANCE,
+		tier: orderbook_primitives::lmp::MarketTier::Tier3,
 	};
 	assert_ok!(OCEX::set_lmp_epoch_config(
 		RuntimeOrigin::root(),
@@ -3096,6 +3100,625 @@ pub fn get_trading_pair() -> TradingPair {
 
 pub fn get_random_signature() -> Signature {
 	Signature::Ecdsa(Default::default())
+}
+
+// ── P2/P3 LMP tests ──────────────────────────────────────────────────────────
+
+fn setup_lmp_config_with_tier(tier: orderbook_primitives::lmp::MarketTier) {
+	use parity_scale_codec::Compact;
+	crete_base_and_quote_asset();
+	register_trading_pair();
+	let pair = get_trading_pair();
+	let wrapper = LMPMarketConfigWrapper {
+		trading_pair: pair,
+		market_weightage: UNIT_BALANCE,
+		min_fees_paid: 0,
+		min_maker_volume: 0,
+		max_spread: UNIT_BALANCE,
+		min_depth: UNIT_BALANCE,
+		tier,
+	};
+	assert_ok!(OCEX::set_lmp_epoch_config(
+		RuntimeOrigin::root(),
+		Some(Compact::from(1000 * UNIT_BALANCE)),
+		Some(Compact::from(1000 * UNIT_BALANCE)),
+		vec![wrapper],
+		Some(10u16),
+		Some(10u32),
+	));
+}
+
+#[test]
+fn set_pair_tier_requires_governance_origin() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		let pair = get_trading_pair();
+		assert_noop!(
+			OCEX::set_pair_tier(
+				RuntimeOrigin::signed(AccountId::new([1u8; 32])),
+				pair,
+				orderbook_primitives::lmp::MarketTier::Tier1,
+			),
+			DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn set_pair_tier_stores_in_expected_lmp_config() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		let pair = get_trading_pair();
+		assert_ok!(OCEX::set_pair_tier(
+			RuntimeOrigin::root(),
+			pair,
+			orderbook_primitives::lmp::MarketTier::Tier1,
+		));
+		let config = crate::pallet::ExpectedLMPConfig::<Test>::get().unwrap();
+		assert_eq!(config.config[&pair].tier, orderbook_primitives::lmp::MarketTier::Tier1);
+	});
+}
+
+#[test]
+fn set_pair_tier_updates_current_epoch_lmp_config() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		let pair = get_trading_pair();
+		// Start an epoch so LMPConfig[0] exists
+		assert_ok!(OCEX::start_new_epoch_lmp(RuntimeOrigin::root()));
+		assert_ok!(OCEX::set_pair_tier(
+			RuntimeOrigin::root(),
+			pair,
+			orderbook_primitives::lmp::MarketTier::Tier2,
+		));
+		let current_epoch = crate::pallet::LMPEpoch::<Test>::get();
+		let config = crate::pallet::LMPConfig::<Test>::get(current_epoch).unwrap();
+		assert_eq!(config.config[&pair].tier, orderbook_primitives::lmp::MarketTier::Tier2);
+	});
+}
+
+#[test]
+fn set_pair_tier_emits_market_tier_set_event() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		let pair = get_trading_pair();
+		assert_ok!(OCEX::set_pair_tier(
+			RuntimeOrigin::root(),
+			pair,
+			orderbook_primitives::lmp::MarketTier::Tier1,
+		));
+		assert_last_event::<Test>(
+			crate::pallet::Event::<Test>::MarketTierSet {
+				pair,
+				tier: orderbook_primitives::lmp::MarketTier::Tier1,
+			}
+			.into(),
+		);
+	});
+}
+
+#[test]
+fn set_pair_tier_fails_when_no_expected_lmp_config() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		// No LMP config set — should return LMPConfigNotFound
+		assert_noop!(
+			OCEX::set_pair_tier(
+				RuntimeOrigin::root(),
+				pair,
+				orderbook_primitives::lmp::MarketTier::Tier1,
+			),
+			crate::pallet::Error::<Test>::LMPConfigNotFound
+		);
+	});
+}
+
+#[test]
+fn fees_collected_populated_by_update_lmp_scores() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		assert_ok!(OCEX::start_new_epoch_lmp(RuntimeOrigin::root()));
+		let epoch = 0u16;
+		let pair = get_trading_pair();
+		// Simulate update_lmp_scores with total_fees_paid = 1.0 (= UNIT_BALANCE in balance units)
+		let mut metrics = orderbook_primitives::TradingPairMetricsMap::new();
+		use rust_decimal::prelude::One;
+		metrics.insert(
+			pair,
+			(std::collections::BTreeMap::new(), (Decimal::zero(), Decimal::one())),
+		);
+		// Trigger FinalizeLMPScore flag
+		crate::pallet::FinalizeLMPScore::<Test>::put(epoch);
+		assert_ok!(OCEX::update_lmp_scores(&metrics));
+		let collected = crate::pallet::FeesCollected::<Test>::get(epoch, pair);
+		assert!(collected > 0u128.into(), "FeesCollected should be positive after update_lmp_scores");
+	});
+}
+
+#[test]
+fn fees_collected_independent_per_pair() {
+	new_test_ext().execute_with(|| {
+		let pair1 = get_trading_pair();
+		// Directly insert into FeesCollected to test independence
+		crate::pallet::FeesCollected::<Test>::insert(0u16, pair1, 1_000u128);
+		let pair2 = TradingPair { base: AssetId::Asset(2), quote: AssetId::Asset(3) };
+		crate::pallet::FeesCollected::<Test>::insert(0u16, pair2, 2_000u128);
+		assert_eq!(crate::pallet::FeesCollected::<Test>::get(0u16, pair1), 1_000u128);
+		assert_eq!(crate::pallet::FeesCollected::<Test>::get(0u16, pair2), 2_000u128);
+	});
+}
+
+#[test]
+fn fees_collected_cleared_after_epoch_boundary() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		let pair = get_trading_pair();
+		crate::pallet::FeesCollected::<Test>::insert(0u16, pair, 1_000_000u128);
+		// start_new_epoch drains FeesCollected for the current epoch
+		assert_ok!(OCEX::start_new_epoch_lmp(RuntimeOrigin::root()));
+		// After epoch boundary the old epoch's FeesCollected should be drained
+		assert_eq!(crate::pallet::FeesCollected::<Test>::get(0u16, pair), 0u128);
+	});
+}
+
+// ── P4: Volatility Multiplier tests ──────────────────────────────────────────
+
+#[test]
+fn trigger_volatility_requires_governance_or_enclave_origin() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		assert_noop!(
+			OCEX::trigger_volatility_multiplier(
+				RuntimeOrigin::signed(AccountId::new([1u8; 32])),
+				pair,
+			),
+			DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn trigger_volatility_increments_count() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(OCEX::set_exchange_state(RuntimeOrigin::root(), true));
+		let pair = get_trading_pair();
+		assert_ok!(OCEX::trigger_volatility_multiplier(RuntimeOrigin::root(), pair));
+		let epoch = crate::pallet::LMPEpoch::<Test>::get();
+		let count = crate::pallet::VolatilityTriggerCount::<Test>::get((epoch, pair, 0u32));
+		assert_eq!(count, 1);
+	});
+}
+
+#[test]
+fn trigger_volatility_capped_at_6_per_day() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(OCEX::set_exchange_state(RuntimeOrigin::root(), true));
+		let pair = get_trading_pair();
+		for _ in 0..6 {
+			assert_ok!(OCEX::trigger_volatility_multiplier(RuntimeOrigin::root(), pair));
+		}
+		assert_noop!(
+			OCEX::trigger_volatility_multiplier(RuntimeOrigin::root(), pair),
+			crate::pallet::Error::<Test>::DailyVolatilityCapReached
+		);
+	});
+}
+
+#[test]
+fn trigger_volatility_sets_volatility_active() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(OCEX::set_exchange_state(RuntimeOrigin::root(), true));
+		let pair = get_trading_pair();
+		assert_ok!(OCEX::trigger_volatility_multiplier(RuntimeOrigin::root(), pair));
+		assert!(crate::pallet::VolatilityActive::<Test>::get(pair));
+	});
+}
+
+#[test]
+fn trigger_volatility_emits_event() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(OCEX::set_exchange_state(RuntimeOrigin::root(), true));
+		let pair = get_trading_pair();
+		assert_ok!(OCEX::trigger_volatility_multiplier(RuntimeOrigin::root(), pair));
+		let epoch = crate::pallet::LMPEpoch::<Test>::get();
+		assert_last_event::<Test>(
+			crate::pallet::Event::<Test>::VolatilityMultiplierTriggered { pair, epoch }.into(),
+		);
+	});
+}
+
+#[test]
+fn volatility_active_cleared_at_epoch_boundary() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		let pair = get_trading_pair();
+		crate::pallet::VolatilityActive::<Test>::insert(pair, true);
+		// epoch boundary via start_new_epoch_lmp
+		assert_ok!(OCEX::start_new_epoch_lmp(RuntimeOrigin::root()));
+		assert!(!crate::pallet::VolatilityActive::<Test>::get(pair));
+	});
+}
+
+// ── P5: DMM System tests ──────────────────────────────────────────────────────
+
+#[test]
+fn register_dmm_stores_commitment() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		assert_ok!(OCEX::start_new_epoch_lmp(RuntimeOrigin::root())); // epoch → 1
+		let pair = get_trading_pair();
+		let alice = AccountId::new([1u8; 32]);
+		assert_ok!(OCEX::register_dmm(
+			RuntimeOrigin::signed(alice.clone()),
+			2u16, // future epoch
+			pair,
+			50u128,
+			1_000_000u128,
+			90u8,
+			5_000_000u128,
+		));
+		let registry = crate::pallet::DMMRegistry::<Test>::get(2u16, pair);
+		assert_eq!(registry.len(), 1);
+		assert_eq!(registry[0].account, alice);
+		assert_eq!(registry[0].committed_uptime, 90);
+	});
+}
+
+#[test]
+fn register_dmm_fails_for_current_epoch() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		let current = crate::pallet::LMPEpoch::<Test>::get();
+		assert_noop!(
+			OCEX::register_dmm(
+				RuntimeOrigin::signed(AccountId::new([1u8; 32])),
+				current,
+				pair,
+				50u128, 1_000_000u128, 90u8, 5_000_000u128,
+			),
+			crate::pallet::Error::<Test>::EpochAlreadyStarted
+		);
+	});
+}
+
+#[test]
+fn register_dmm_fails_when_uptime_exceeds_100() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		assert_noop!(
+			OCEX::register_dmm(
+				RuntimeOrigin::signed(AccountId::new([1u8; 32])),
+				5u16,
+				pair,
+				50u128, 1_000_000u128, 101u8, 5_000_000u128,
+			),
+			crate::pallet::Error::<Test>::InvalidUptimeCommitment
+		);
+	});
+}
+
+#[test]
+fn confirm_dmm_selection_requires_governance() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		let accounts: frame_support::BoundedVec<AccountId, crate::mock::MaxDMMsPerPair> =
+			frame_support::BoundedVec::default();
+		assert_noop!(
+			OCEX::confirm_dmm_selection(
+				RuntimeOrigin::signed(AccountId::new([1u8; 32])),
+				1u16,
+				pair,
+				accounts,
+			),
+			DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn confirm_dmm_selection_filters_registry() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		assert_ok!(OCEX::start_new_epoch_lmp(RuntimeOrigin::root())); // epoch → 1
+		let pair = get_trading_pair();
+		let alice = AccountId::new([1u8; 32]);
+		let bob = AccountId::new([2u8; 32]);
+		let charlie = AccountId::new([3u8; 32]);
+		for acc in [alice.clone(), bob.clone(), charlie.clone()] {
+			assert_ok!(OCEX::register_dmm(
+				RuntimeOrigin::signed(acc),
+				2u16, pair, 50, 100, 80, 1000,
+			));
+		}
+		// Confirm only alice and bob
+		let selected: frame_support::BoundedVec<AccountId, crate::mock::MaxDMMsPerPair> =
+			frame_support::BoundedVec::try_from(vec![alice.clone(), bob.clone()]).unwrap();
+		assert_ok!(OCEX::confirm_dmm_selection(RuntimeOrigin::root(), 2u16, pair, selected));
+		let registry = crate::pallet::DMMRegistry::<Test>::get(2u16, pair);
+		assert_eq!(registry.len(), 2);
+		assert!(registry.iter().all(|c| c.account != charlie));
+	});
+}
+
+#[test]
+fn submit_dmm_performance_stores_uptime() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		let alice = AccountId::new([1u8; 32]);
+		let perf: frame_support::BoundedVec<(AccountId, u8), crate::mock::MaxDMMsPerPair> =
+			frame_support::BoundedVec::try_from(vec![(alice.clone(), 85u8)]).unwrap();
+		assert_ok!(OCEX::submit_dmm_performance(RuntimeOrigin::root(), 1u16, pair, perf));
+		assert_eq!(crate::pallet::DMMPerformance::<Test>::get((1u16, pair, alice)), Some(85u8));
+	});
+}
+
+#[test]
+fn claim_dmm_stipend_fails_if_uptime_not_met() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		assert_ok!(OCEX::start_new_epoch_lmp(RuntimeOrigin::root()));
+		let pair = get_trading_pair();
+		let alice = AccountId::new([1u8; 32]);
+		// Register DMM for epoch 2 with committed_uptime = 90
+		assert_ok!(OCEX::register_dmm(
+			RuntimeOrigin::signed(alice.clone()),
+			2u16, pair, 50, 100, 90u8, 1_000u128,
+		));
+		// Record actual uptime = 80 (below committed)
+		let perf: frame_support::BoundedVec<(AccountId, u8), crate::mock::MaxDMMsPerPair> =
+			frame_support::BoundedVec::try_from(vec![(alice.clone(), 80u8)]).unwrap();
+		assert_ok!(OCEX::submit_dmm_performance(RuntimeOrigin::root(), 2u16, pair, perf));
+		assert_noop!(
+			OCEX::claim_dmm_stipend(RuntimeOrigin::signed(alice), 2u16, pair),
+			crate::pallet::Error::<Test>::DMMUptimeNotMet
+		);
+	});
+}
+
+// ── P6: Merkle Snapshot & Claim tests ────────────────────────────────────────
+
+#[test]
+fn submit_lmp_snapshot_requires_enclave_origin() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		let root = sp_core::H256::from([1u8; 32]);
+		assert_noop!(
+			OCEX::submit_lmp_snapshot(
+				RuntimeOrigin::signed(AccountId::new([1u8; 32])),
+				1u16, pair, root,
+			),
+			DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn submit_lmp_snapshot_stores_root() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		let root = sp_core::H256::from([42u8; 32]);
+		assert_ok!(OCEX::submit_lmp_snapshot(RuntimeOrigin::root(), 1u16, pair, root));
+		assert_eq!(crate::pallet::LMPMerkleRoot::<Test>::get(1u16, pair), Some(root));
+	});
+}
+
+#[test]
+fn submit_lmp_snapshot_emits_event() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		let root = sp_core::H256::from([7u8; 32]);
+		assert_ok!(OCEX::submit_lmp_snapshot(RuntimeOrigin::root(), 1u16, pair, root));
+		assert_last_event::<Test>(
+			crate::pallet::Event::<Test>::LMPMerkleRootSubmitted { epoch: 1u16, pair, root }.into(),
+		);
+	});
+}
+
+#[test]
+fn claim_rewards_merkle_single_leaf_valid_proof() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		let alice = AccountId::new([1u8; 32]);
+		let epoch = 1u16;
+		let amount = 1_000_000_000_000u128; // 1 PDEX
+		// Build leaf hash same way as the pallet
+		let leaf_hash = OCEX::build_merkle_leaf(&alice, epoch, amount);
+		let root = sp_core::H256::from(leaf_hash);
+		// Submit root
+		assert_ok!(OCEX::submit_lmp_snapshot(RuntimeOrigin::root(), epoch, pair, root));
+		// Set claim block to 0 (already claimable)
+		crate::pallet::LMPClaimBlk::<Test>::insert(epoch, 0u64);
+		// Fund rewards account
+		let rewards_account: AccountId =
+			<Test as crate::pallet::Config>::LMPRewardsPalletId::get()
+				.into_account_truncating();
+		let _ = <Test as crate::pallet::Config>::NativeCurrency::make_free_balance_be(
+			&rewards_account, 10_000_000_000_000u128,
+		);
+		// Claim with empty proof (single-leaf tree)
+		assert_ok!(OCEX::claim_rewards_merkle(
+			RuntimeOrigin::signed(alice.clone()),
+			epoch, pair, amount, vec![],
+		));
+		// Verify double-claim guard
+		assert_noop!(
+			OCEX::claim_rewards_merkle(
+				RuntimeOrigin::signed(alice),
+				epoch, pair, amount, vec![],
+			),
+			crate::pallet::Error::<Test>::MerkleRewardAlreadyClaimed
+		);
+	});
+}
+
+#[test]
+fn claim_rewards_merkle_fails_with_wrong_proof() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		let alice = AccountId::new([1u8; 32]);
+		let epoch = 1u16;
+		let amount = 1_000_000_000_000u128;
+		let leaf_hash = OCEX::build_merkle_leaf(&alice, epoch, amount);
+		let root = sp_core::H256::from(leaf_hash);
+		assert_ok!(OCEX::submit_lmp_snapshot(RuntimeOrigin::root(), epoch, pair, root));
+		crate::pallet::LMPClaimBlk::<Test>::insert(epoch, 0u64);
+		// Tampered proof (non-empty but wrong sibling)
+		assert_noop!(
+			OCEX::claim_rewards_merkle(
+				RuntimeOrigin::signed(alice),
+				epoch, pair, amount,
+				vec![sp_core::H256::from([0xffu8; 32])],
+			),
+			crate::pallet::Error::<Test>::InvalidMerkleProof
+		);
+	});
+}
+
+#[test]
+fn claim_rewards_merkle_fails_before_safety_period() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		let alice = AccountId::new([1u8; 32]);
+		let epoch = 1u16;
+		let amount = 1_000_000_000_000u128;
+		let leaf_hash = OCEX::build_merkle_leaf(&alice, epoch, amount);
+		let root = sp_core::H256::from(leaf_hash);
+		assert_ok!(OCEX::submit_lmp_snapshot(RuntimeOrigin::root(), epoch, pair, root));
+		// Set claim block to a future block (block 999999)
+		crate::pallet::LMPClaimBlk::<Test>::insert(epoch, 999_999u64);
+		assert_noop!(
+			OCEX::claim_rewards_merkle(
+				RuntimeOrigin::signed(alice),
+				epoch, pair, amount, vec![],
+			),
+			crate::pallet::Error::<Test>::RewardsNotReady
+		);
+	});
+}
+
+#[test]
+fn verify_merkle_proof_two_leaf_tree() {
+	// Unit-test the proof verification helper directly
+	let alice = AccountId::new([1u8; 32]);
+	let bob = AccountId::new([2u8; 32]);
+	let epoch = 1u16;
+	let amount = 1_000u128;
+	let alice_leaf = crate::Pallet::<Test>::build_merkle_leaf(&alice, epoch, amount);
+	let bob_leaf = crate::Pallet::<Test>::build_merkle_leaf(&bob, epoch, amount);
+	// Build 2-leaf root
+	let (left, right) =
+		if alice_leaf <= bob_leaf { (alice_leaf, bob_leaf) } else { (bob_leaf, alice_leaf) };
+	let mut combined = [0u8; 64];
+	combined[..32].copy_from_slice(&left);
+	combined[32..].copy_from_slice(&right);
+	let root = sp_core::H256::from(sp_io::hashing::blake2_256(&combined));
+	// Alice's proof = [bob_leaf]
+	let alice_proof = vec![sp_core::H256::from(bob_leaf)];
+	assert!(crate::Pallet::<Test>::verify_merkle_proof(alice_leaf, &alice_proof, root));
+	// Bob's proof = [alice_leaf]
+	let bob_proof = vec![sp_core::H256::from(alice_leaf)];
+	assert!(crate::Pallet::<Test>::verify_merkle_proof(bob_leaf, &bob_proof, root));
+}
+
+// ── P7: Governance extrinsics tests ──────────────────────────────────────────
+
+#[test]
+fn suspend_lmp_rewards_requires_governance() {
+	new_test_ext().execute_with(|| {
+		let pair = get_trading_pair();
+		assert_noop!(
+			OCEX::suspend_lmp_rewards(RuntimeOrigin::signed(AccountId::new([1u8; 32])), pair),
+			DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn suspend_lmp_rewards_sets_suspended_flag() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		let pair = get_trading_pair();
+		assert_ok!(OCEX::suspend_lmp_rewards(RuntimeOrigin::root(), pair));
+		assert!(crate::pallet::SuspendedLMPPairs::<Test>::get(pair));
+	});
+}
+
+#[test]
+fn suspend_lmp_rewards_removes_pair_from_expected_config() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		let pair = get_trading_pair();
+		assert_ok!(OCEX::suspend_lmp_rewards(RuntimeOrigin::root(), pair));
+		let config = crate::pallet::ExpectedLMPConfig::<Test>::get().unwrap();
+		assert!(!config.config.contains_key(&pair));
+	});
+}
+
+#[test]
+fn suspend_lmp_rewards_emits_event() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		let pair = get_trading_pair();
+		assert_ok!(OCEX::suspend_lmp_rewards(RuntimeOrigin::root(), pair));
+		assert_last_event::<Test>(
+			crate::pallet::Event::<Test>::LMPRewardsSuspended { pair }.into(),
+		);
+	});
+}
+
+#[test]
+fn demote_pair_tier_requires_governance() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier1);
+		let pair = get_trading_pair();
+		assert_noop!(
+			OCEX::demote_pair_tier(
+				RuntimeOrigin::signed(AccountId::new([1u8; 32])),
+				pair,
+				orderbook_primitives::lmp::MarketTier::Tier2,
+			),
+			DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn demote_pair_tier_updates_expected_config() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier1);
+		let pair = get_trading_pair();
+		// First set pair to Tier1
+		assert_ok!(OCEX::set_pair_tier(
+			RuntimeOrigin::root(),
+			pair,
+			orderbook_primitives::lmp::MarketTier::Tier1,
+		));
+		// Then demote to Tier2
+		assert_ok!(OCEX::demote_pair_tier(
+			RuntimeOrigin::root(),
+			pair,
+			orderbook_primitives::lmp::MarketTier::Tier2,
+		));
+		let config = crate::pallet::ExpectedLMPConfig::<Test>::get().unwrap();
+		assert_eq!(config.config[&pair].tier, orderbook_primitives::lmp::MarketTier::Tier2);
+	});
+}
+
+#[test]
+fn demote_pair_tier_rejects_invalid_demotion() {
+	new_test_ext().execute_with(|| {
+		setup_lmp_config_with_tier(orderbook_primitives::lmp::MarketTier::Tier3);
+		let pair = get_trading_pair();
+		// Tier3 is already lowest — cannot demote further
+		assert_noop!(
+			OCEX::demote_pair_tier(
+				RuntimeOrigin::root(),
+				pair,
+				orderbook_primitives::lmp::MarketTier::Tier3,
+			),
+			crate::pallet::Error::<Test>::InvalidTierDemotion
+		);
+	});
 }
 
 pub mod fixture_old_user_action {
