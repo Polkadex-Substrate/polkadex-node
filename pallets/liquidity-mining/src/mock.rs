@@ -184,6 +184,7 @@ impl ocex::Config for Test {
 	type OBWithdrawalLimit = OBWithdrawalLimit;
 	type WeightInfo = ocex::weights::WeightInfo<Test>;
 	type CrossChainGadget = ();
+	type MaxDMMsPerPair = frame_support::traits::ConstU32<10>;
 }
 
 parameter_types! {

@@ -35,6 +35,7 @@ use num_traits::pow::Pow;
 use num_traits::FromPrimitive;
 use orderbook_primitives::constants::POLKADEX_MAINNET_SS58;
 use orderbook_primitives::ingress::{EgressMessages, IngressMessages};
+use orderbook_primitives::lmp::{LMPMarketConfig, MarketTier};
 use orderbook_primitives::types::Order;
 use orderbook_primitives::{
     constants::FEE_POT_PALLET_ID,
@@ -791,9 +792,10 @@ impl<T: Config> Pallet<T> {
                     let withdrawal = Self::withdraw(request, state, *stid)?;
                     withdrawals.push(withdrawal);
                 },
-                UserActions::OneMinLMPReport(_market, _total, _scores) => {
-                    // let current_on_chain_epoch = <LMPEpoch<T>>::get();
-                    // Self::store_q_scores(state, *market, scores, current_on_chain_epoch)?;
+                // P9: Wire Q-score storage from engine LMP reports
+                UserActions::OneMinLMPReport(market, _total, scores, _maker_volume, _uptime_present) => {
+                    let current_on_chain_epoch = <crate::pallet::LMPEpoch<T>>::get();
+                    Self::store_q_scores(state, *market, scores, current_on_chain_epoch)?;
                 },
             }
         }
@@ -846,6 +848,15 @@ impl<T: Config> Pallet<T> {
                 (BTreeMap<T::AccountId, (Decimal, Decimal)>, (Decimal, Decimal)),
             > = BTreeMap::new();
             for pair in enabled_pairs {
+                // P7: skip pairs suspended by governance
+                if <crate::pallet::SuspendedLMPPairs<T>>::get(pair) {
+                    log::info!(target: "ocex", "Skipping suspended LMP pair: {:?}", pair.to_string());
+                    continue;
+                }
+                let market_config = config
+                    .config
+                    .get(&pair)
+                    .ok_or("LMPMarketConfig not found for pair")?;
                 let mut map = BTreeMap::new();
                 let mut total_score = Decimal::zero();
                 let mut total_fees_paid = Decimal::zero();
@@ -854,7 +865,7 @@ impl<T: Config> Pallet<T> {
                     let main: AccountId = Decode::decode(&mut &main_type.encode()[..]).unwrap();
                     let fees_paid =
                         get_fees_paid_by_main_account_in_quote(state, epoch, &pair, &main)?;
-                    let final_score = Self::compute_score(state, &main, pair, epoch)?;
+                    let final_score = Self::compute_score(state, &main, pair, epoch, market_config)?;
                     // Update the trader map
                     if !final_score.is_zero() || !fees_paid.is_zero() {
                         map.insert(main_type, (final_score, fees_paid));
@@ -883,6 +894,7 @@ impl<T: Config> Pallet<T> {
         main: &AccountId,
         pair: TradingPair,
         epoch: u16,
+        market_config: &LMPMarketConfig,
     ) -> Result<Decimal, &'static str> {
         let maker_volume = get_maker_volume_by_main_account(state, epoch, &pair, main)?;
 
@@ -902,11 +914,20 @@ impl<T: Config> Pallet<T> {
         // Get Q_score and uptime information from offchain state
         let (q_score, uptime) = get_q_score_and_uptime(state, epoch, &pair, main)?;
         let uptime = Decimal::from(uptime);
-        // Compute the final score
+
+        // P2-3: Tier-aware exponents. Values are identical across tiers pending
+        // product confirmation of per-tier parameters.
+        let (depth_exp, uptime_exp, volume_exp): (f64, f64, f64) = match market_config.tier {
+            MarketTier::Tier1 => (0.15, 5.0, 0.85),
+            MarketTier::Tier2 => (0.15, 5.0, 0.85),
+            MarketTier::Tier3 => (0.15, 5.0, 0.85),
+        };
+
+        // q_final = (q_score)^depth_exp * (uptime)^uptime_exp * (maker_volume)^volume_exp
         let final_score = q_score
-            .pow(0.15f64)
-            .saturating_mul(uptime.pow(5.0f64))
-            .saturating_mul(maker_volume.pow(0.85f64)); // q_final = (q_score)^0.15*(uptime)^5*(maker_volume)^0.85
+            .pow(depth_exp)
+            .saturating_mul(uptime.pow(uptime_exp))
+            .saturating_mul(maker_volume.pow(volume_exp));
         Ok(final_score)
     }
 

@@ -188,9 +188,11 @@ impl Config for Test {
 	type WeightInfo = crate::weights::WeightInfo<Test>;
 	type OBWithdrawalLimit = OBWithdrawalLimit;
 	type CrossChainGadget = ();
+	type MaxDMMsPerPair = MaxDMMsPerPair;
 }
 
 parameter_types! {
+	pub const MaxDMMsPerPair: u32 = 10;
 	pub const AssetDeposit: u128 = 100;
 	pub const ApprovalDeposit: u128 = 1;
 	pub const StringLimit: u32 = 50;

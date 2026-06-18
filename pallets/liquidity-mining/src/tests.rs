@@ -534,6 +534,64 @@ pub fn update_lmp_score() {
 	assert_ok!(OCEX::update_lmp_scores(&trading_pair_metrics_map));
 }
 
+// ── P8: C-35 to C-39 tests ───────────────────────────────────────────────────
+
+#[test]
+fn unsigned_tx_validation_rejects_when_no_snapshot_active() {
+	new_test_ext().execute_with(|| {
+		// No SnapshotFlag set — validate_unsigned must reject
+		let call = crate::pallet::Call::<Test>::submit_scores_of_lps { results: Default::default() };
+		use frame_support::unsigned::ValidateUnsigned;
+		let result = crate::pallet::Pallet::<Test>::validate_unsigned(
+			sp_runtime::transaction_validity::TransactionSource::Local,
+			&call,
+		);
+		assert!(result.is_err(), "should reject when no snapshot flag");
+	});
+}
+
+#[test]
+fn unsigned_tx_validation_rejects_external_source() {
+	new_test_ext().execute_with(|| {
+		crate::pallet::SnapshotFlag::<Test>::put(1u64);
+		let call = crate::pallet::Call::<Test>::submit_scores_of_lps { results: Default::default() };
+		use frame_support::unsigned::ValidateUnsigned;
+		let result = crate::pallet::Pallet::<Test>::validate_unsigned(
+			sp_runtime::transaction_validity::TransactionSource::External,
+			&call,
+		);
+		assert!(result.is_err(), "external source must be rejected");
+	});
+}
+
+#[test]
+fn pool_snapshot_flag_independent_per_pool() {
+	new_test_ext().execute_with(|| {
+		let pair = TradingPair { base: AssetId::Polkadex, quote: AssetId::Asset(1) };
+		let mm_a = AccountId32::new([1u8; 32]);
+		let mm_b = AccountId32::new([2u8; 32]);
+		// Set flag for pool A only
+		crate::pallet::PoolSnapshotFlag::<Test>::insert(pair, &mm_a, 1u64);
+		assert!(crate::pallet::PoolSnapshotFlag::<Test>::get(pair, &mm_a).is_some());
+		assert!(crate::pallet::PoolSnapshotFlag::<Test>::get(pair, &mm_b).is_none());
+	});
+}
+
+#[test]
+fn pool_snapshot_flag_cleared_per_pool() {
+	new_test_ext().execute_with(|| {
+		let pair = TradingPair { base: AssetId::Polkadex, quote: AssetId::Asset(1) };
+		let mm_a = AccountId32::new([1u8; 32]);
+		let mm_b = AccountId32::new([2u8; 32]);
+		crate::pallet::PoolSnapshotFlag::<Test>::insert(pair, &mm_a, 1u64);
+		crate::pallet::PoolSnapshotFlag::<Test>::insert(pair, &mm_b, 1u64);
+		// Clear only mm_a
+		crate::pallet::PoolSnapshotFlag::<Test>::remove(pair, &mm_a);
+		assert!(crate::pallet::PoolSnapshotFlag::<Test>::get(pair, &mm_a).is_none());
+		assert!(crate::pallet::PoolSnapshotFlag::<Test>::get(pair, &mm_b).is_some());
+	});
+}
+
 pub fn add_lmp_config() {
 	let total_liquidity_mining_rewards: Option<Compact<u128>> =
 		Some(Compact::from(1000 * UNIT_BALANCE));
@@ -551,6 +609,7 @@ pub fn add_lmp_config() {
 		min_maker_volume: polkadex_primitives::UNIT_BALANCE,
 		max_spread: polkadex_primitives::UNIT_BALANCE,
 		min_depth: polkadex_primitives::UNIT_BALANCE,
+		tier: orderbook_primitives::lmp::MarketTier::Tier3,
 	};
 	assert_ok!(OCEX::set_lmp_epoch_config(
 		RuntimeOrigin::root(),

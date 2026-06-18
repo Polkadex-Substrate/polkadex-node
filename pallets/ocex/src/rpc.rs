@@ -17,14 +17,21 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
-	pallet::{Accounts, AllowlistedToken, IngressMessages},
+	pallet::{
+		Accounts, AllowlistedToken, DMMPerformance, DMMRegistry, IngressMessages, LMPEpoch,
+		LMPMerkleRoot, VolatilityTriggerCount, BLOCKS_PER_DAY,
+	},
 	storage::OffchainState,
 	validator::WORKER_STATUS,
 	Config, Pallet,
 };
+use frame_support::traits::Get;
 use frame_system::pallet_prelude::BlockNumberFor;
+use orderbook_primitives::lmp::DMMCommitment;
+use orderbook_primitives::types::TradingPair;
 use parity_scale_codec::{Decode, Encode};
 use polkadex_primitives::{AccountId, AssetId};
+use sp_core::H256;
 use rust_decimal::Decimal;
 use sp_application_crypto::ByteArray;
 use sp_runtime::{
@@ -155,5 +162,42 @@ impl<T: Config> Pallet<T> {
 			deviation.insert(*asset, diff);
 		}
 		Ok(deviation)
+	}
+
+	// ── P5 RPC ───────────────────────────────────────────────────────────────
+
+	/// Returns DMM registry (commitments) and recorded performance for an epoch/pair.
+	pub fn get_dmm_status(
+		epoch: u16,
+		pair: TradingPair,
+	) -> (
+		sp_std::vec::Vec<DMMCommitment<T::AccountId>>,
+		sp_std::vec::Vec<(T::AccountId, u8)>,
+	) {
+		let registry = <DMMRegistry<T>>::get(epoch, pair).into_iter().collect();
+		let performance: sp_std::vec::Vec<(T::AccountId, u8)> = <DMMPerformance<T>>::iter_prefix((epoch, pair))
+			.map(|(account, pct)| (account, pct))
+			.collect();
+		(registry, performance)
+	}
+
+	// ── P6 RPCs ──────────────────────────────────────────────────────────────
+
+	/// Returns the stored Merkle root for an epoch/pair, if any.
+	pub fn get_lmp_merkle_root(epoch: u16, pair: TradingPair) -> Option<H256> {
+		<LMPMerkleRoot<T>>::get(epoch, pair)
+	}
+
+	/// Returns the volatility trigger count for the current epoch, given pair, and day.
+	pub fn get_volatility_trigger_count(pair: TradingPair, day: u32) -> u8 {
+		let epoch = <LMPEpoch<T>>::get();
+		<VolatilityTriggerCount<T>>::get((epoch, pair, day))
+	}
+
+	/// Returns the day index for the current block (helper for clients).
+	pub fn current_day_index() -> u32 {
+		let current_block: u32 =
+			frame_system::Pallet::<T>::current_block_number().saturated_into();
+		current_block / BLOCKS_PER_DAY
 	}
 }

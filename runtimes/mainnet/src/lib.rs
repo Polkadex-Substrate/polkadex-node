@@ -1972,6 +1972,7 @@ impl pallet_ocex_lmp::Config for Runtime {
 	type WeightInfo = pallet_ocex_lmp::weights::WeightInfo<Runtime>;
 	//type CrossChainGadget = TheaExecutor;
 	type CrossChainGadget = ();
+	type MaxDMMsPerPair = frame_support::traits::ConstU32<10>;
 }
 
 //Install rewards Pallet
@@ -2956,6 +2957,8 @@ const IDENTITY_MIGRATION_KEY_LIMIT: u64 = u64::MAX;
 // `OnRuntimeUpgrade`. Note: These are examples and do not need to be run directly
 // after the genesis block.
 type Migrations = (
+	// P2: adds tier: MarketTier field to LMPMarketConfig in LMPConfig / ExpectedLMPConfig
+	pallet_ocex_lmp::migrations::v1::Migration<Runtime>,
 	migrations::InitOcexFeeConfig<Runtime>,
 	migrations::UpgradeSessionKeys,
     // Pallet storage version migrations

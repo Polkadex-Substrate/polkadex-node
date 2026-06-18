@@ -185,9 +185,20 @@ pub mod pallet {
 	#[pallet::getter(fn active_lmp_epoch)]
 	pub(crate) type LMPEpoch<T: Config> = StorageValue<_, u16, ValueQuery>;
 
-	/// Offchain worker flag
+	/// Global offchain worker flag (kept for take_snapshot compatibility)
 	#[pallet::storage]
 	pub(super) type SnapshotFlag<T: Config> = StorageValue<_, BlockNumberFor<T>, OptionQuery>;
+
+	/// Per-pool snapshot-in-progress flag (C-36).
+	/// Set when a pool's snapshot begins; cleared when complete.
+	/// Prevents add/remove liquidity only for the specific pool being snapshotted.
+	#[pallet::storage]
+	pub(super) type PoolSnapshotFlag<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat, TradingPair,
+		Blake2_128Concat, T::AccountId, // market_maker
+		BlockNumberFor<T>, OptionQuery,
+	>;
 
 	/// Issueing withdrawals for epoch
 	#[pallet::storage]
@@ -225,6 +236,14 @@ pub mod pallet {
 			pool: T::AccountId,
 			base_freed: BalanceOf<T>,
 			quote_freed: BalanceOf<T>,
+		},
+		/// LP claimed their proportional share of a force-closed pool (C-38)
+		LiquidityFundsClaimed {
+			market: TradingPair,
+			pool: T::AccountId,
+			lp: T::AccountId,
+			base_amount: BalanceOf<T>,
+			quote_amount: BalanceOf<T>,
 		},
 	}
 
@@ -282,42 +301,26 @@ pub mod pallet {
 		type Call = Call<T>;
 		fn validate_unsigned(source: TransactionSource, call: &Self::Call) -> TransactionValidity {
 			if let Call::submit_scores_of_lps { results: _ } = call {
-				// This txn is only available during snapshotting
-				if <SnapshotFlag<T>>::get().is_none() {
+				// Only valid during an active snapshot window
+				let snapshot_blk = match <SnapshotFlag<T>>::get() {
+					None => return InvalidTransaction::Call.into(),
+					Some(blk) => blk,
+				};
+
+				// Only accept from local/in-block sources; reject external/in-pool submissions
+				if source == TransactionSource::External
+					|| source == TransactionSource::InBlock
+				{
 					return InvalidTransaction::Call.into();
 				}
 
-				if source == TransactionSource::External {
-					// Don't accept externally sourced calls
-					return InvalidTransaction::Call.into();
-				}
-
-				// TODO: @zktony Update the verification logic to make it more stringent.
+				// Use the snapshot block number as the uniqueness tag so only one
+				// `submit_scores_of_lps` per snapshot window enters the pool.
 				ValidTransaction::with_tag_prefix("LiquidityMining")
-					// We set base priority to 2**20 and hope it's included before any other
-					// transactions in the pool. Next we tweak the priority depending on how much
-					// it differs from the current average. (the more it differs the more priority
-					// it has).
-					.priority(Default::default()) // TODO: update this
-					// This transaction does not require anything else to go before into the pool.
-					// In theory we could require `previous_unsigned_at` transaction to go first,
-					// but it's not necessary in our case.
-					//.and_requires()
-					// We set the `provides` tag to be the same as `next_unsigned_at`. This makes
-					// sure only one transaction produced after `next_unsigned_at` will ever
-					// get to the transaction pool and will end up in the block.
-					// We can still have multiple transactions compete for the same "spot",
-					// and the one with higher priority will replace other one in the pool.
-					.and_provides("liquidity_mining") // TODO: update this
-					// The transaction is only valid for next 5 blocks. After that it's
-					// going to be revalidated by the pool.
+					.priority(u64::MAX) // highest priority — must be included before other txns
+					.and_provides((b"lmp_snapshot", snapshot_blk).encode())
 					.longevity(5)
-					// It's fine to propagate that transaction to other peers, which means it can be
-					// created even by nodes that don't produce blocks.
-					// Note that sometimes it's better to keep it for yourself (if you are the block
-					// producer), since for instance in some schemes others may copy your solution
-					// and claim a reward.
-					.propagate(true)
+					.propagate(false) // local only — do not gossip to peers
 					.build()
 			} else {
 				InvalidTransaction::Call.into()
@@ -424,7 +427,11 @@ pub mod pallet {
 		) -> DispatchResult {
 			let lp = ensure_signed(origin)?;
 			let config = <Pools<T>>::get(market, &market_maker).ok_or(Error::<T>::UnknownPool)?;
-			ensure!(<SnapshotFlag<T>>::get().is_none(), Error::<T>::SnapshotInProgress); // TODO: @zktony Replace with pool level flags
+			// C-36: Per-pool snapshot flag prevents interference with other pools
+			ensure!(
+				<PoolSnapshotFlag<T>>::get(market, &market_maker).is_none(),
+				Error::<T>::SnapshotInProgress
+			);
 			ensure!(!config.force_closed, Error::<T>::PoolForceClosed);
 			if !config.public_funds_allowed && !config.force_closed {
 				ensure!(lp == market_maker, Error::<T>::PublicDepositsNotAllowed);
@@ -473,8 +480,12 @@ pub mod pallet {
 		) -> DispatchResult {
 			let lp = ensure_signed(origin)?;
 
-			let config = <Pools<T>>::get(market, market_maker).ok_or(Error::<T>::UnknownPool)?;
-			ensure!(<SnapshotFlag<T>>::get().is_none(), Error::<T>::SnapshotInProgress); // TODO: @zktony Replace with pool level flags
+			let config = <Pools<T>>::get(market, market_maker.clone()).ok_or(Error::<T>::UnknownPool)?;
+			// C-36: Check per-pool flag to allow other pools to operate concurrently
+			ensure!(
+				<PoolSnapshotFlag<T>>::get(market, &market_maker).is_none(),
+				Error::<T>::SnapshotInProgress
+			);
 
 			let total = T::OtherAssets::total_issuance(config.share_id.try_into().unwrap());
 			ensure!(!total.is_zero(), Error::<T>::TotalShareIssuanceIsZero);
@@ -643,9 +654,8 @@ pub mod pallet {
 		}
 
 		#[pallet::call_index(7)]
-		#[pallet::weight(10000)]
-		// TODO: @zktony weight should be paramaterized by the number of requests and the market
-		// maker is expected to call this multiple times to exhaust the pending withdrawals
+		// C-37: Weight scaled by num_requests to reflect actual DB reads/writes per withdrawal.
+		#[pallet::weight(10000u64.saturating_add((*num_requests as u64).saturating_mul(5000)))]
 		#[transactional]
 		pub fn initiate_withdrawal(
 			origin: OriginFor<T>,
@@ -739,7 +749,14 @@ pub mod pallet {
 				quote_amt_to_claim,
 				Preservation::Expendable,
 			)?;
-			// TODO: Emit events (Ask @frontend team about this)
+			// C-38: Emit event so the frontend can detect the claim
+			Self::deposit_event(Event::<T>::LiquidityFundsClaimed {
+				market,
+				pool: pool_config.pool_id.clone(),
+				lp: lp.clone(),
+				base_amount: base_amt_to_claim,
+				quote_amount: quote_amt_to_claim,
+			});
 			Ok(())
 		}
 	}

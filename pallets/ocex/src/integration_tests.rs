@@ -44,8 +44,15 @@ use sequential_test::sequential;
 use sp_core::crypto::AccountId32;
 use sp_core::sr25519::Signature;
 use sp_core::{Pair, H160, H256};
+use sp_core::offchain::{testing::TestOffchainExt, OffchainDbExt, OffchainWorkerExt};
 use sp_runtime::offchain::storage::StorageValueRef;
 use std::collections::BTreeMap;
+
+fn register_offchain_ext(ext: &mut sp_io::TestExternalities) {
+	let (offchain, _offchain_state) = TestOffchainExt::with_offchain_db(ext.offchain_db());
+	ext.register_extension(OffchainDbExt::new(offchain.clone()));
+	ext.register_extension(OffchainWorkerExt::new(offchain));
+}
 
 #[test]
 #[sequential]
@@ -194,6 +201,7 @@ pub fn set_lmp_config() {
 		min_maker_volume: UNIT_BALANCE,
 		max_spread: UNIT_BALANCE,
 		min_depth: UNIT_BALANCE,
+		tier: orderbook_primitives::lmp::MarketTier::Tier3,
 	};
 	assert_ok!(OCEX::set_lmp_epoch_config(
 		RuntimeOrigin::root(),
@@ -389,4 +397,139 @@ fn get_trades() -> (Order, Order) {
 	let signature = taker_user_pair.sign(&order_payload.encode());
 	taker_order.signature = signature.into();
 	(maker_order, taker_order)
+}
+
+// ── P9: Offchain state verification tests ────────────────────────────────────
+
+fn push_lmp_report_user_actions(
+	stid: u64,
+	snapshot_id: u64,
+	block_no: u64,
+	market: orderbook_primitives::types::TradingPair,
+	scores: BTreeMap<AccountId32, Decimal>,
+) {
+	// Use a block import with empty ingress (does NOT overwrite existing ingress messages)
+	let lmp_report_action = UserActions::OneMinLMPReport(
+		market,
+		scores.values().cloned().fold(Decimal::ZERO, |a, b| a + b),
+		scores.clone(),
+		BTreeMap::new(), // maker_volume
+		BTreeMap::new(), // uptime_present
+	);
+	let block_import_action =
+		UserActions::BlockImport(block_no as u32, BTreeMap::new(), BTreeMap::new());
+	let user_action_batch = UserActionBatch {
+		actions: vec![block_import_action, lmp_report_action],
+		stid,
+		snapshot_id,
+		signature: sp_core::ecdsa::Signature::from_raw([0; 65]),
+	};
+	AggregatorClient::<Test>::mock_get_user_action_batch(user_action_batch);
+}
+
+#[test]
+#[sequential]
+fn maker_volume_stored_in_offchain_state_after_trade() {
+	let mut ext = new_test_ext();
+	ext.persist_offchain_overlay();
+	register_offchain_ext(&mut ext);
+	ext.execute_with(|| {
+		set_lmp_config();
+		push_trade_user_actions(1, 0, 1);
+		assert_ok!(OCEX::run_on_chain_validation(1));
+		// Read offchain state and verify maker volume was stored
+		let mut root = crate::storage::load_trie_root();
+		let mut storage = crate::storage::State;
+		let mut state = OffchainState::load(&mut storage, &mut root);
+		let (maker_account, _) = get_maker_and_taker_account();
+		let trading_pair = orderbook_primitives::types::TradingPair {
+			base: AssetId::Polkadex,
+			quote: AssetId::Asset(1),
+		};
+		let epoch = crate::pallet::LMPEpoch::<Test>::get();
+		let maker_account_id: polkadex_primitives::AccountId =
+			parity_scale_codec::Decode::decode(&mut &maker_account.encode()[..]).unwrap();
+		let volume = crate::lmp::get_maker_volume_by_main_account(
+			&mut state,
+			epoch,
+			&trading_pair,
+			&maker_account_id,
+		)
+		.expect("should not fail");
+		assert!(volume > Decimal::ZERO, "maker volume should be positive after a trade");
+	});
+}
+
+#[test]
+#[sequential]
+fn uptime_count_increments_per_non_zero_score_snapshot() {
+	let mut ext = new_test_ext();
+	ext.persist_offchain_overlay();
+	register_offchain_ext(&mut ext);
+	ext.execute_with(|| {
+		set_lmp_config();
+		let trading_pair = orderbook_primitives::types::TradingPair {
+			base: AssetId::Polkadex,
+			quote: AssetId::Asset(1),
+		};
+		let (maker_account, _) = get_maker_and_taker_account();
+
+		// Step 1: Run a trade validation which also processes NewLMPEpoch ingress,
+		// writing the LMP config to offchain state.
+		push_trade_user_actions(1, 0, 1);
+		// Manually append the NewLMPEpoch ingress message to block 1 ingress
+		// so the offchain worker writes LMPConfig to trie during validation.
+		let epoch = crate::pallet::LMPEpoch::<Test>::get();
+		<crate::pallet::IngressMessages<Test>>::mutate(1u64, |msgs| {
+			msgs.push(orderbook_primitives::ingress::IngressMessages::NewLMPEpoch(epoch));
+		});
+		assert_ok!(OCEX::run_on_chain_validation(1));
+
+		// Step 2: Push ONE batch with 3 OneMinLMPReport actions (different scores/indices).
+		// The mock aggregator stores only one batch at a time, so pack all reports into one.
+		let mut scores_non_zero = BTreeMap::new();
+		scores_non_zero.insert(maker_account.clone(), Decimal::from_f64(0.5).unwrap());
+		let report_action = |s: BTreeMap<AccountId32, Decimal>| {
+			UserActions::OneMinLMPReport(
+				trading_pair,
+				s.values().cloned().fold(Decimal::ZERO, |a, b| a + b),
+				s,
+				BTreeMap::new(),
+				BTreeMap::new(),
+			)
+		};
+		let block_import =
+			UserActions::BlockImport(2u32, BTreeMap::new(), BTreeMap::new());
+		let batch = UserActionBatch {
+			actions: vec![
+				block_import,
+				report_action(scores_non_zero.clone()),
+				report_action(scores_non_zero.clone()),
+				report_action(scores_non_zero.clone()),
+			],
+			stid: 2,
+			snapshot_id: 1,
+			signature: sp_core::ecdsa::Signature::from_raw([0; 65]),
+		};
+		AggregatorClient::<Test>::mock_get_user_action_batch(batch);
+		let s_info = StorageValueRef::persistent(&crate::validator::WORKER_STATUS);
+		s_info.set(&false);
+		assert_ok!(OCEX::run_on_chain_validation(2));
+
+		// Read offchain state and verify uptime count = 3
+		let mut root = crate::storage::load_trie_root();
+		let mut storage = crate::storage::State;
+		let mut state = OffchainState::load(&mut storage, &mut root);
+		let epoch = crate::pallet::LMPEpoch::<Test>::get();
+		let maker_account_id: polkadex_primitives::AccountId =
+			parity_scale_codec::Decode::decode(&mut &maker_account.encode()[..]).unwrap();
+		let (_total_score, uptime_count) = crate::lmp::get_q_score_and_uptime(
+			&mut state,
+			epoch,
+			&trading_pair,
+			&maker_account_id,
+		)
+		.expect("should not fail");
+		assert_eq!(uptime_count, 3, "uptime count should equal number of non-zero reports");
+	});
 }
