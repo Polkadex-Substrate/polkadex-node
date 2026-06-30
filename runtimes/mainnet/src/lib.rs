@@ -2964,13 +2964,10 @@ type Migrations = (
     migrations::GrandpaStorageVersionMigration<Runtime>,
     migrations::IdentityStorageVersionMigration<Runtime>,
     migrations::ChildBountiesStorageVersionMigration<Runtime>,
-    migrations::AssetsStorageMigration,
     // Existing migrations
-    // pallet_nomination_pools::migration::versioned::V6ToV7<Runtime>,
     pallet_alliance::migration::Migration<Runtime>,
     pallet_contracts::Migration<Runtime>,
     pallet_identity::migration::versioned::V0ToV1<Runtime, IDENTITY_MIGRATION_KEY_LIMIT>,
-    migrations::ClearIsmpStaleRequests,
 );
 
 type EventRecord = frame_system::EventRecord<
