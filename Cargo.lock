@@ -10015,8 +10015,6 @@ dependencies = [
 [[package]]
 name = "pallet-hyper-fungible-token"
 version = "2512.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47e0d84e3141c28031fe61430e06bb0c9f3bf97293ec107d9f5f8d090252b56e"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-macro",

@@ -3,13 +3,11 @@ use frame_support::{
     traits::{OnRuntimeUpgrade, Get, GetStorageVersion},
     weights::Weight
 };
-use sp_core::storage::ChildInfo;
 use sp_std::marker::PhantomData;
 use polkadex_primitives::auction::FeeDistribution;
 use sp_runtime::{BoundToRuntimeAppPublic, KeyTypeId, RuntimeAppPublic};
 use sp_core::{Encode, Decode};
 use sp_runtime::traits::AccountIdConversion;
-// use hex; // Not available in runtime
 
 // Type alias for the old Thea pallet that was removed
 type OldTheaPublic = thea::ecdsa::AuthorityId;
@@ -199,6 +197,27 @@ impl OnRuntimeUpgrade for UpgradeSessionKeys {
 // Pallet Storage Version Migrations
 // =============================================================================
 
+/// Generic storage version bump for any pallet. Bumps on-chain version to
+/// match in-code version if behind; no-op if already current.
+pub struct StorageVersionMigration<P>(PhantomData<P>);
+impl<P> OnRuntimeUpgrade for StorageVersionMigration<P>
+where
+    P: GetStorageVersion<InCodeStorageVersion = frame_support::traits::StorageVersion>
+        + frame_support::traits::PalletInfoAccess,
+{
+    fn on_runtime_upgrade() -> Weight {
+        let current = P::on_chain_storage_version();
+        let target = P::in_code_storage_version();
+        if current < target {
+            log::info!("🔧 Updating {} storage version from {:?} to {:?}", P::name(), current, target);
+            target.put::<P>();
+            <Runtime as frame_system::Config>::DbWeight::get().reads_writes(1, 1)
+        } else {
+            <Runtime as frame_system::Config>::DbWeight::get().reads(1)
+        }
+    }
+}
+
 /// Migration for pallet-staking storage version update
 pub struct StakingStorageVersionMigration<T>(PhantomData<T>);
 impl<T: pallet_staking::Config> OnRuntimeUpgrade for StakingStorageVersionMigration<T> {
@@ -284,200 +303,86 @@ impl<T: pallet_child_bounties::Config> OnRuntimeUpgrade for ChildBountiesStorage
     }
 }
 
-/// Migration to re-key `pallet_assets` storage maps from u32 AssetId to u128 AssetId.
-///
-/// All storage maps that use AssetId as a Blake2_128Concat key need re-keying because
-/// the encoded key bytes change from 4 bytes (u32) to 16 bytes (u128).
-///
-/// Storage layout with Blake2_128Concat:
-///   key = twox_128(pallet) ++ twox_128(storage) ++ blake2_128(encoded_id) ++ encoded_id
-///
-/// Old key lengths (u32 = 4 bytes):
-///   Asset/Metadata/Reserves : 32 + 16 + 4       = 52  bytes
-///   Account (double map)    : 32 + 16 + 4 + 48  = 100 bytes  (48 = blake2_128+AccountId)
-///   Approvals (N-map)       : 32 + 16 + 4 + 96  = 148 bytes  (96 = 2x (blake2_128+AccountId))
-///
-/// New key lengths (u128 = 16 bytes, +12 each):  64 / 112 / 160 bytes
-pub struct AssetsStorageMigration;
+// =============================================================================
+// Offences Storage Cleanup
+// =============================================================================
 
-const ASSETS_MIGRATION_FROM_SPEC: u32 = 380;
+// =============================================================================
+// Balances frozen field repair
+// =============================================================================
 
-impl OnRuntimeUpgrade for AssetsStorageMigration {
+/// Old on-chain account data (pallet_balances v0) stored `misc_frozen` and
+/// `fee_frozen` as separate fields. The new v1 format stores a single `frozen`
+/// that must be `>= max(all_locks)`. Accounts whose old `misc_frozen` was zero
+/// but had a lock (e.g. fee-only reasons) are found with `frozen = 0` by the
+/// new try_state check. This migration corrects the `frozen` field to be at
+/// least the maximum of all existing locks.
+pub struct FixBalancesFrozen;
+impl OnRuntimeUpgrade for FixBalancesFrozen {
     fn on_runtime_upgrade() -> Weight {
-        if crate::System::last_runtime_upgrade_spec_version() != ASSETS_MIGRATION_FROM_SPEC {
-            log::info!("Skipping AssetsStorageMigration: not upgrading from spec {}", ASSETS_MIGRATION_FROM_SPEC);
-            return <crate::Runtime as frame_system::Config>::DbWeight::get().reads(1);
-        }
-
-        let mut total_reads = 1u64;
-        let mut total_writes = 0u64;
-
-        for pallet_name in &[b"Assets" as &[u8], b"PoolAssets"] {
-            // Simple maps: old key = 52 bytes (32 prefix + 16 hash + 4 u32)
-            for storage_name in &[b"Asset" as &[u8], b"Metadata", b"Reserves"] {
-                let (r, w) = rekey_assets_map(pallet_name, storage_name, 52);
-                total_reads += r;
-                total_writes += w;
+        let mut fixed: u64 = 0;
+        for (who, locks) in pallet_balances::Locks::<Runtime>::iter() {
+            let max_lock = locks.iter().map(|l| l.amount).max().unwrap_or_default();
+            if max_lock == 0 {
+                continue;
             }
-            // Account double map: old key = 100 bytes
-            let (r, w) = rekey_assets_map(pallet_name, b"Account", 100);
-            total_reads += r;
-            total_writes += w;
-
-            // Approvals N-map: old key = 148 bytes
-            let (r, w) = rekey_assets_map(pallet_name, b"Approvals", 148);
-            total_reads += r;
-            total_writes += w;
+            // T::AccountStore = frame_system::Pallet<Runtime>, so balance data
+            // lives in frame_system::Account (NOT pallet_balances::Account).
+            frame_system::Account::<Runtime>::mutate(&who, |info| {
+                if max_lock > info.data.frozen {
+                    info.data.frozen = max_lock;
+                    fixed += 1;
+                }
+            });
         }
+        log::info!("🔧 Fixed frozen field for {} accounts with stale locks", fixed);
+        <Runtime as frame_system::Config>::DbWeight::get()
+            .reads_writes(fixed * 2 + 1, fixed)
+    }
+}
 
+// =============================================================================
+// Council prime cleanup
+// =============================================================================
+
+/// The council prime on-chain is not in the members list (pre-existing state
+/// inconsistency from the mainnet fork). Clear it so the invariant holds.
+pub struct FixCouncilPrime;
+impl OnRuntimeUpgrade for FixCouncilPrime {
+    fn on_runtime_upgrade() -> Weight {
+        use pallet_collective::Instance1 as CouncilCollective;
+        if let Some(prime) = pallet_collective::Prime::<Runtime, CouncilCollective>::get() {
+            let members = pallet_collective::Members::<Runtime, CouncilCollective>::get();
+            if !members.contains(&prime) {
+                pallet_collective::Prime::<Runtime, CouncilCollective>::kill();
+                log::info!("🔧 Cleared Council prime (not a member)");
+                return <Runtime as frame_system::Config>::DbWeight::get().reads_writes(2, 1);
+            }
+        }
+        <Runtime as frame_system::Config>::DbWeight::get().reads(2)
+    }
+}
+
+/// Clear all Offences::Reports entries. These encode `IdentificationTuple`
+/// (from `pallet_session::historical`) which changed between spec versions,
+/// making existing entries undecodable with the new runtime types.
+/// Old offence records are stale processed slash data — safe to clear.
+/// Uses raw prefix clearing because entries can't be decoded with new types.
+pub struct ClearOffenceReports;
+impl OnRuntimeUpgrade for ClearOffenceReports {
+    fn on_runtime_upgrade() -> Weight {
+        let result = frame_support::storage::migration::clear_storage_prefix(
+            b"Offences",
+            b"Reports",
+            b"",
+            None,
+            None,
+        );
         log::info!(
-            "🔧 AssetsStorageMigration complete: {} reads, {} writes",
-            total_reads, total_writes
+            "🧹 Cleared {} Offences::Reports entries (maybe_cursor={})",
+            result.backend,
+            result.maybe_cursor.is_some()
         );
-        <crate::Runtime as frame_system::Config>::DbWeight::get()
-            .reads_writes(total_reads, total_writes)
-    }
-
-    #[cfg(feature = "try-runtime")]
-    fn pre_upgrade() -> Result<sp_std::vec::Vec<u8>, sp_runtime::TryRuntimeError> {
-        use sp_io::hashing::twox_128;
-
-        let mut total = 0u32;
-        for pallet_name in &[b"Assets" as &[u8], b"PoolAssets"] {
-            for storage_name in &[b"Asset" as &[u8], b"Metadata", b"Reserves", b"Account", b"Approvals"] {
-                let prefix: sp_std::vec::Vec<u8> = [
-                    twox_128(pallet_name).as_ref(),
-                    twox_128(storage_name).as_ref(),
-                ].concat();
-                let mut key = prefix.clone();
-                loop {
-                    match sp_io::storage::next_key(&key) {
-                        Some(next) if next.starts_with(&prefix) => { total += 1; key = next; }
-                        _ => break,
-                    }
-                }
-            }
-        }
-        log::info!("🔍 AssetsStorageMigration pre-upgrade: {} total entries", total);
-        Ok(total.encode())
-    }
-
-    #[cfg(feature = "try-runtime")]
-    fn post_upgrade(state: sp_std::vec::Vec<u8>) -> Result<(), sp_runtime::TryRuntimeError> {
-        use frame_support::ensure;
-        use sp_io::hashing::twox_128;
-
-        let pre_count: u32 = Decode::decode(&mut &state[..])
-            .map_err(|_| "Failed to decode pre-upgrade state")?;
-
-        let mut post_count = 0u32;
-        for pallet_name in &[b"Assets" as &[u8], b"PoolAssets"] {
-            for storage_name in &[b"Asset" as &[u8], b"Metadata", b"Reserves", b"Account", b"Approvals"] {
-                let prefix: sp_std::vec::Vec<u8> = [
-                    twox_128(pallet_name).as_ref(),
-                    twox_128(storage_name).as_ref(),
-                ].concat();
-                let mut key = prefix.clone();
-                loop {
-                    match sp_io::storage::next_key(&key) {
-                        Some(next) if next.starts_with(&prefix) => { post_count += 1; key = next; }
-                        _ => break,
-                    }
-                }
-            }
-        }
-
-        ensure!(
-            pre_count == post_count,
-            "AssetsStorageMigration: entry count changed after migration"
-        );
-        log::info!("✅ AssetsStorageMigration post-upgrade: {} entries all re-keyed", post_count);
-        Ok(())
+        <Runtime as frame_system::Config>::DbWeight::get().writes(result.backend as u64 + 1)
     }
 }
-
-/// Re-keys a single pallet_assets storage map from u32 to u128 AssetId.
-///
-/// Identifies old keys by their expected `old_key_len`, extracts the u32 from
-/// bytes [48..52], and writes the value at the new u128 key position.
-fn rekey_assets_map(pallet_name: &[u8], storage_name: &[u8], old_key_len: usize) -> (u64, u64) {
-    use sp_io::hashing::{twox_128, blake2_128};
-    use sp_runtime::codec::Encode;
-
-    let prefix: sp_std::vec::Vec<u8> = [
-        twox_128(pallet_name).as_ref(),
-        twox_128(storage_name).as_ref(),
-    ].concat();
-
-    // AssetId sits at [48..52] in old keys (32 prefix + 16 blake2_128 hash)
-    const ASSET_ID_START: usize = 48;
-    const OLD_ASSET_ID_END: usize = 52; // 48 + 4 (u32)
-
-    let mut reads = 0u64;
-    let mut writes = 0u64;
-
-    // Collect old-format keys first to avoid iterator invalidation
-    let mut old_keys: sp_std::vec::Vec<sp_std::vec::Vec<u8>> = sp_std::vec::Vec::new();
-    let mut cursor = prefix.clone();
-    loop {
-        reads += 1;
-        match sp_io::storage::next_key(&cursor) {
-            Some(next) if next.starts_with(&prefix) => {
-                if next.len() == old_key_len {
-                    old_keys.push(next.clone());
-                }
-                cursor = next;
-            }
-            _ => break,
-        }
-    }
-
-    for old_key in old_keys {
-        reads += 1;
-        if let Some(value) = sp_io::storage::get(&old_key) {
-            let u32_bytes: [u8; 4] = match old_key[ASSET_ID_START..OLD_ASSET_ID_END].try_into() {
-                Ok(b) => b,
-                Err(_) => continue,
-            };
-            let new_id: u128 = u32::from_le_bytes(u32_bytes) as u128;
-            let new_id_encoded = new_id.encode();
-            let new_hash = blake2_128(&new_id_encoded);
-
-            // Everything after the old u32 AssetId stays the same (AccountId parts for double/N maps)
-            let rest = &old_key[OLD_ASSET_ID_END..];
-
-            let mut new_key = prefix.clone();
-            new_key.extend_from_slice(&new_hash);
-            new_key.extend_from_slice(&new_id_encoded);
-            new_key.extend_from_slice(rest);
-
-            sp_io::storage::set(&new_key, &value);
-            sp_io::storage::clear(&old_key);
-            writes += 2;
-        }
-    }
-
-    (reads, writes)
-}
-
-/// Clears all stale GET request commitments left by the old pallet-token-gateway from
-/// pallet-ismp's ISMPv2 child trie. These requests use a StateMachine variant encoding
-/// that no longer exists, causing IsmpRuntimeApi_block_events to fail in current blocks
-/// whenever a timeout event is emitted for them.
-pub struct ClearIsmpStaleRequests;
-impl OnRuntimeUpgrade for ClearIsmpStaleRequests {
-    fn on_runtime_upgrade() -> Weight {
-        // ISMPv2 is the child trie prefix used by pallet-ismp
-        let child_key = ChildInfo::new_default(b"ISMPv2");
-        let child_key = child_key.storage_key();
-
-        sp_io::default_child_storage::clear_prefix(child_key, b"RequestCommitments", None);
-        sp_io::default_child_storage::clear_prefix(child_key, b"ResponseCommitments", None);
-
-        log::info!("🧹 ClearIsmpStaleRequests: cleared old pallet-token-gateway request/response commitments");
-
-        // Generous fixed weight — we're clearing an unknown number of items
-        <Runtime as frame_system::Config>::DbWeight::get().writes(1000)
-    }
-}
-
