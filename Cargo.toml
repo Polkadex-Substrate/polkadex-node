@@ -266,3 +266,4 @@ polkadex-client = { path = "client", default-features = false }
 # pallet-revive-proc-macro (up to 0.7.3) does not support that attribute. The polkadot-sdk
 # stable2512 workspace ships a patched proc-macro 0.7.1 that does support it.
 pallet-revive-proc-macro = { git = "https://github.com/paritytech/polkadot-sdk.git", tag = "polkadot-stable2512-3" }
+pallet-hyper-fungible-token = { path = "vendor/pallet-hyper-fungible-token" }

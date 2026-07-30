@@ -171,7 +171,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 385,
+    spec_version: 386,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 2,
@@ -1235,7 +1235,7 @@ impl pallet_staking::Config for Runtime {
     type WeightInfo = pallet_staking::weights::SubstrateWeight<Runtime>;
     type BenchmarkingConfig = StakingBenchmarkingConfig;
     type Filter = Nothing;
-    type MaxValidatorSet = ConstU32<256>;
+    type MaxValidatorSet = MaxActiveValidators;
 }
 
 //impl pallet_staking::Config for Runtime {
@@ -2964,6 +2964,26 @@ type Migrations = (
     migrations::GrandpaStorageVersionMigration<Runtime>,
     migrations::IdentityStorageVersionMigration<Runtime>,
     migrations::ChildBountiesStorageVersionMigration<Runtime>,
+    // Storage version bumps for pallets missing on-chain version markers
+    migrations::StorageVersionMigration<pallet_balances::Pallet<Runtime>>,
+    migrations::StorageVersionMigration<pallet_election_provider_multi_phase::Pallet<Runtime>>,
+    migrations::StorageVersionMigration<pallet_collective::Pallet<Runtime, pallet_collective::Instance1>>,
+    migrations::StorageVersionMigration<pallet_collective::Pallet<Runtime, pallet_collective::Instance2>>,
+    migrations::StorageVersionMigration<pallet_im_online::Pallet<Runtime>>,
+    migrations::StorageVersionMigration<pallet_offences::Pallet<Runtime>>,
+    migrations::StorageVersionMigration<pallet_session::historical::Pallet<Runtime>>,
+    migrations::StorageVersionMigration<pallet_scheduler::Pallet<Runtime>>,
+    migrations::StorageVersionMigration<pallet_multisig::Pallet<Runtime>>,
+    migrations::StorageVersionMigration<pallet_bounties::Pallet<Runtime>>,
+    migrations::StorageVersionMigration<pallet_democracy::Pallet<Runtime>>,
+    migrations::StorageVersionMigration<pallet_preimage::Pallet<Runtime>>,
+    migrations::StorageVersionMigration<pallet_assets::Pallet<Runtime, pallet_assets::Instance1>>,
+    // Repair accounts where frozen < max(locks) due to old account data layout
+    migrations::FixBalancesFrozen,
+    // Clear council prime if not in members list (pre-existing state inconsistency)
+    migrations::FixCouncilPrime,
+    // Clear undecodable offence reports (IdentificationTuple type changed between spec versions)
+    migrations::ClearOffenceReports,
     // Existing migrations
     pallet_alliance::migration::Migration<Runtime>,
     pallet_contracts::Migration<Runtime>,
