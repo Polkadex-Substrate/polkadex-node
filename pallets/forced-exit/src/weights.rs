@@ -28,10 +28,13 @@ use frame_support::weights::Weight;
 /// Weight functions needed by the pallet.
 pub trait WeightInfo {
 	fn request_withdrawal() -> Weight;
+	fn cancel_request() -> Weight;
 	fn trigger_settlement_freeze() -> Weight;
-	/// `d` is the merkle proof depth.
+	/// `d` is the merkle proof depth (bounded at 64 by `BoundedProof`).
 	fn force_withdraw(d: u32) -> Weight;
+	fn claim_shortfall() -> Weight;
 	fn resume_settlement() -> Weight;
+	fn purge_stale() -> Weight;
 }
 
 impl WeightInfo for () {
@@ -40,19 +43,36 @@ impl WeightInfo for () {
 			.saturating_add(Weight::from_parts(0, 4_000))
 	}
 
+	fn cancel_request() -> Weight {
+		Weight::from_parts(35_000_000, 0)
+			.saturating_add(Weight::from_parts(0, 3_000))
+	}
+
 	fn trigger_settlement_freeze() -> Weight {
 		Weight::from_parts(30_000_000, 0)
 			.saturating_add(Weight::from_parts(0, 3_000))
 	}
 
 	fn force_withdraw(d: u32) -> Weight {
-		// Base cost plus one blake2_256 of a 65-byte pre-image per proof level.
-		Weight::from_parts(60_000_000, 0)
+		// Base cost (includes clearing up to MaxPendingRequests) plus one blake2_256 of a
+		// 65-byte pre-image per proof level; proof_size grows ~33 bytes per sibling node.
+		Weight::from_parts(80_000_000, 0)
 			.saturating_add(Weight::from_parts(1_500_000, 0).saturating_mul(d.into()))
 			.saturating_add(Weight::from_parts(0, 6_000))
+			.saturating_add(Weight::from_parts(0, 40).saturating_mul(d.into()))
+	}
+
+	fn claim_shortfall() -> Weight {
+		Weight::from_parts(45_000_000, 0)
+			.saturating_add(Weight::from_parts(0, 4_000))
 	}
 
 	fn resume_settlement() -> Weight {
+		Weight::from_parts(35_000_000, 0)
+			.saturating_add(Weight::from_parts(0, 3_000))
+	}
+
+	fn purge_stale() -> Weight {
 		Weight::from_parts(35_000_000, 0)
 			.saturating_add(Weight::from_parts(0, 3_000))
 	}

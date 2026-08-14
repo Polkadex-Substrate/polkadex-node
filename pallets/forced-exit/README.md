@@ -13,13 +13,17 @@ bound to engine liveness. This pallet breaks that dependency.
 
 | Stage | Mechanism |
 |---|---|
-| Ask | `request_withdrawal` records the request in runtime storage with a deadline, so being ignored becomes an on-chain fact rather than a support ticket. |
-| Escalate | `trigger_settlement_freeze` — **permissionless**. Anyone may call it, presenting evidence that is objectively true on-chain: no finalized snapshot within `SnapshotLivenessTimeout`, or a request unserviced past `RequestServiceTimeout`. |
-| Exit | `force_withdraw` — while frozen, pays out the caller's balance as committed in the last finalized snapshot (merkle inclusion proof) plus any deposits the chain witnessed after it. |
-| Recover | `resume_settlement` — governance restarts the venue under a fresh snapshot. Bumping the exit epoch lapses prior claims. |
+| Ask | `request_withdrawal` records the request in runtime storage with a deadline, so being ignored becomes an on-chain fact rather than a support ticket. (`cancel_request` lets the owner withdraw it and reclaim the deposit.) |
+| Escalate | `trigger_settlement_freeze` — **permissionless**. Anyone may call it, presenting evidence that is objectively true on-chain: no finalized snapshot within `SnapshotLivenessTimeout`, or a request unserviced past `RequestServiceTimeout`. Both clocks measure from the **liveness baseline** (the later of pallet activation and the last resume), so neither a fresh deployment nor a just-resumed venue can be frozen before the engine has had a full timeout window. |
+| Exit | `force_withdraw` — while frozen, pays out the caller's balance as committed in the last finalized snapshot (merkle inclusion proof) plus any deposits the chain witnessed after it, and clears the caller's outstanding requests with their deposits. If custody cannot cover a verified claim, the paid portion is released and the remainder recorded in `ShortfallOwed` — claimable later via `claim_shortfall` once custody is replenished, no fresh proof needed. |
+| Recover | `resume_settlement` — governance restarts the venue under a fresh snapshot. Bumping the exit epoch lapses prior claim state (lazily reclaimable via `purge_stale`); the liveness baseline resets. |
 
 Freezing is permissionless; resuming is governed. Evacuation must never need permission;
 recovery is a privileged, visible act.
+
+**Governance duty at resume:** the resume root is the sole authority for the new epoch. It
+MUST fold in balances of non-exited users, their unsnapshotted deposits, and any unpaid
+`ShortfallOwed` remainders — whatever the resume root omits, the runtime no longer honours.
 
 ## What stops the hatch being used to steal
 
@@ -57,6 +61,11 @@ on the other.
 - This pallet implements `traits::SettlementNotifier`; the settlement pallet calls
   `on_snapshot_finalized`, `on_requests_serviced`, `on_deposit`, `on_deposits_settled`, and
   must consult `is_frozen()` before accepting snapshots or deposits.
+- **Servicing is payment-by-inclusion, never a bare assertion:** `on_requests_serviced`
+  carries the `state_change_id` of the finalized snapshot whose withdrawal set contains the
+  requests, and calls that do not match the currently finalized snapshot clear nothing. A
+  censoring engine therefore cannot destroy a user's unserviced-request freeze evidence
+  without committing the payment on-chain.
 
 ### Required of the settlement layer
 
