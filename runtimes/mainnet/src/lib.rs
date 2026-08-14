@@ -559,6 +559,10 @@ const_assert!(DesiredMembers::get() <= CouncilMaxMembers::get());
 //	type RootOrigin = EnsureRoot<AccountId>;
 //}
 
+// NOTE(fee-handler PR): pallet_hyperbridge cannot be enabled yet - its only 2512-family
+// release (2512.0.0) was published against ismp 2512.0.0, and the workspace pins
+// ismp =2512.1.0 whose router/dispatcher API changed incompatibly. Needs either a
+// polytope-labs git pin matching ismp 2512.1.0 or a new crates.io release.
 // impl pallet_hyperbridge::Config for Runtime {
 // 	type IsmpHost = Ismp;
 // }
@@ -615,8 +619,19 @@ impl pallet_ismp::Config for Runtime {
     // Offchain database implementation. Outgoing requests and responses are
     // inserted in this database, while their commitments are stored onchain.
     type OffchainDB = ();
-    // The fee handler implementation
-    type FeeHandler = ();
+    // The fee handler implementation. POLICY = false: successful message delivery is free
+    // (Pays::No), so relayers pay nothing to deliver valid messages, while invalid batches
+    // never reach the handler and pay full transaction fees — spam still costs the sender.
+    // This removes the destination-side relayer subsidy and lets third-party relayers serve
+    // the chain at zero marginal cost; their compensation comes from source-side fees via
+    // the Hyperbridge fee system.
+    type FeeHandler = pallet_ismp::fee_handler::WeightFeeHandler<
+        AccountId,
+        Balances,
+        IdentityFee<Balance>,
+        TreasuryPalletId,
+        false,
+    >;
     type MigrationWeightInfo = ();
 }
 
