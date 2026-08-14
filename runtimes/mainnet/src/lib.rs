@@ -619,12 +619,22 @@ impl pallet_ismp::Config for Runtime {
     // Offchain database implementation. Outgoing requests and responses are
     // inserted in this database, while their commitments are stored onchain.
     type OffchainDB = ();
-    // The fee handler implementation. POLICY = false: successful message delivery is free
-    // (Pays::No), so relayers pay nothing to deliver valid messages, while invalid batches
-    // never reach the handler and pay full transaction fees — spam still costs the sender.
-    // This removes the destination-side relayer subsidy and lets third-party relayers serve
-    // the chain at zero marginal cost; their compensation comes from source-side fees via
-    // the Hyperbridge fee system.
+    // The fee handler implementation.
+    //
+    // NOTE(review): under pallet-ismp 2512.2.0 this configuration is inert. The crate's
+    // only delivery extrinsic is `handle_unsigned` (`ensure_none`; there is no signed
+    // `handle` variant and no "unsigned" cargo feature in this version), so message
+    // delivery is already feeless for relayers, and `Pallet::execute` discards the
+    // `PostDispatchInfo` returned by `FeeHandler::on_executed`, so the `Pays::No`
+    // produced by POLICY = false never propagates to fee logic. Invalid batches are
+    // rejected in the transaction pool (`validate_unsigned` -> BadProof) and pay
+    // nothing; spam resistance rests on pool validation + source-chain/Hyperbridge
+    // costs, not on destination-side transaction fees.
+    //
+    // POLICY = false is kept as forward-prep only: if a future pallet-ismp reintroduces
+    // a fee-paying delivery path that honors `on_executed`'s `PostDispatchInfo`,
+    // successful delivery becomes free (Pays::No). The currency / weight-to-fee /
+    // treasury parameters below are only evaluated under POLICY = true.
     type FeeHandler = pallet_ismp::fee_handler::WeightFeeHandler<
         AccountId,
         Balances,
