@@ -48,9 +48,15 @@ pub trait SettlementNotifier<AccountId> {
 	/// `state_change_id` must be strictly increasing; the implementation rejects rewinds.
 	fn on_snapshot_finalized(balances_root: H256, state_change_id: u64);
 
-	/// Reports that the engine has serviced the withdrawal requests recorded on-chain for
-	/// `who` up to and including `up_to_request_id`.
-	fn on_requests_serviced(who: &AccountId, up_to_request_id: u64);
+	/// Reports that the withdrawals for the listed request ids were included in the snapshot
+	/// finalized at `state_change_id`.
+	///
+	/// **Contract:** this must be called only while finalizing the snapshot whose withdrawal
+	/// set actually contains these requests — servicing is payment-by-inclusion, never a bare
+	/// assertion. The implementation ignores calls whose `state_change_id` does not match the
+	/// currently finalized snapshot, so a censoring engine cannot destroy a user's
+	/// unserviced-request freeze evidence without committing the payment on-chain.
+	fn on_requests_serviced(who: &AccountId, request_ids: &[u64], state_change_id: u64);
 
 	/// Reports a deposit that is not yet covered by any finalized snapshot.
 	fn on_deposit(who: &AccountId, asset: AssetId, amount: u128);

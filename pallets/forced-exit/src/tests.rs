@@ -25,10 +25,11 @@ use crate::{
 	merkle,
 	mock::*,
 	traits::{Custody, SettlementNotifier},
-	types::{BalanceLeaf, FreezeEvidence, ProofNode},
-	Error, Freeze, LastFinalized, UnprocessedDeposits,
+	types::{BalanceLeaf, FreezeEvidence},
+	BoundedProof, Error, Freeze, LastFinalized, LivenessBaseline, ShortfallOwed,
+	UnprocessedDeposits,
 };
-use frame_support::{assert_noop, assert_ok};
+use frame_support::{assert_noop, assert_ok, traits::Hooks};
 use polkadex_primitives::AssetId;
 use sp_core::H256;
 
@@ -47,9 +48,12 @@ fn commit_book(
 }
 
 /// Produces the inclusion proof for one leaf of a committed book.
-fn prove(leaves: &[BalanceLeaf<u64>], target: &BalanceLeaf<u64>) -> Vec<ProofNode> {
+fn prove(leaves: &[BalanceLeaf<u64>], target: &BalanceLeaf<u64>) -> BoundedProof {
 	let mut leaves = leaves.to_vec();
-	merkle::build_proof(&mut leaves, target).expect("leaf is in the book")
+	merkle::build_proof(&mut leaves, target)
+		.expect("leaf is in the book")
+		.try_into()
+		.expect("proof depth is within the bound")
 }
 
 // --- merkle format -------------------------------------------------------------------
@@ -119,11 +123,43 @@ fn pending_requests_are_bounded() {
 #[test]
 fn servicing_requests_refunds_the_deposit() {
 	new_test_ext().execute_with(|| {
+		commit_book(vec![(ALICE, USDT, 10 * UNIT, 0)], 1);
 		assert_ok!(ForcedExit::request_withdrawal(RuntimeOrigin::signed(ALICE), USDT, UNIT));
 		assert_eq!(Balances::reserved_balance(ALICE), 10);
 
-		<ForcedExit as SettlementNotifier<u64>>::on_requests_serviced(&ALICE, 0);
+		<ForcedExit as SettlementNotifier<u64>>::on_requests_serviced(&ALICE, &[0], 1);
 
+		assert_eq!(Balances::reserved_balance(ALICE), 0);
+		assert!(crate::Requests::<Test>::get(0).is_none());
+	});
+}
+
+#[test]
+fn servicing_without_matching_finalized_snapshot_clears_nothing() {
+	new_test_ext().execute_with(|| {
+		commit_book(vec![(ALICE, USDT, 10 * UNIT, 0)], 1);
+		assert_ok!(ForcedExit::request_withdrawal(RuntimeOrigin::signed(ALICE), USDT, UNIT));
+
+		// A censoring engine asserting servicing against a stale or future snapshot id
+		// cannot destroy the user's freeze evidence.
+		<ForcedExit as SettlementNotifier<u64>>::on_requests_serviced(&ALICE, &[0], 999);
+
+		assert!(crate::Requests::<Test>::get(0).is_some());
+		assert_eq!(Balances::reserved_balance(ALICE), 10);
+	});
+}
+
+#[test]
+fn cancel_request_refunds_only_to_owner() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(ForcedExit::request_withdrawal(RuntimeOrigin::signed(ALICE), USDT, UNIT));
+
+		assert_noop!(
+			ForcedExit::cancel_request(RuntimeOrigin::signed(BOB), 0),
+			Error::<Test>::NotRequestOwner
+		);
+
+		assert_ok!(ForcedExit::cancel_request(RuntimeOrigin::signed(ALICE), 0));
 		assert_eq!(Balances::reserved_balance(ALICE), 0);
 		assert!(crate::Requests::<Test>::get(0).is_none());
 	});
@@ -381,7 +417,7 @@ fn deposits_made_after_the_last_snapshot_are_recoverable() {
 			proof
 		));
 		assert_eq!(released(ALICE, USDT), 7 * UNIT);
-		assert_eq!(UnprocessedDeposits::<Test>::get(ALICE, USDT), 0);
+		assert_eq!(UnprocessedDeposits::<Test>::get((0, ALICE), USDT), 0);
 	});
 }
 
@@ -439,6 +475,55 @@ fn custody_shortfall_is_reported_and_pays_what_exists() {
 			}
 			.into(),
 		);
+		// The unpaid remainder survives as an on-chain debt.
+		assert_eq!(ShortfallOwed::<Test>::get((0, ALICE), USDT), 7 * UNIT);
+
+		// Custody is replenished (bridge recovery / governance top-up): the remainder is
+		// claimable without a fresh proof, and only once.
+		fund_custody(USDT, 100 * UNIT);
+		assert_ok!(ForcedExit::claim_shortfall(RuntimeOrigin::signed(ALICE), USDT));
+		assert_eq!(released(ALICE, USDT), 10 * UNIT);
+		assert_eq!(ShortfallOwed::<Test>::get((0, ALICE), USDT), 0);
+		assert_noop!(
+			ForcedExit::claim_shortfall(RuntimeOrigin::signed(ALICE), USDT),
+			Error::<Test>::NothingToClaim
+		);
+	});
+}
+
+#[test]
+fn total_insolvency_still_records_the_debt_on_chain() {
+	new_test_ext().execute_with(|| {
+		// Custody holds nothing at all: the worst case must not revert into silence.
+		let leaves = commit_book(vec![(ALICE, USDT, 10 * UNIT, 0), (BOB, USDT, 1 * UNIT, 0)], 1);
+		freeze_now();
+
+		let leaf = leaves.iter().find(|l| l.account == ALICE).unwrap().clone();
+		let proof = prove(&leaves, &leaf);
+
+		assert_ok!(ForcedExit::force_withdraw(
+			RuntimeOrigin::signed(ALICE),
+			USDT,
+			10 * UNIT,
+			0,
+			proof
+		));
+		assert_eq!(released(ALICE, USDT), 0);
+		assert_eq!(ShortfallOwed::<Test>::get((0, ALICE), USDT), 10 * UNIT);
+		System::assert_has_event(
+			crate::Event::CustodyShortfall { who: ALICE, asset: USDT, owed: 10 * UNIT, paid: 0 }
+				.into(),
+		);
+
+		// Claiming against still-empty custody reports the right condition.
+		assert_noop!(
+			ForcedExit::claim_shortfall(RuntimeOrigin::signed(ALICE), USDT),
+			Error::<Test>::CustodyEmpty
+		);
+
+		fund_custody(USDT, 10 * UNIT);
+		assert_ok!(ForcedExit::claim_shortfall(RuntimeOrigin::signed(ALICE), USDT));
+		assert_eq!(released(ALICE, USDT), 10 * UNIT);
 	});
 }
 
@@ -527,6 +612,144 @@ fn resume_requires_governance_and_lapses_prior_claims() {
 			bob_proof
 		));
 		assert_eq!(released(BOB, USDT), 1 * UNIT);
+	});
+}
+
+// --- lifecycle regressions -----------------------------------------------------------
+
+#[test]
+fn stale_requests_cannot_instantly_refreeze_after_resume() {
+	new_test_ext().execute_with(|| {
+		commit_book(vec![(ALICE, USDT, 10 * UNIT, 0)], 1);
+		assert_ok!(ForcedExit::request_withdrawal(RuntimeOrigin::signed(ALICE), USDT, UNIT));
+		freeze_now(); // block 100_000
+
+		assert_ok!(ForcedExit::resume_settlement(RuntimeOrigin::root(), H256::repeat_byte(1), 2));
+
+		// The pre-freeze request is thousands of blocks old, but the resume reset the
+		// liveness baseline: the engine gets a full fresh timeout window.
+		run_to_block(100_100);
+		assert_noop!(
+			ForcedExit::trigger_settlement_freeze(
+				RuntimeOrigin::signed(BOB),
+				FreezeEvidence::UnservicedRequest(0)
+			),
+			Error::<Test>::FreezeConditionNotMet
+		);
+		assert_noop!(
+			ForcedExit::trigger_settlement_freeze(
+				RuntimeOrigin::signed(BOB),
+				FreezeEvidence::SnapshotLiveness
+			),
+			Error::<Test>::FreezeConditionNotMet
+		);
+
+		// If the engine still ignores the request past a full timeout from resume, the
+		// freeze is once again legitimate.
+		run_to_block(100_101);
+		assert_ok!(ForcedExit::trigger_settlement_freeze(
+			RuntimeOrigin::signed(BOB),
+			FreezeEvidence::UnservicedRequest(0)
+		));
+	});
+}
+
+#[test]
+fn runtime_upgrade_seeds_the_liveness_baseline() {
+	new_test_ext().execute_with(|| {
+		// The pallet arrives on a long-running chain via runtime upgrade; no snapshot has
+		// ever been finalized. Without the baseline, the clock would run from block zero.
+		run_to_block(20_000_000);
+		assert!(LivenessBaseline::<Test>::get().is_none());
+		<ForcedExit as Hooks<u64>>::on_runtime_upgrade();
+		assert_eq!(LivenessBaseline::<Test>::get(), Some(20_000_000));
+
+		assert_noop!(
+			ForcedExit::trigger_settlement_freeze(
+				RuntimeOrigin::signed(ALICE),
+				FreezeEvidence::SnapshotLiveness
+			),
+			Error::<Test>::FreezeConditionNotMet
+		);
+
+		// The engine failing for a full timeout after activation is genuine evidence.
+		run_to_block(20_000_201);
+		assert_ok!(ForcedExit::trigger_settlement_freeze(
+			RuntimeOrigin::signed(ALICE),
+			FreezeEvidence::SnapshotLiveness
+		));
+
+		// The hook is idempotent: a later upgrade must not move an existing baseline.
+		run_to_block(30_000_000);
+		<ForcedExit as Hooks<u64>>::on_runtime_upgrade();
+		assert_eq!(LivenessBaseline::<Test>::get(), Some(20_000_000));
+	});
+}
+
+#[test]
+fn force_withdraw_clears_requests_and_refunds_deposits() {
+	new_test_ext().execute_with(|| {
+		fund_custody(USDT, 100 * UNIT);
+		let leaves = commit_book(vec![(ALICE, USDT, 5 * UNIT, 0), (BOB, USDT, 1 * UNIT, 0)], 1);
+		assert_ok!(ForcedExit::request_withdrawal(RuntimeOrigin::signed(ALICE), USDT, UNIT));
+		assert_ok!(ForcedExit::request_withdrawal(RuntimeOrigin::signed(ALICE), BTC, UNIT));
+		assert_eq!(Balances::reserved_balance(ALICE), 20);
+		freeze_now();
+
+		let leaf = leaves.iter().find(|l| l.account == ALICE).unwrap().clone();
+		let proof = prove(&leaves, &leaf);
+		assert_ok!(ForcedExit::force_withdraw(
+			RuntimeOrigin::signed(ALICE),
+			USDT,
+			5 * UNIT,
+			0,
+			proof
+		));
+
+		// The dead engine will never service her requests; the hatch returns the deposits.
+		assert_eq!(Balances::reserved_balance(ALICE), 0);
+		assert!(crate::Requests::<Test>::get(0).is_none());
+		assert!(crate::Requests::<Test>::get(1).is_none());
+	});
+}
+
+#[test]
+fn deposits_are_not_tallied_while_frozen() {
+	new_test_ext().execute_with(|| {
+		commit_book(vec![(ALICE, USDT, 1 * UNIT, 0)], 1);
+		freeze_now();
+
+		// Settlement must refuse deposits while frozen; if it fails to, tallying here would
+		// open a double-claim path, so the notifier ignores it (defense in depth).
+		<ForcedExit as SettlementNotifier<u64>>::on_deposit(&ALICE, USDT, 5 * UNIT);
+		assert_eq!(UnprocessedDeposits::<Test>::get((0, ALICE), USDT), 0);
+	});
+}
+
+#[test]
+fn stale_epoch_deposits_lapse_at_resume_and_are_purgeable() {
+	new_test_ext().execute_with(|| {
+		fund_custody(USDT, 100 * UNIT);
+		commit_book(vec![(ALICE, USDT, 1 * UNIT, 0)], 1);
+
+		// Bob deposits; no snapshot ever covers it; the venue freezes and he does not exit.
+		<ForcedExit as SettlementNotifier<u64>>::on_deposit(&BOB, USDT, 5 * UNIT);
+		freeze_now();
+
+		// Governance resumes; the resume root (not this tally) is now the sole authority
+		// for Bob's balance. His epoch-0 tally is unreachable in epoch 1.
+		assert_ok!(ForcedExit::resume_settlement(RuntimeOrigin::root(), H256::repeat_byte(2), 2));
+		assert_eq!(UnprocessedDeposits::<Test>::get((1, BOB), USDT), 0);
+		assert_eq!(UnprocessedDeposits::<Test>::get((0, BOB), USDT), 5 * UNIT);
+
+		// The stale entry cannot be purged while its epoch is current-or-future, and can be
+		// once lapsed.
+		assert_noop!(
+			ForcedExit::purge_stale(RuntimeOrigin::signed(CHARLIE), 1, BOB, USDT),
+			Error::<Test>::EpochNotLapsed
+		);
+		assert_ok!(ForcedExit::purge_stale(RuntimeOrigin::signed(CHARLIE), 0, BOB, USDT));
+		assert_eq!(UnprocessedDeposits::<Test>::get((0, BOB), USDT), 0);
 	});
 }
 
