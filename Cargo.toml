@@ -29,6 +29,7 @@ members = [
   "rpc/swap",
   "rpc/assets/runtime-api",
   "pallets/pdex-migration",
+  "pallets/forced-exit",
   "pallets/liquidity-mining",
   "pallets/ocex",
   "pallets/ocex/rpc",

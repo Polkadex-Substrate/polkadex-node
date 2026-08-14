@@ -9971,6 +9971,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-forced-exit"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "pallet-balances",
+ "parity-scale-codec",
+ "polkadex-primitives",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+ "sp-std",
+]
+
+[[package]]
 name = "pallet-glutton"
 version = "31.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
