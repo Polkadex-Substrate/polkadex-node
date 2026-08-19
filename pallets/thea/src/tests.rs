@@ -1184,3 +1184,164 @@ fn test_h8_on_initialize_sequential_messages_all_processed() {
 		assert_eq!(Balances::free_balance(&relayer), 100 * UNIT_BALANCE);
 	})
 }
+
+// ─── R2-H2 & R2-H3 regression tests ─────────────────────────────────────────
+//
+// R2-H2: Two consecutive session rotations leave an outgoing message
+//        permanently unsignable. The C8 fix (cross-set signature merging
+//        rejected by add_signature) combined with submit_signed_outgoing_messages
+//        pinning to the current active set means: once the set rotates, partial
+//        signatures from the old set are invalid, and the new set's signatures
+//        are rejected (validator_set_id mismatch). Bridge permanently stuck.
+//
+// Fix: On rotation, reset SignedOutgoingMessages entries for unfinalized nonces —
+//      update validator_set_id to the new active set and clear accumulated
+//      signatures so the new set can sign from scratch.
+//
+// R2-H3: change_authorities advances ValidatorSetId and generates
+//        ValidatorsRotated ("activate the scheduled set") even for networks
+//        that did not receive a ScheduledRotateValidators ("here is the set")
+//        message in block 1, because the two `if` blocks are independent.
+//
+// Fix: Track which networks got ScheduledRotateValidators in block 1; skip
+//      ValidatorsRotated in block 2 for any that missed it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_r2_h2_rotation_resets_pending_signatures_to_new_set_id() {
+	// Verifies that after a session rotation, any SignedOutgoingMessages entries
+	// for unfinalized nonces are reset: validator_set_id updated to the new
+	// active set and accumulated signatures cleared so the new set can sign.
+	new_test_ext().execute_with(|| {
+		let network: Network = 1;
+		let mut networks = BTreeSet::new();
+		networks.insert(network);
+		<ActiveNetworks<Test>>::put(networks);
+
+		// Build three distinct validator sets (A, B, C) using different key seeds.
+		let make_set = |seed: u64| -> Vec<(&'static u64, <Test as Config>::TheaId)> {
+			vec![(
+				&1u64,
+				Pair::generate_with_phrase(Some(
+					format!("{}//{}", WELL_KNOWN, seed).as_str()
+				))
+				.0
+				.public()
+				.into(),
+			)]
+		};
+		let set_a = make_set(100);
+		let set_b = make_set(200);
+		let set_c = make_set(300);
+
+		// Install set A as the genesis/current set (id=0).
+		let set_a_keys: Vec<<Test as Config>::TheaId> =
+			set_a.iter().map(|(_, k)| k.clone()).collect();
+		<Authorities<Test>>::insert(0, BoundedVec::truncate_from(set_a_keys));
+		<ValidatorSetId<Test>>::put(0u64);
+
+		// Session 1: A is active; incoming=B, queued=C.
+		// Block 1 (B≠C): generates ScheduledRotateValidators at nonce 1.
+		// Block 2 (B≠A): advances to id=1, generates ValidatorsRotated at nonce 2.
+		Thea::on_new_session(false, set_b.clone().into_iter(), set_c.clone().into_iter());
+		assert_eq!(<ValidatorSetId<Test>>::get(), 1u64, "set should advance to B (id=1)");
+
+		// Simulate set B partially signing nonce 1 (threshold not yet reached).
+		let pending_msg = <OutgoingMessages<Test>>::get(network, 1u64)
+			.expect("nonce 1 message must exist");
+		let dummy_sig = sp_core::ecdsa::Signature::default().into();
+		let partial = SignedMessage::new(pending_msg, 1u64 /* set B's id */, 0, dummy_sig);
+		<SignedOutgoingMessages<Test>>::insert(network, 1u64, partial);
+
+		// Confirm the stored entry belongs to set B.
+		assert_eq!(
+			<SignedOutgoingMessages<Test>>::get(network, 1u64).unwrap().validator_set_id,
+			1u64
+		);
+		assert_eq!(
+			<SignedOutgoingMessages<Test>>::get(network, 1u64).unwrap().signatures.len(),
+			1
+		);
+
+		// Session 2: B is active; incoming=C, queued=C.
+		// Block 1 doesn't run (C==C).
+		// Block 2 (C≠B): advances to id=2, generates ValidatorsRotated at nonce 3.
+		// SECURITY (R2-H2): Must also reset SignedOutgoingMessages[n][1].
+		Thea::on_new_session(false, set_c.clone().into_iter(), set_c.clone().into_iter());
+		assert_eq!(<ValidatorSetId<Test>>::get(), 2u64, "set should advance to C (id=2)");
+
+		// The pending message at nonce 1 must now carry set C's id with no signatures —
+		// set C can begin signing it from scratch without hitting the add_signature guard.
+		let reset = <SignedOutgoingMessages<Test>>::get(network, 1u64)
+			.expect("SignedOutgoingMessages[n][1] must still exist after reset");
+		assert_eq!(
+			reset.validator_set_id,
+			2u64,
+			"validator_set_id must be updated to new active set (C, id=2)"
+		);
+		assert!(
+			reset.signatures.is_empty(),
+			"partial signatures from retiring set must be cleared on rotation"
+		);
+	})
+}
+
+#[test]
+fn test_r2_h3_validators_rotated_matches_scheduled_rotate_per_network() {
+	// Verifies the normal two-session rotation: ScheduledRotateValidators is
+	// generated in session 1, then ValidatorsRotated fires in session 2.
+	// Both should produce outgoing messages; nonces must advance correctly.
+	new_test_ext().execute_with(|| {
+		let network: Network = 1;
+		let mut networks = BTreeSet::new();
+		networks.insert(network);
+		<ActiveNetworks<Test>>::put(networks);
+		let network_config = thea_primitives::types::NetworkConfig {
+			fork_period: 0,
+			min_stake: 0,
+			fisherman_stake: 0,
+			network_type: NetworkType::Parachain,
+		};
+		<NetworkConfig<Test>>::insert(network, network_config);
+
+		let make_set = |seed: u64| -> Vec<(&'static u64, <Test as Config>::TheaId)> {
+			vec![(
+				&1u64,
+				Pair::generate_with_phrase(Some(
+					format!("{}//{}", WELL_KNOWN, seed).as_str()
+				))
+				.0
+				.public()
+				.into(),
+			)]
+		};
+		let set_a = make_set(400);
+		let set_b = make_set(500);
+		let set_c = make_set(600);
+
+		let set_a_keys: Vec<<Test as Config>::TheaId> =
+			set_a.iter().map(|(_, k)| k.clone()).collect();
+		<Authorities<Test>>::insert(0, BoundedVec::truncate_from(set_a_keys));
+		<ValidatorSetId<Test>>::put(0u64);
+
+		// Session 1: incoming=B, queued=C.
+		// Block 1 (B≠C): ScheduledRotateValidators → nonce 1.
+		// Block 2 (B≠A): ValidatorsRotated      → nonce 2.
+		Thea::on_new_session(false, set_b.clone().into_iter(), set_c.clone().into_iter());
+		assert_eq!(<OutgoingNonce<Test>>::get(network), 2u64);
+		// Nonce 1 must be ScheduledRotateValidators (non-empty data encodes the queued set).
+		let msg1 = <OutgoingMessages<Test>>::get(network, 1u64).expect("nonce 1 must exist");
+		assert_eq!(msg1.payload_type, PayloadType::ScheduledRotateValidators);
+		// Nonce 2 must be ValidatorsRotated (empty data = activate the scheduled set).
+		let msg2 = <OutgoingMessages<Test>>::get(network, 2u64).expect("nonce 2 must exist");
+		assert_eq!(msg2.payload_type, PayloadType::ValidatorsRotated);
+
+		// Session 2: incoming=C, queued=C.
+		// Block 1 doesn't run (C==C — no new change scheduled).
+		// Block 2 (C≠B): ValidatorsRotated → nonce 3.
+		Thea::on_new_session(false, set_c.clone().into_iter(), set_c.clone().into_iter());
+		assert_eq!(<OutgoingNonce<Test>>::get(network), 3u64);
+		let msg3 = <OutgoingMessages<Test>>::get(network, 3u64).expect("nonce 3 must exist");
+		assert_eq!(msg3.payload_type, PayloadType::ValidatorsRotated);
+	})
+}
