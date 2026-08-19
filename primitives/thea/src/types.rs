@@ -24,7 +24,6 @@ use polkadex_primitives::{AssetId, UNIT_BALANCE};
 use scale_info::TypeInfo;
 use serde::{Deserialize, Serialize};
 use sp_core::H160;
-use sp_runtime::Percent;
 #[cfg(not(feature = "std"))]
 use sp_std::vec::Vec;
 use sp_std::{cmp::Ordering, collections::btree_map::BTreeMap};
@@ -86,9 +85,20 @@ impl<Signature> SignedMessage<Signature> {
 			log::error!(target:"thea", "Thea Message is not same");
 			return;
 		}
-		if self.validator_set_id < validator_set_id {
-			self.validator_set_id = validator_set_id;
-			self.signatures.clear();
+		// AUTHENTICATION HARDENING (2026-08-14): never merge signatures across
+		// validator sets. The original code advanced the stored set id whenever
+		// a newer (or attacker-chosen higher) id arrived, clearing all prior
+		// signatures. This allowed a single signature from any set — including a
+		// fabricated non-existent one — to reset quorum progress and ultimately
+		// meet a collapsed threshold. Drop cross-set contributions silently.
+		if self.validator_set_id != validator_set_id {
+			log::error!(
+				target: "thea",
+				"Rejecting signature with mismatched validator_set_id: expected {}, got {}",
+				self.validator_set_id,
+				validator_set_id,
+			);
+			return;
 		}
 		self.signatures.insert(auth_index, signature);
 	}
@@ -103,9 +113,20 @@ impl<Signature> SignedMessage<Signature> {
 	///
 	/// * `bool` - True if the threshold is reached
 	pub fn threshold_reached(&self, max_len: usize) -> bool {
-		const MAJORITY: u8 = 67;
-		let p = Percent::from_percent(MAJORITY);
-		let threshold = p * max_len;
+		// AUTHENTICATION HARDENING (2026-08-14).
+		//
+		// (1) An empty authority set can never reach quorum.
+		//     The original Percent-based calculation gives 67% * 0 = 0, and
+		//     signatures.len() >= 0 is always true — an empty-set message was
+		//     treated as finalised with zero signatures.
+		if max_len == 0 {
+			return false;
+		}
+		// (2) Use strict integer ceiling arithmetic so the threshold never floors
+		//     to a value that is achievable with fewer signers than intended.
+		//     (2 * n) / 3 + 1 is the smallest integer strictly greater than 2n/3,
+		//     guaranteeing a genuine 2/3 supermajority for any set size.
+		let threshold = (2 * max_len) / 3 + 1;
 		self.signatures.len() >= threshold
 	}
 
