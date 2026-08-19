@@ -706,6 +706,154 @@ fn test_submit_incoming_message_happy_path_first_message() {
 	})
 }
 
+// ─── H1 regression tests ─────────────────────────────────────────────────────
+//
+// H1 finding: submit_incoming_message gated only on single allowlisted test
+// relayer — one address per network set by governance. Single point of failure:
+// if that account goes offline or is compromised the bridge for that network
+// stops.
+//
+// Fix: removed the three-line AllowListTestingRelayers check from
+// submit_incoming_message. Any signed account may now relay provided they lock
+// at least min_stake. Economic security (stake + fisherman slashing) replaces
+// the allowlist.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_h1_any_account_with_sufficient_stake_can_relay() {
+	// Verifies that an account with NO entry in AllowListTestingRelayers can
+	// submit a message successfully, provided it meets the min_stake requirement.
+	// Before H1 this call would return NotAnAllowlistedRelayer.
+	new_test_ext().execute_with(|| {
+		let network_id: Network = 2;
+		let stranger = 99u64; // deliberately NOT inserted into AllowListTestingRelayers
+		let stake = 1 * UNIT_BALANCE;
+
+		let _ = Balances::deposit_creating(&stranger, 100 * UNIT_BALANCE);
+		let network_config = thea_primitives::types::NetworkConfig {
+			fork_period: 0,
+			min_stake: 1 * UNIT_BALANCE,
+			fisherman_stake: 1 * UNIT_BALANCE,
+			network_type: NetworkType::Parachain,
+		};
+		<NetworkConfig<Test>>::insert(network_id, network_config);
+		// Note: AllowListTestingRelayers is intentionally NOT populated for this network.
+
+		let message = Message {
+			block_no: 0,
+			nonce: 1,
+			network: network_id,
+			payload_type: PayloadType::L1Deposit,
+			data: vec![],
+		};
+
+		// Must succeed — stake meets min_stake, allowlist gate is gone.
+		assert_ok!(Thea::submit_incoming_message(
+			RuntimeOrigin::signed(stranger),
+			message,
+			stake
+		));
+		// Stake must be locked.
+		assert_eq!(Balances::reserved_balance(&stranger), stake);
+	})
+}
+
+#[test]
+fn test_h1_multiple_unlisted_relayers_compete_highest_stake_wins() {
+	// Verifies that two accounts — neither in AllowListTestingRelayers — can
+	// compete for the same nonce slot, with the higher-staked one winning.
+	new_test_ext().execute_with(|| {
+		let network_id: Network = 3;
+		let relayer_a = 10u64;
+		let relayer_b = 11u64;
+		let stake_a = 1 * UNIT_BALANCE;
+		let stake_b = 2 * UNIT_BALANCE; // higher stake — should win the slot
+
+		let _ = Balances::deposit_creating(&relayer_a, 100 * UNIT_BALANCE);
+		let _ = Balances::deposit_creating(&relayer_b, 100 * UNIT_BALANCE);
+		let network_config = thea_primitives::types::NetworkConfig {
+			fork_period: 0,
+			min_stake: 1 * UNIT_BALANCE,
+			fisherman_stake: 1 * UNIT_BALANCE,
+			network_type: NetworkType::Parachain,
+		};
+		<NetworkConfig<Test>>::insert(network_id, network_config);
+
+		// relayer_a submits first.
+		let message_a = Message {
+			block_no: 0,
+			nonce: 1,
+			network: network_id,
+			payload_type: PayloadType::L1Deposit,
+			data: vec![0xaa],
+		};
+		assert_ok!(Thea::submit_incoming_message(
+			RuntimeOrigin::signed(relayer_a),
+			message_a.clone(),
+			stake_a
+		));
+		assert_eq!(Balances::reserved_balance(&relayer_a), stake_a);
+
+		// relayer_b outbids with a higher stake — must take the slot.
+		let message_b = Message {
+			block_no: 0,
+			nonce: 1,
+			network: network_id,
+			payload_type: PayloadType::L1Deposit,
+			data: vec![0xbb],
+		};
+		assert_ok!(Thea::submit_incoming_message(
+			RuntimeOrigin::signed(relayer_b),
+			message_b.clone(),
+			stake_b
+		));
+
+		// relayer_b holds the slot; relayer_a's stake is released.
+		assert_eq!(Balances::reserved_balance(&relayer_b), stake_b);
+		assert_eq!(Balances::reserved_balance(&relayer_a), 0);
+
+		// The queued message must reflect relayer_b's submission.
+		let queued =
+			<IncomingMessagesQueue<Test>>::get(network_id, 1u64).expect("slot must be occupied");
+		assert_eq!(queued.relayer, relayer_b);
+		assert_eq!(queued.message.data, vec![0xbb]);
+	})
+}
+
+#[test]
+fn test_h1_insufficient_stake_still_rejected() {
+	// Confirms the stake guard is intact after removing the allowlist gate.
+	new_test_ext().execute_with(|| {
+		let network_id: Network = 4;
+		let relayer = 20u64;
+		let _ = Balances::deposit_creating(&relayer, 100 * UNIT_BALANCE);
+		let network_config = thea_primitives::types::NetworkConfig {
+			fork_period: 0,
+			min_stake: 5 * UNIT_BALANCE,
+			fisherman_stake: 1 * UNIT_BALANCE,
+			network_type: NetworkType::Parachain,
+		};
+		<NetworkConfig<Test>>::insert(network_id, network_config);
+
+		let message = Message {
+			block_no: 0,
+			nonce: 1,
+			network: network_id,
+			payload_type: PayloadType::L1Deposit,
+			data: vec![],
+		};
+		// Stake (1) is below min_stake (5) — must still fail.
+		assert_err!(
+			Thea::submit_incoming_message(
+				RuntimeOrigin::signed(relayer),
+				message,
+				1 * UNIT_BALANCE
+			),
+			Error::<Test>::NotEnoughStake
+		);
+	})
+}
+
 #[test]
 fn test_add_signature() {
 	new_test_ext().execute_with(|| {
@@ -762,5 +910,277 @@ fn test_locks() {
 		assert_eq!(Balances::reserved_balance(&relayer), 1 * UNIT_BALANCE);
 		Balances::release(&MockHoldReason::Relayer, &relayer, stake, Precision::BestEffort).unwrap();
 		assert_eq!(Balances::reserved_balance(&relayer), 0);
+	})
+}
+
+// ── SECURITY (H7) regression tests ──────────────────────────────────────────
+
+/// Sending two outgoing messages via governance must use distinct, strictly-
+/// incrementing nonces — no slot must be overwritten.
+#[test]
+fn test_h7_execute_withdrawals_sequential_nonces_not_overwritten() {
+	new_test_ext().execute_with(|| {
+		let network = 1u8;
+
+		// First governance message → nonce 1
+		assert_ok!(Thea::send_thea_message(RuntimeOrigin::root(), vec![1, 2, 3], network));
+		let msg1 = <OutgoingMessages<Test>>::get(network, 1).expect("message 1 must exist");
+		assert_eq!(msg1.nonce, 1);
+		assert_eq!(<OutgoingNonce<Test>>::get(network), 1);
+
+		// Second governance message → nonce 2, must NOT overwrite nonce 1
+		assert_ok!(Thea::send_thea_message(RuntimeOrigin::root(), vec![4, 5, 6], network));
+		let msg2 = <OutgoingMessages<Test>>::get(network, 2).expect("message 2 must exist");
+		assert_eq!(msg2.nonce, 2);
+		assert_eq!(<OutgoingNonce<Test>>::get(network), 2);
+
+		// Nonce 1 slot is untouched
+		let still_msg1 = <OutgoingMessages<Test>>::get(network, 1).expect("message 1 still present");
+		assert_eq!(still_msg1.data, vec![1, 2, 3]);
+	})
+}
+
+/// update_outgoing_nonce must reject values below the current outgoing nonce
+/// (SECURITY H7: rolling back would let execute_withdrawals overwrite an
+/// existing OutgoingMessages slot, orphaning in-flight signatures).
+#[test]
+fn test_h7_update_outgoing_nonce_rejects_backwards_roll() {
+	new_test_ext().execute_with(|| {
+		let network = 1u8;
+
+		// Advance the nonce to 10 via two messages
+		assert_ok!(Thea::send_thea_message(RuntimeOrigin::root(), vec![], network));
+		assert_ok!(Thea::send_thea_message(RuntimeOrigin::root(), vec![], network));
+		assert_ok!(Thea::update_outgoing_nonce(RuntimeOrigin::root(), 10, network));
+		assert_eq!(<OutgoingNonce<Test>>::get(network), 10);
+
+		// Rolling back below the current OutgoingNonce must be rejected.
+		assert_err!(
+			Thea::update_outgoing_nonce(RuntimeOrigin::root(), 9, network),
+			Error::<Test>::OutgoingNonceBelowFinalized
+		);
+		assert_err!(
+			Thea::update_outgoing_nonce(RuntimeOrigin::root(), 0, network),
+			Error::<Test>::OutgoingNonceBelowFinalized
+		);
+
+		// Advancing (same value or higher) must still work.
+		assert_ok!(Thea::update_outgoing_nonce(RuntimeOrigin::root(), 10, network));
+		assert_ok!(Thea::update_outgoing_nonce(RuntimeOrigin::root(), 100, network));
+	})
+}
+
+/// If somehow an OutgoingMessages slot is already occupied (e.g. storage
+/// inconsistency after an emergency nonce override), execute_withdrawals must
+/// return an error rather than silently overwriting the existing message.
+#[test]
+fn test_h7_execute_withdrawals_refuses_to_overwrite_occupied_slot() {
+	new_test_ext().execute_with(|| {
+		let network = 1u8;
+
+		// Write a message at nonce 1 manually, then reset OutgoingNonce to 0
+		// (bypassing the guard via direct storage write, simulating an emergency
+		// recovery that left state inconsistent).
+		let orphaned = Message {
+			block_no: 0,
+			nonce: 1,
+			network,
+			payload_type: PayloadType::L1Deposit,
+			data: vec![99],
+		};
+		<OutgoingMessages<Test>>::insert(network, 1u64, orphaned);
+		<OutgoingNonce<Test>>::insert(network, 0u64); // reset counter (direct, bypasses guard)
+
+		// Now execute_withdrawals would try nonce 1 — must fail, not overwrite.
+		assert_err!(
+			Thea::send_thea_message(RuntimeOrigin::root(), vec![1, 2], network),
+			Error::<Test>::OutgoingMessageSlotOccupied
+		);
+
+		// The original message at nonce 1 must be intact.
+		let still_orphaned =
+			<OutgoingMessages<Test>>::get(network, 1u64).expect("orphaned message still present");
+		assert_eq!(still_orphaned.data, vec![99]);
+	})
+}
+
+// ─── H8 regression tests ────────────────────────────────────────────────────
+//
+// H8 finding: "do_deposit is #[transactional] — one failed deposit reverts all
+// unrelated deposits."
+//
+// Fix: `on_initialize` wraps the executor call in `with_transaction`.  On Err
+// the executor's partial storage changes are rolled back, but the nonce still
+// advances so the incoming queue does not stall permanently.
+//
+// Note: the `()` executor always returns `Ok(())`, so the Err branch can only
+// be exercised by a real executor implementation.  The tests below cover the
+// structural contracts — queue draining, nonce advancement, event emission,
+// and stake release — which hold regardless of executor result.
+// ────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_h8_on_initialize_emits_payload_processed_event_and_archives_message() {
+	// Verifies that on success the TheaPayloadProcessed event is emitted and
+	// the message is archived in IncomingMessages (so it can be queried).
+	new_test_ext().execute_with(|| {
+		// Events are not registered at block 0; advance to block 1.
+		System::set_block_number(1);
+
+		let network: Network = 1;
+		let nonce = 0u64;
+		let relayer = 1u64;
+		let stake = 1 * UNIT_BALANCE;
+
+		let mut networks: BTreeSet<Network> = BTreeSet::new();
+		networks.insert(network);
+		<ActiveNetworks<Test>>::put(networks);
+		<IncomingNonce<Test>>::insert(network, nonce);
+
+		let _ = Balances::deposit_creating(&relayer, 100 * UNIT_BALANCE);
+		Balances::hold(&MockHoldReason::Relayer, &relayer, stake).unwrap();
+
+		let message = Message {
+			block_no: 0,
+			nonce,
+			network,
+			payload_type: PayloadType::L1Deposit,
+			data: vec![42, 43], // non-empty data to distinguish from a zero-value slot
+		};
+		let incoming_message =
+			IncomingMessage { message: message.clone(), relayer, stake, execute_at: 0 };
+		<IncomingMessagesQueue<Test>>::insert(network, nonce.saturating_add(1), incoming_message);
+
+		Thea::on_initialize(1u64);
+
+		// Nonce must advance.
+		assert_eq!(<IncomingNonce<Test>>::get(network), 1u64);
+
+		// Message must be dequeued.
+		assert!(
+			<IncomingMessagesQueue<Test>>::get(network, 1u64).is_none(),
+			"message must be consumed from IncomingMessagesQueue"
+		);
+
+		// Message must be archived for audit / replay-protection.
+		let archived = <IncomingMessages<Test>>::get(network, nonce)
+			.expect("message must be archived in IncomingMessages");
+		assert_eq!(archived.data, vec![42, 43]);
+
+		// TheaPayloadProcessed event must be emitted.
+		System::assert_has_event(Event::TheaPayloadProcessed(network, nonce).into());
+
+		// Relayer stake must be released.
+		assert_eq!(
+			Balances::free_balance(&relayer),
+			100 * UNIT_BALANCE,
+			"relayer stake must be released on success"
+		);
+	})
+}
+
+#[test]
+fn test_h8_on_initialize_queue_always_cleared_regardless_of_stake() {
+	// Verifies that the incoming message is unconditionally consumed from the
+	// queue in on_initialize, even when the relayer has no stake held (stake=0),
+	// ensuring the queue never grows unboundedly due to failed releases.
+	new_test_ext().execute_with(|| {
+		let network: Network = 2;
+		let nonce = 0u64;
+		let relayer = 2u64;
+
+		let mut networks: BTreeSet<Network> = BTreeSet::new();
+		networks.insert(network);
+		<ActiveNetworks<Test>>::put(networks);
+		<IncomingNonce<Test>>::insert(network, nonce);
+
+		let message = Message {
+			block_no: 0,
+			nonce,
+			network,
+			payload_type: PayloadType::L1Deposit,
+			data: vec![],
+		};
+		// stake = 0: release will succeed trivially; tests queue draining independently.
+		let incoming_message = IncomingMessage { message, relayer, stake: 0, execute_at: 0 };
+		<IncomingMessagesQueue<Test>>::insert(network, nonce.saturating_add(1), incoming_message);
+
+		// Queue must have one entry before on_initialize.
+		assert!(<IncomingMessagesQueue<Test>>::get(network, 1u64).is_some());
+
+		Thea::on_initialize(1u64);
+
+		// Queue must be empty after on_initialize regardless of executor result.
+		assert!(
+			<IncomingMessagesQueue<Test>>::get(network, 1u64).is_none(),
+			"IncomingMessagesQueue must be cleared by on_initialize"
+		);
+
+		// Nonce must have advanced.
+		assert_eq!(
+			<IncomingNonce<Test>>::get(network),
+			1u64,
+			"nonce must advance to prevent queue stall"
+		);
+	})
+}
+
+#[test]
+fn test_h8_on_initialize_sequential_messages_all_processed() {
+	// Verifies that two consecutive bridge messages in the queue are both
+	// processed (nonces 1 and 2) across two separate on_initialize calls,
+	// confirming the transactional wrapper does not interfere with sequential
+	// message delivery.
+	new_test_ext().execute_with(|| {
+		// Events are not registered at block 0; advance to block 1.
+		System::set_block_number(1);
+
+		let network: Network = 1;
+		let relayer = 1u64;
+		let stake = 1 * UNIT_BALANCE;
+
+		let mut networks: BTreeSet<Network> = BTreeSet::new();
+		networks.insert(network);
+		<ActiveNetworks<Test>>::put(networks);
+		<IncomingNonce<Test>>::insert(network, 0u64);
+
+		let _ = Balances::deposit_creating(&relayer, 100 * UNIT_BALANCE);
+
+		// Enqueue two messages at nonces 1 and 2.
+		for nonce in 1u64..=2u64 {
+			// Place a fresh hold for each message's stake.
+			Balances::hold(&MockHoldReason::Relayer, &relayer, stake).unwrap();
+			let msg = Message {
+				block_no: 0,
+				nonce,
+				network,
+				payload_type: PayloadType::L1Deposit,
+				data: vec![nonce as u8],
+			};
+			<IncomingMessagesQueue<Test>>::insert(
+				network,
+				nonce,
+				IncomingMessage { message: msg, relayer, stake, execute_at: 0 },
+			);
+		}
+
+		// First on_initialize: processes nonce 1.
+		Thea::on_initialize(1u64);
+		assert_eq!(<IncomingNonce<Test>>::get(network), 1u64);
+		assert!(<IncomingMessagesQueue<Test>>::get(network, 1u64).is_none());
+		assert!(<IncomingMessages<Test>>::get(network, 1u64).is_some());
+
+		// Second on_initialize: processes nonce 2.
+		Thea::on_initialize(2u64);
+		assert_eq!(<IncomingNonce<Test>>::get(network), 2u64);
+		assert!(<IncomingMessagesQueue<Test>>::get(network, 2u64).is_none());
+		assert!(<IncomingMessages<Test>>::get(network, 2u64).is_some());
+
+		// Both messages must have emitted TheaPayloadProcessed.
+		System::assert_has_event(Event::TheaPayloadProcessed(network, 1u64).into());
+		System::assert_has_event(Event::TheaPayloadProcessed(network, 2u64).into());
+
+		// Full stake released across both messages.
+		assert_eq!(Balances::free_balance(&relayer), 100 * UNIT_BALANCE);
 	})
 }

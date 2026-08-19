@@ -93,8 +93,20 @@ pub const ETHEREUM_NETWORK: Network = 2;
 pub const MESSAGE_CACHE_DURATION_IN_SECS: u64 = 60;
 
 /// Thea incoming message executor abstraction which should be implemented by the "Thea Executor".
+///
+/// # SECURITY (H8 / R3-H14): Per-deposit transaction isolation
+///
+/// Implementors **MUST** process each individual deposit in its own isolated storage
+/// transaction (e.g. `frame_support::storage::transactional::with_storage_layer`).
+/// Wrapping the entire batch in a single `#[transactional]` block causes one failed
+/// deposit to revert all preceding successful deposits in the same bridge message,
+/// permanently losing those bridged tokens.
+///
+/// Return `Err` only when the *entire* batch payload is irrecoverably invalid (e.g.
+/// SCALE decode failure). Per-deposit failures should be logged individually and
+/// skipped — the remaining deposits in the same message must still be attempted.
 pub trait TheaIncomingExecutor {
-	fn execute_deposits(network: Network, deposits: Vec<u8>);
+	fn execute_deposits(network: Network, deposits: Vec<u8>) -> DispatchResult;
 }
 
 /// Thea outgoing message executor abstraction which should be implemented by the "Thea" pallet.
@@ -104,7 +116,9 @@ pub trait TheaOutgoingExecutor {
 }
 
 impl TheaIncomingExecutor for () {
-	fn execute_deposits(_network: Network, _deposits: Vec<u8>) {}
+	fn execute_deposits(_network: Network, _deposits: Vec<u8>) -> DispatchResult {
+		Ok(())
+	}
 }
 
 pub trait TheaBenchmarkHelper {

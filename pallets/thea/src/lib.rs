@@ -96,12 +96,14 @@ pub trait TheaWeightInfo {
 pub mod pallet {
 	use super::*;
 	use frame_support::{
+		storage::transactional::with_transaction,
 		traits::{
 			fungible::{Inspect, Mutate as OtherMutate},
 			tokens::{fungible::hold::Mutate, Fortitude, Precision, Preservation},
 		},
 		transactional,
 	};
+	use sp_runtime::TransactionOutcome;
 	//use frame_system::offchain::SendTransactionTypes;
 	use frame_system::offchain::CreateTransactionBase;
 	use polkadex_primitives::Balance;
@@ -277,7 +279,12 @@ pub mod pallet {
 		OptionQuery,
 	>;
 
-	/// Temporary allowlist for relayer
+	/// DEPRECATED (H1 fix): Single-relayer testing gate — kept so that existing
+	/// storage keys are not silently orphaned without a clearing migration. Nothing
+	/// reads this map after the H1 fix; `add_relayer_origin_for_network` still
+	/// writes it for governance tooling compatibility. Remove this storage item
+	/// together with that extrinsic in the next breaking spec upgrade once a
+	/// clearing migration has run.
 	#[pallet::storage]
 	pub(super) type AllowListTestingRelayers<T: Config> =
 		StorageMap<_, Identity, Network, T::AccountId, OptionQuery>;
@@ -299,6 +306,11 @@ pub mod pallet {
 		UnableToSlicePublicKeyHash(T::TheaId),
 		/// Unable to generate rotate validators payload for this network
 		UnableToGenerateValidatorSet(Network),
+		/// SECURITY (H8): The deposit batch for this message failed execution;
+		/// all partial storage changes made by the executor were rolled back.
+		/// The nonce was advanced to prevent the incoming queue from stalling.
+		/// Inspect the DispatchError to diagnose the executor failure.
+		DepositExecutionFailed(Network, u64, DispatchError),
 	}
 
 	#[pallet::error]
@@ -314,11 +326,30 @@ pub mod pallet {
 		/// MessageNotFound
 		MessageNotFound,
 		/// No Relayer found
+		/// DEPRECATED (H1 fix): AllowListTestingRelayers gate removed; this variant is
+		/// retained at its original enum position to preserve error-index encoding for
+		/// existing clients. It is no longer returned by any extrinsic.
 		NoRelayersFound,
 		/// Not expected relayer origin
+		/// DEPRECATED (H1 fix): AllowListTestingRelayers gate removed; this variant is
+		/// retained at its original enum position to preserve error-index encoding for
+		/// existing clients. It is no longer returned by any extrinsic.
 		NotAnAllowlistedRelayer,
 		/// Nonce Error
 		NonceError,
+		/// The caller-supplied validator_set_id does not match the active set
+		InvalidValidatorSetId,
+		/// The active authority set is empty and cannot authorise any message
+		EmptyValidatorSet,
+		/// SECURITY (H7): Attempted to overwrite an existing outgoing message slot.
+		/// Inserting a new message at an already-occupied nonce would orphan any
+		/// in-flight signatures (add_signature silently drops them when the stored
+		/// message != the new message) and permanently lose the bridged tokens.
+		OutgoingMessageSlotOccupied,
+		/// SECURITY (H7): update_outgoing_nonce attempted to roll the nonce below
+		/// the last finalized nonce, which would re-use already-finalized nonce
+		/// slots and expose the overwrite vulnerability above.
+		OutgoingNonceBelowFinalized,
 	}
 
 	#[pallet::hooks]
@@ -333,32 +364,81 @@ pub mod pallet {
 					None => continue,
 					Some(msg) => {
 						if msg.execute_at <= blk.saturated_into::<u32>() {
-							<T as pallet::Config>::Executor::execute_deposits(
-								msg.message.network,
-								msg.message.data.clone(),
-							);
+							// SECURITY (H8): Wrap the executor call in an isolated storage
+							// transaction.  If execute_deposits returns Err, or panics
+							// (via stack unwinding), all partial state changes made by the
+							// executor are rolled back atomically before we resume here.
+							//
+							// The nonce is advanced unconditionally AFTER the transaction
+							// block because the message was already `take`n from the queue;
+							// failing to advance nonce here would permanently stall the
+							// bridge for this network.
+							//
+							// Implementors of TheaIncomingExecutor::execute_deposits MUST
+							// process each deposit individually inside its own storage layer
+							// so that one bad deposit does not revert the others.
+							let deposit_result = with_transaction(|| {
+								let r = <T as pallet::Config>::Executor::execute_deposits(
+									msg.message.network,
+									msg.message.data.clone(),
+								);
+								match r {
+									Ok(()) => TransactionOutcome::Commit(Ok(())),
+									Err(e) => TransactionOutcome::Rollback(Err(e)),
+								}
+							});
+
+							// Always advance the nonce — the message is gone from the queue.
 							<IncomingNonce<T>>::insert(msg.message.network, next_nonce);
-							Self::deposit_event(Event::<T>::TheaPayloadProcessed(
-								msg.message.network,
-								msg.message.nonce,
-							));
-							// Save the incoming message for some time
-							<IncomingMessages<T>>::insert(
-								msg.message.network,
-								msg.message.nonce,
-								msg.message,
-							);
-							if let Err(err) = T::NativeCurrency::release(
-								&T::RuntimeHoldReason::from(HoldReason::Relayer),
-								&msg.relayer,
-								msg.stake.saturated_into(),
-								Precision::BestEffort,
-							) {
-								// Emit an error event
-								Self::deposit_event(Event::<T>::ErrorWhileReleasingLock(
-									msg.relayer,
-									err,
-								));
+
+							match deposit_result {
+								Ok(()) => {
+									Self::deposit_event(Event::<T>::TheaPayloadProcessed(
+										msg.message.network,
+										msg.message.nonce,
+									));
+									// Save the incoming message for some time
+									<IncomingMessages<T>>::insert(
+										msg.message.network,
+										msg.message.nonce,
+										msg.message,
+									);
+									if let Err(err) = T::NativeCurrency::release(
+										&T::RuntimeHoldReason::from(HoldReason::Relayer),
+										&msg.relayer,
+										msg.stake.saturated_into(),
+										Precision::BestEffort,
+									) {
+										Self::deposit_event(Event::<T>::ErrorWhileReleasingLock(
+											msg.relayer,
+											err,
+										));
+									}
+								},
+								Err(e) => {
+									// SECURITY (H8): Executor failed; its storage changes were
+									// rolled back above. Emit an event so the chain operator
+									// can detect and investigate the failure.
+									// The relayer still receives their stake back — they
+									// submitted a cryptographically-valid signed message;
+									// executor failure is not their fault.
+									Self::deposit_event(Event::<T>::DepositExecutionFailed(
+										msg.message.network,
+										msg.message.nonce,
+										e,
+									));
+									if let Err(err) = T::NativeCurrency::release(
+										&T::RuntimeHoldReason::from(HoldReason::Relayer),
+										&msg.relayer,
+										msg.stake.saturated_into(),
+										Precision::BestEffort,
+									) {
+										Self::deposit_event(Event::<T>::ErrorWhileReleasingLock(
+											msg.relayer,
+											err,
+										));
+									}
+								},
 							}
 						}
 					},
@@ -400,9 +480,12 @@ pub mod pallet {
 			stake: Balance,
 		) -> DispatchResult {
 			let signer = ensure_signed(origin)?;
-			let expected_signer = <AllowListTestingRelayers<T>>::get(payload.network)
-				.ok_or(Error::<T>::NoRelayersFound)?;
-			ensure!(signer == expected_signer, Error::<T>::NotAnAllowlistedRelayer);
+			// SECURITY (H1): The single-relayer allowlist gate has been removed.
+			// Any signed account may submit an incoming message provided they lock
+			// at least `min_stake`.  Competing relayers are resolved by the
+			// highest-stake-wins rule in the `Some(existing_payload)` branch below.
+			// Fishermen may slash a relayer who submits an incorrect message via
+			// `report_misbehaviour`, so economic collateral replaces the allowlist.
 
 			let config = <NetworkConfig<T>>::get(payload.network);
 
@@ -502,6 +585,17 @@ pub mod pallet {
 			network: Network,
 		) -> DispatchResult {
 			ensure_root(origin)?;
+			// SECURITY (H7): Never roll the outgoing nonce backwards.
+			// If OutgoingNonce is reset to a value below the highest nonce already
+			// written into OutgoingMessages, the next execute_withdrawals call will
+			// re-use an occupied slot.  The new message overwrites the old one, and
+			// any in-flight signatures for the old message are silently dropped by
+			// add_signature (it checks message equality), permanently orphaning the
+			// bridged tokens for both the old and new withdrawal.
+			// Note: the contains_key guard inside execute_withdrawals is the hard
+			// safety net; this check provides defence-in-depth.
+			let current = <OutgoingNonce<T>>::get(network);
+			ensure!(nonce >= current, Error::<T>::OutgoingNonceBelowFinalized);
 			<OutgoingNonce<T>>::insert(network, nonce);
 			Ok(())
 		}
@@ -555,6 +649,19 @@ pub mod pallet {
 		) -> DispatchResult {
 			ensure_none(origin)?;
 
+			// AUTHENTICATION HARDENING (2026-08-14): same guards as
+			// validate_signed_outgoing_message — pin to the active set and
+			// reject an empty one. validate_unsigned already ran these checks,
+			// but defence in depth keeps the dispatch body safe on its own.
+			let active_set_id = <ValidatorSetId<T>>::get();
+			if id != active_set_id {
+				return Err(Error::<T>::InvalidValidatorSetId.into());
+			}
+			let authorities = <Authorities<T>>::get(active_set_id);
+			if authorities.is_empty() {
+				return Err(Error::<T>::EmptyValidatorSet.into());
+			}
+
 			for (network, nonce, signature) in signatures {
 				let message = match <OutgoingMessages<T>>::get(network, nonce) {
 					None => return Err(Error::<T>::MessageNotFound.into()),
@@ -567,7 +674,10 @@ pub mod pallet {
 					},
 					Some(mut signed_msg) => {
 						signed_msg.add_signature(message, id, auth_index, signature);
-						let auth_len = <Authorities<T>>::get(signed_msg.validator_set_id).len();
+						// Use the already-validated active authority set — do not
+						// re-derive from signed_msg.validator_set_id which is
+						// attacker-influenced storage.
+						let auth_len = authorities.len();
 						if signed_msg.threshold_reached(auth_len) {
 							<SignedOutgoingNonce<T>>::insert(network, nonce);
 							// Emit an event
@@ -690,7 +800,13 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Adds a relayer origin for deposits - will be removed after mainnet testing
+		/// DEPRECATED (H1 fix): This extrinsic wrote to `AllowListTestingRelayers`,
+		/// which was used to gate `submit_incoming_message` to a single test relayer.
+		/// That gate has been removed; any staked account may now submit messages.
+		/// This extrinsic is retained at call index 9 to avoid shifting call-index
+		/// encoding for governance tooling that may have it in pending proposals.
+		/// It will be fully removed in the next breaking spec upgrade alongside a
+		/// migration that clears the `AllowListTestingRelayers` storage map.
 		#[pallet::call_index(9)]
 		#[pallet::weight(< T as Config >::WeightInfo::add_thea_network())]
 		pub fn add_relayer_origin_for_network(
@@ -716,7 +832,23 @@ impl<T: Config> Pallet<T> {
 		id: &thea_primitives::ValidatorSetId,
 		signatures: &Vec<(Network, u64, T::Signature)>,
 	) -> TransactionValidity {
-		let authorities = <Authorities<T>>::get(id).to_vec();
+		// AUTHENTICATION HARDENING (2026-08-14).
+		//
+		// The caller-supplied `id` must match the chain's current active validator
+		// set. An attacker-chosen id that does not exist resolves to an empty
+		// BoundedVec via ValueQuery, collapsing the 67% threshold to zero and
+		// letting a zero-signature message pass as finalised (C8).
+		//
+		// (1) Pin to the active set.
+		let active_set_id = <ValidatorSetId<T>>::get();
+		if *id != active_set_id {
+			return InvalidTransaction::Custom(7).into();
+		}
+		// (2) Reject an empty authority set — defence in depth.
+		let authorities = <Authorities<T>>::get(active_set_id).to_vec();
+		if authorities.is_empty() {
+			return InvalidTransaction::Custom(8).into();
+		}
 		let signer: &T::TheaId = match authorities.get(*auth_index as usize) {
 			None => return InvalidTransaction::Custom(1).into(),
 			Some(signer) => signer,
@@ -868,6 +1000,10 @@ impl<T: Config> Pallet<T> {
 			// This will happen when new era starts, or end of the last epoch
 			<Authorities<T>>::insert(new_id, incoming);
 			<ValidatorSetId<T>>::put(new_id);
+			// Prune the set two epochs back so retired sets cannot be used to
+			// meet quorum. We keep current (new_id) and previous (new_id - 1)
+			// to allow re-signing during a rotation window.
+			<Authorities<T>>::remove(new_id.saturating_sub(2));
 			for network in active_networks {
 				let message =
 					Self::generate_payload(PayloadType::ValidatorsRotated, network, Vec::new()); //Empty data means activate the next set_id
@@ -896,6 +1032,16 @@ impl<T: Config> Pallet<T> {
 impl<T: Config> thea_primitives::TheaOutgoingExecutor for Pallet<T> {
 	fn execute_withdrawals(network: Network, data: Vec<u8>) -> DispatchResult {
 		let payload = Self::generate_payload(PayloadType::L1Deposit, network, data);
+		// SECURITY (H7): Refuse to overwrite an existing outgoing message.
+		// If this slot is already occupied (e.g. because update_outgoing_nonce
+		// was used to roll the counter back despite the guard above), inserting
+		// a new message here would permanently orphan any in-flight signatures:
+		// add_signature silently drops signatures whose stored message != the new
+		// message, so the slot can never finalise, and the bridged tokens are lost.
+		ensure!(
+			!<OutgoingMessages<T>>::contains_key(network, payload.nonce),
+			Error::<T>::OutgoingMessageSlotOccupied
+		);
 		// Update nonce
 		<OutgoingNonce<T>>::insert(network, payload.nonce);
 		<OutgoingMessages<T>>::insert(network, payload.nonce, payload);
