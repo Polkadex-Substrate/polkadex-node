@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 17 fixed (as of last update) · 48 open  
+**Totals:** 65 findings in this repo · 18 fixed (as of last update) · 47 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -548,6 +548,31 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 ---
 
+### R3-H9 — Global asset registry; weakest network mints any bridged asset
+**Severity:** High  
+**Location:** `pallets/thea-executor/src/lib.rs` (remote repo: `Polkadex-Substrate/Polkadex`)  
+**Date:** 2026-08-19
+
+**Vulnerability:** `Metadata` was a `StorageMap<AssetId, AssetMetadata>` keyed only by `AssetId`.  Any active bridge network could submit a deposit claiming any `AssetId` already registered, causing `execute_deposit` to mint tokens even though the depositing network is not the canonical issuer of that asset.  A compromised low-security chain (e.g., a testnet-grade parachain) could mint mainnet Ethereum-bridged tokens.
+
+**Changes made (remote repo `pallets/thea-executor/src/lib.rs`):**
+- Changed `Metadata` from `StorageMap<AssetId>` to `StorageDoubleMap<Network, AssetId>` with a security comment block
+- Added `STORAGE_VERSION` constant (bumped to 1) and `#[pallet::storage_version]` attribute
+- `update_asset_metadata`: added `network: Network` as second parameter; callers now register each `(network, asset_id)` pair independently; updated doc comment
+- `create_parachain_asset`: registers metadata under `PARACHAIN_NETWORK`
+- `do_deposit` → `execute_deposit`: threaded `network` through so deposit metadata is looked up as `Metadata[network][asset_id]`
+- `execute_deposit`: added `network: Network` parameter
+- `do_withdraw`: scoped both asset and fee-asset metadata lookups to `network`
+- `claim_deposit`: added `network: Network` parameter; passed to `execute_deposit`
+- `TheaBenchmarkHelper::set_metadata`: registers under `ETHEREUM_NETWORK`
+- Added `migrations::MigrateMetadataToDoubleMap` — copies all v0 `Metadata[asset_id]` entries to `Metadata[ETHEREUM_NETWORK][asset_id]`, bumps storage version to 1; includes `try-runtime` pre/post upgrade checks
+- `benchmarking.rs`: updated `Metadata::insert` and `claim_deposit` call to use network keys
+- `tests.rs`: updated all 15 tests to pass `network` to `update_asset_metadata`, `execute_deposit`, `claim_deposit`; updated `Metadata` storage reads/writes; all 15 tests pass
+
+**Commit:** `5c334ada` (remote repo, branch `mainnet-release`)
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -560,7 +585,6 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | R3-H12 | 🟠 High | pallets/ocex | LMP config metrics write-only; epoch budget over-issued |
 | R3-H13 | 🟠 High | pallets/ocex | close_auction non-transactional; place_bid commented out |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
-| R3-H9 | 🟠 High | pallets/thea | Global asset registry — weakest network mints any bridged asset |
 | R3-H6 | 🟠 High | pallets/liquidity-mining | Pools keyed by market_maker, callbacks look up by pool_id |
 | R3-H7 | 🟠 High | pallets/liquidity-mining | remove_liquidity_failed mints 10¹²× shares |
 | R3-H8 | 🟠 High | pallets/liquidity-mining | force_close_pool sends funds to personal account |
