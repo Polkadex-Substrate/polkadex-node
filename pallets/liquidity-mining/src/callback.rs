@@ -17,7 +17,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 use crate::pallet::{
-	AddLiquidityRecords, Config, Error, Event, LMPEpoch, Pallet, Pools, SnapshotFlag,
+	AddLiquidityRecords, Config, Error, Event, LMPEpoch, Pallet, PoolIdIndex, Pools, SnapshotFlag,
 	WithdrawingEpoch,
 };
 use frame_support::{
@@ -38,13 +38,17 @@ impl<T: Config> LiquidityMiningCrowdSourcePallet<T::AccountId> for Pallet<T> {
 
 	fn add_liquidity_success(
 		market: TradingPair,
-		market_maker: &T::AccountId,
+		pool_id: &T::AccountId,
 		lp: &T::AccountId,
 		shared_issued: Decimal,
 		price: Decimal,
 		total_inventory_in_quote: Decimal,
 	) -> DispatchResult {
-		let pool_config = <Pools<T>>::get(market, market_maker).ok_or(Error::<T>::UnknownPool)?;
+		// SECURITY (C6): OCEX passes pool_id (the derived account), not market_maker.
+		// Resolve through the reverse index before looking up in Pools.
+		let (_mkt, market_maker) =
+			<PoolIdIndex<T>>::get(pool_id).ok_or(Error::<T>::UnknownPool)?;
+		let pool_config = <Pools<T>>::get(market, &market_maker).ok_or(Error::<T>::UnknownPool)?;
 		let new_shared_issued = shared_issued
 			.saturating_mul(Decimal::from(UNIT_BALANCE))
 			.to_u128()
@@ -126,7 +130,11 @@ impl<T: Config> LiquidityMiningCrowdSourcePallet<T::AccountId> for Pallet<T> {
 			.saturated_into();
 
 		// Mint back the shares here.
-		let pool_config = <Pools<T>>::get(market, pool).ok_or(Error::<T>::UnknownPool)?;
+		// SECURITY (C6): `pool` is pool_id; resolve market_maker via reverse index.
+		let (_mkt, market_maker) =
+			<PoolIdIndex<T>>::get(pool).ok_or(Error::<T>::UnknownPool)?;
+		let pool_config =
+			<Pools<T>>::get(market, &market_maker).ok_or(Error::<T>::UnknownPool)?;
 		T::OtherAssets::mint_into(pool_config.share_id.try_into().unwrap(), lp, shares_burned)?;
 
 		let base_free = base_free
@@ -164,14 +172,17 @@ impl<T: Config> LiquidityMiningCrowdSourcePallet<T::AccountId> for Pallet<T> {
 
 	fn pool_force_close_success(
 		market: TradingPair,
-		market_maker: &T::AccountId,
+		pool_id: &T::AccountId,
 		base_freed: Decimal,
 		quote_freed: Decimal,
 	) -> DispatchResult {
+		// SECURITY (C6): `pool_id` is the derived account; resolve market_maker first.
+		let (_mkt, market_maker) =
+			<PoolIdIndex<T>>::get(pool_id).ok_or(Error::<T>::UnknownPool)?;
 		let mut pool_config =
-			<Pools<T>>::get(market, market_maker).ok_or(Error::<T>::UnknownPool)?;
+			<Pools<T>>::get(market, &market_maker).ok_or(Error::<T>::UnknownPool)?;
 		pool_config.force_closed = true;
-		<Pools<T>>::insert(market, market_maker, pool_config);
+		<Pools<T>>::insert(market, &market_maker, pool_config);
 		let base_freed = base_freed
 			.saturating_mul(Decimal::from(UNIT_BALANCE))
 			.to_u128()
@@ -194,5 +205,11 @@ impl<T: Config> LiquidityMiningCrowdSourcePallet<T::AccountId> for Pallet<T> {
 
 	fn stop_accepting_lmp_withdrawals(epoch: u16) {
 		<WithdrawingEpoch<T>>::put(epoch)
+	}
+
+	/// SECURITY (R2-H1): Check that pool_id is a registered pool sub-account before
+	/// OCEX transfers funds to it in RemoveLiquidityResult / PoolForceClosed egress messages.
+	fn is_valid_pool_id(pool_id: &T::AccountId) -> bool {
+		<PoolIdIndex<T>>::contains_key(pool_id)
 	}
 }

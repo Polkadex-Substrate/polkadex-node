@@ -162,6 +162,9 @@ parameter_types! {
 	pub const LMPRewardsPalletId: PalletId = PalletId(*b"OCEX_TMP");
 	pub const MsPerDay: u64 = 86_400_000;
 	pub const OBWithdrawalLimit: u32 = 50;
+	pub const OBIngressLimit: u32 = 100;
+	pub const MinimumDeposit: u128 = 1;
+	pub const MaxEgressMessages: u32 = 1000;
 }
 
 impl crate::pallet::Config for Test {
@@ -182,6 +185,9 @@ impl ocex::Config for Test {
 	type GovernanceOrigin = EnsureRoot<sp_runtime::AccountId32>;
 	type CrowdSourceLiqudityMining = LiqudityMining;
 	type OBWithdrawalLimit = OBWithdrawalLimit;
+	type OBIngressLimit = OBIngressLimit;
+	type MinimumDeposit = MinimumDeposit;
+	type MaxEgressMessages = MaxEgressMessages;
 	type WeightInfo = ocex::weights::WeightInfo<Test>;
 	type CrossChainGadget = ();
 }

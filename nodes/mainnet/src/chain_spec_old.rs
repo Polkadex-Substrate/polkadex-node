@@ -91,7 +91,23 @@ pub fn session_keys(
 }
 
 fn udon_testnet_config_genesis() -> serde_json::Value {
-	let seed = "***REMOVED***//";
+	// SECURITY (C7): The mnemonic seed previously hardcoded here was committed to git and is
+	// therefore permanently compromised. It has been removed. To regenerate a testnet genesis,
+	// supply fresh seeds via environment variables — never hard-code a mnemonic in source.
+	//
+	// Usage:
+	//   TESTNET_SEED_1="word1 ... word12" \
+	//   TESTNET_SEED_2="word1 ... word12" \
+	//   TESTNET_SEED_3="word1 ... word12" \
+	//   cargo run -- build-spec ...
+	let seeds = [
+		std::env::var("TESTNET_SEED_1")
+			.expect("SECURITY (C7): set TESTNET_SEED_1 env var with a fresh mnemonic"),
+		std::env::var("TESTNET_SEED_2")
+			.expect("SECURITY (C7): set TESTNET_SEED_2 env var with a fresh mnemonic"),
+		std::env::var("TESTNET_SEED_3")
+			.expect("SECURITY (C7): set TESTNET_SEED_3 env var with a fresh mnemonic"),
+	];
 	let mut initial_authorities: Vec<(
 		AccountId,
 		AccountId,
@@ -104,49 +120,51 @@ fn udon_testnet_config_genesis() -> serde_json::Value {
 		MixnetId,
 		BeefyId,
 	)> = vec![];
-	for idx in 1..4 {
+	for (idx, seed) in seeds.iter().enumerate() {
+		let seed = format!("{seed}//");
+		let idx = idx + 1; // keep 1-based index for derivation paths
 		let babe = sp_core::sr25519::Pair::from_string(
-			&(seed.to_owned() + idx.to_string().as_str() + "//babe"),
+			&(seed.clone() + idx.to_string().as_str() + "//babe"),
 			None,
 		)
 		.unwrap();
 		let imon = sp_core::sr25519::Pair::from_string(
-			&(seed.to_owned() + idx.to_string().as_str() + "//imon"),
+			&(seed.clone() + idx.to_string().as_str() + "//imon"),
 			None,
 		)
 		.unwrap();
 		let audi = sp_core::sr25519::Pair::from_string(
-			&(seed.to_owned() + idx.to_string().as_str() + "//audi"),
+			&(seed.clone() + idx.to_string().as_str() + "//audi"),
 			None,
 		)
 		.unwrap();
 
-		// Granpda uses ed25519 cryptography
+		// Grandpa uses ed25519 cryptography
 		let gran = sp_core::ed25519::Pair::from_string(
-			&(seed.to_owned() + idx.to_string().as_str() + "//grandpa"),
+			&(seed.clone() + idx.to_string().as_str() + "//grandpa"),
 			None,
 		)
 		.unwrap();
 		let ob = sp_core::sr25519::Pair::from_string(
-			&(seed.to_owned() + idx.to_string().as_str() + "//orderbook"),
+			&(seed.clone() + idx.to_string().as_str() + "//orderbook"),
 			None,
 		)
 		.unwrap();
 
 		let thea = sp_core::ecdsa::Pair::from_string(
-			&(seed.to_owned() + idx.to_string().as_str() + "//thea"),
+			&(seed.clone() + idx.to_string().as_str() + "//thea"),
 			None,
 		)
 		.unwrap();
 
 		let mxn = sp_core::sr25519::Pair::from_string(
-			&(seed.to_owned() + idx.to_string().as_str() + "//mixnet"),
+			&(seed.clone() + idx.to_string().as_str() + "//mixnet"),
 			None,
 		)
 		.unwrap();
 
 		let bfy = sp_core::ecdsa::Pair::from_string(
-			&(seed.to_owned() + idx.to_string().as_str() + "//beefy"),
+			&(seed.clone() + idx.to_string().as_str() + "//beefy"),
 			None,
 		)
 		.unwrap();
