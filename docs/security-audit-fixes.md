@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 13 fixed (as of last update) · 52 open  
+**Totals:** 65 findings in this repo · 15 fixed (as of last update) · 50 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -430,6 +430,49 @@ No additional code changes required — the full fix is in the H8 commit.
 
 ---
 
+### R2-H2 — Session rotation leaves outgoing message permanently unsignable
+**Severity:** High  
+**Location:** `pallets/thea/src/lib.rs` — `change_authorities`  
+**Fixed in spec:** 391  
+**Date:** 2026-08-18  
+**Migration required:** No — pure logic change in `change_authorities`.
+
+**Vulnerability:** The C8 fix (cross-set signature merging rejected by `add_signature`) combined with `submit_signed_outgoing_messages` pinning to the active set creates a permanent signing deadlock on rotation. When `ValidatorSetId` advances from N to N+1: the retiring set (id=N) can no longer submit signatures (the active set pin rejects them); the new set (id=N+1) can't add signatures either because `add_signature` drops any sig where `self.validator_set_id != validator_set_id` (stored id=N, submitted id=N+1). Any outgoing message that had not reached threshold before the rotation is permanently unsignable.
+
+**Changes made:**
+
+`pallets/thea/src/lib.rs` — `change_authorities`:
+- After advancing `ValidatorSetId` to `new_id`, loops over all active networks and for each unfinalized nonce (from `SignedOutgoingNonce+1` to `OutgoingNonce`), updates any existing `SignedOutgoingMessages` entry: sets `validator_set_id = new_id` and clears all accumulated signatures
+- The new active set can now sign those messages from scratch without hitting the `add_signature` cross-set guard
+- If no signatures were accumulated yet (entry is `None`), the new set creates a fresh entry when they first sign — no action needed
+
+`pallets/thea/src/tests.rs`:
+- Added `test_r2_h2_rotation_resets_pending_signatures_to_new_set_id`: installs set A, triggers session S0→B, inserts partial signatures (set B's id) at nonce 1, triggers session S1→C, asserts `SignedOutgoingMessages[n][1].validator_set_id = 2` and `signatures.is_empty()`
+
+---
+
+### R2-H3 — ValidatorsRotated generated even when ScheduledRotateValidators was skipped
+**Severity:** High  
+**Location:** `pallets/thea/src/lib.rs` — `change_authorities`  
+**Fixed in spec:** 391  
+**Date:** 2026-08-18  
+**Migration required:** No — pure logic change.
+
+**Vulnerability:** `change_authorities` contains two independent `if` blocks. Block 1 (`incoming ≠ queued`) generates `ScheduledRotateValidators` ("here is the next validator set") per network; on payload-generation failure it emits an error event and `continue`s, skipping the write for that network. Block 2 (`incoming ≠ outgoing`) always generates `ValidatorsRotated` ("activate the scheduled set") for ALL networks regardless of whether block 1 succeeded. A destination chain that missed block 1's notification receives "activate the next set" without knowing what that set is, leaving the bridge in an undefined validator state.
+
+**Changes made:**
+
+`pallets/thea/src/lib.rs` — `change_authorities`:
+- Added `block1_ran` bool (true when `incoming ≠ queued`) and `scheduled_networks: BTreeSet<Network>` to track which networks received their `ScheduledRotateValidators` payload
+- In block 1, added `scheduled_networks.insert(*network)` after a successful payload write
+- In block 2, skips `ValidatorsRotated` for any network where `block1_ran && !scheduled_networks.contains(&network)`: logs error and emits `UnableToGenerateValidatorSet` event — exactly the same observable signal used when block 1 fails
+- When `block1_ran` is false (`incoming == queued` — a scheduled change from a previous session is being activated), all networks are processed normally
+
+`pallets/thea/src/tests.rs`:
+- Added `test_r2_h3_validators_rotated_matches_scheduled_rotate_per_network`: drives two sessions (S0: B incoming, C queued → produces nonces 1+2; S1: C incoming, C queued → produces nonce 3) and verifies each has the correct `PayloadType` (`ScheduledRotateValidators` at 1, `ValidatorsRotated` at 2 and 3)
+
+---
+
 ## One-shot migrations — must be removed before spec 392
 
 The following migrations are in `runtimes/mainnet/src/migrations.rs` and wired into the `Migrations` tuple in `runtimes/mainnet/src/lib.rs`. They are idempotent but execute on **every** runtime upgrade. They must be **removed from the tuple before the next spec version bump** (≥ 392):
@@ -455,8 +498,6 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | R3-H12 | 🟠 High | pallets/ocex | LMP config metrics write-only; epoch budget over-issued |
 | R3-H13 | 🟠 High | pallets/ocex | close_auction non-transactional; place_bid commented out |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
-| R2-H2 | 🟠 High | pallets/thea | Two rotations leave a message permanently unsignable |
-| R2-H3 | 🟠 High | pallets/thea | change_authorities advances set when payload generation skipped |
 | R2-H4 | 🟠 High | pallets/thea | fork_period accepts 0; no clawback path |
 | R2-H5 | 🟠 High | pallets/thea, pallets/xcm-helper | Unbounded on_initialize deposit batch; unbounded xcm-helper queue |
 | R3-H9 | 🟠 High | pallets/thea | Global asset registry — weakest network mints any bridged asset |

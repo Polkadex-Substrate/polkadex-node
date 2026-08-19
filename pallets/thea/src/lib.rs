@@ -922,7 +922,14 @@ impl<T: Config> Pallet<T> {
 		// This last message should be signed by the outgoing set
 		// Similar to how Grandpa's session change works.
 		let incoming_set = BTreeSet::from_iter(incoming.to_vec());
-		if incoming_set != BTreeSet::from_iter(queued.to_vec()) {
+
+		// SECURITY (R2-H3): track which networks successfully received their
+		// ScheduledRotateValidators payload so that block 2 can skip ValidatorsRotated
+		// for any network that missed block 1's notification.
+		let mut scheduled_networks: BTreeSet<Network> = BTreeSet::new();
+		let block1_ran = incoming_set != BTreeSet::from_iter(queued.to_vec());
+
+		if block1_ran {
 			let uncompressed_keys: Vec<[u8; 20]> = vec![];
 			// TODO: Uncomment the following when parsing is fixed for ethereum keys.
 			// for public_key in queued.clone().into_iter() {
@@ -993,6 +1000,8 @@ impl<T: Config> Pallet<T> {
 				};
 				<OutgoingNonce<T>>::insert(message.network, message.nonce);
 				<OutgoingMessages<T>>::insert(message.network, message.nonce, message);
+				// SECURITY (R2-H3): record success so block 2 can gate on it.
+				scheduled_networks.insert(*network);
 			}
 			<NextAuthorities<T>>::put(queued);
 		}
@@ -1004,7 +1013,49 @@ impl<T: Config> Pallet<T> {
 			// meet quorum. We keep current (new_id) and previous (new_id - 1)
 			// to allow re-signing during a rotation window.
 			<Authorities<T>>::remove(new_id.saturating_sub(2));
+
+			// SECURITY (R2-H2): The active validator set just changed. Any
+			// SignedOutgoingMessages that accumulated partial signatures from the
+			// retiring set must have their validator_set_id and signature map reset
+			// so the new active set can sign them from scratch.
+			//
+			// Without this reset, cross-set signature merging is blocked by the C8
+			// fix in `add_signature` (validator_set_id mismatch → drop), AND the
+			// retiring set can no longer submit (submit_signed_outgoing_messages
+			// pins to the current active set id). The message becomes permanently
+			// unsignable after even one rotation if it hadn't yet reached threshold.
+			for network in &active_networks {
+				let signed_nonce = <SignedOutgoingNonce<T>>::get(network);
+				let outgoing_nonce = <OutgoingNonce<T>>::get(network);
+				for nonce in (signed_nonce.saturating_add(1))..=outgoing_nonce {
+					if let Some(mut signed_msg) = <SignedOutgoingMessages<T>>::get(network, nonce) {
+						signed_msg.validator_set_id = new_id;
+						signed_msg.signatures.clear();
+						<SignedOutgoingMessages<T>>::insert(network, nonce, signed_msg);
+					}
+					// If None: no signatures accumulated yet; the new set will create
+					// a fresh SignedOutgoingMessages entry when they first sign.
+				}
+			}
+
 			for network in active_networks {
+				// SECURITY (R2-H3): Only send ValidatorsRotated if this network
+				// either received its ScheduledRotateValidators notification this
+				// session (block1_ran && network in scheduled_networks), or block 1
+				// did not run at all (incoming == queued — the scheduled change from
+				// a previous session is now being activated).
+				// Skipping prevents destination chains from being told "activate the
+				// next validator set" when they never learned what that set would be.
+				if block1_ran && !scheduled_networks.contains(&network) {
+					log::error!(
+						target: "thea",
+						"SECURITY (R2-H3): skipping ValidatorsRotated for network {:?} \
+						 — ScheduledRotateValidators was not delivered this session",
+						network
+					);
+					Self::deposit_event(Event::<T>::UnableToGenerateValidatorSet(network));
+					continue;
+				}
 				let message =
 					Self::generate_payload(PayloadType::ValidatorsRotated, network, Vec::new()); //Empty data means activate the next set_id
 				<OutgoingNonce<T>>::insert(network, message.nonce);
