@@ -120,13 +120,29 @@ pub mod pallet {
 	/// Pools
 	#[pallet::storage]
 	#[pallet::getter(fn lmp_pool)]
-	pub(super) type Pools<T: Config> = StorageDoubleMap<
+	pub type Pools<T: Config> = StorageDoubleMap<
 		_,
 		Blake2_128Concat,
 		TradingPair, // market
 		Identity,
 		T::AccountId, // market maker
 		MarketMakerConfig<T::AccountId>,
+		OptionQuery,
+	>;
+
+	/// Reverse index: pool_id → (market, market_maker).
+	///
+	/// SECURITY (C6): OCEX egress callbacks receive the derived `pool_id`
+	/// account as their second argument but `Pools` is keyed by `market_maker`.
+	/// Without this index every callback lookup returns `None` and the operation
+	/// silently fails.  The index is populated in `register_pool` and used in
+	/// all three affected callbacks.
+	#[pallet::storage]
+	pub type PoolIdIndex<T: Config> = StorageMap<
+		_,
+		Blake2_128Concat,
+		T::AccountId,                // pool_id (derived account)
+		(TradingPair, T::AccountId), // (market, market_maker)
 		OptionQuery,
 	>;
 
@@ -408,6 +424,9 @@ pub mod pallet {
 				share_id,
 				force_closed: false,
 			};
+			// SECURITY (C6): populate reverse index so callbacks can resolve
+			// pool_id → (market, market_maker) without a full table scan.
+			<PoolIdIndex<T>>::insert(&config.pool_id, (market, market_maker.clone()));
 			<Pools<T>>::insert(market, market_maker, config);
 			Ok(())
 		}

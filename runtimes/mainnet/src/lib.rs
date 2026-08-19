@@ -171,7 +171,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 386,
+    spec_version: 391,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 2,
@@ -432,6 +432,12 @@ parameter_types! {
     pub const LMPRewardsPalletId: PalletId = PalletId(*b"LMPREWAR");
     pub const MsPerDay: u64 = 86_400_000;
     pub const OBWithdrawalLimit: u32 = 50;
+    // C9: cap ingress queue at 500 messages per block to bound storage growth
+    pub const OBIngressLimit: u32 = 500;
+    // C9: minimum deposit = 1 PDEX (12 decimal places) to prevent dust-spam
+    pub const OcexMinimumDeposit: u128 = 1_000_000_000_000;
+    // R2-H1: cap egress messages per snapshot — bounds block execution from crafted snapshots
+    pub const MaxEgressMessages: u32 = 1000;
     pub const RewardsPalletId: PalletId = PalletId(*b"REWARDSQ");
     pub const CrowdSourcingRewardsPalletId: PalletId = PalletId(*b"CROWSOUR");
     pub const PolkadexAssetId: u128 = POLKADEX_NATIVE_ASSET_ID;
@@ -782,7 +788,7 @@ impl frame_system::Config for Runtime {
     type AccountData = pallet_balances::AccountData<Balance>;
     type SystemWeightInfo = frame_system::weights::SubstrateWeight<Runtime>;
     type SS58Prefix = ConstU16<88>;
-    type MaxConsumers = ConstU32<16>;
+    type MaxConsumers = ConstU32<64>;
     type MultiBlockMigrator = MultiBlockMigrations;
 }
 
@@ -1967,8 +1973,13 @@ impl pallet_ocex_lmp::Config for Runtime {
 	type EnclaveOrigin = EnsureSigned<AccountId>;
 	type AuthorityId = pallet_ocex_lmp::sr25519::AuthorityId;
 	type GovernanceOrigin = EnsureRootOrHalfCouncil;
-	type CrowdSourceLiqudityMining = ();
+	// SECURITY (C6): was () — callbacks were never fired; shares never minted,
+	// withdrawn funds stuck in pool accounts.  Now wired to the real pallet.
+	type CrowdSourceLiqudityMining = CrowdSourceLMP;
 	type OBWithdrawalLimit = OBWithdrawalLimit;
+	type OBIngressLimit = OBIngressLimit;
+	type MinimumDeposit = OcexMinimumDeposit;
+	type MaxEgressMessages = MaxEgressMessages;
 	type WeightInfo = pallet_ocex_lmp::weights::WeightInfo<Runtime>;
 	//type CrossChainGadget = TheaExecutor;
 	type CrossChainGadget = ();
@@ -2984,6 +2995,14 @@ type Migrations = (
     migrations::FixCouncilPrime,
     // Clear undecodable offence reports (IdentificationTuple type changed between spec versions)
     migrations::ClearOffenceReports,
+    // C6: build reverse index pool_id → (market, market_maker) in the LMP pallet
+    // so that OCEX egress callbacks can correctly look up pool config.
+    // Zero pools existed on mainnet at upgrade time; this is a no-op in practice.
+    migrations::RebuildLmpPoolIdIndex,
+    // C9: prune IngressMessages entries for all blocks already processed by the enclave
+    // (storage was never pruned before spec 391; safe across Vec→BoundedVec type change
+    // because only keys are iterated — values are never decoded during this migration)
+    migrations::PruneStaleIngressMessages,
     // Existing migrations
     pallet_alliance::migration::Migration<Runtime>,
     pallet_contracts::Migration<Runtime>,

@@ -334,9 +334,11 @@ fn test_force_close_pool_happy_path_and_error() {
 		let market_maker = AccountId32::new([2; 32]);
 		let base_freed = Decimal::from(2);
 		let quote_freed = Decimal::from(3);
+		// SECURITY (C6): callbacks now expect pool_id (derived sub-account), not market_maker.
+		let (pool_id, _) = LiqudityMining::create_pool_account(&market_maker, trading_pair);
 		assert_ok!(LiqudityMining::pool_force_close_success(
 			trading_pair,
-			&market_maker,
+			&pool_id,
 			base_freed,
 			quote_freed
 		));
@@ -365,9 +367,11 @@ fn test_add_liquidity_success_happy_path() {
 		register_test_pool(true);
 		// Start new epoch
 		LiqudityMining::new_epoch(1);
+		// SECURITY (C6): callbacks now expect pool_id (derived sub-account), not market_maker.
+		let (pool_id, _) = LiqudityMining::create_pool_account(&market_maker, trading_pair);
 		assert_ok!(LiqudityMining::add_liquidity_success(
 			trading_pair,
-			&market_maker,
+			&pool_id,
 			&lp,
 			share_issued,
 			price,
@@ -591,9 +595,11 @@ fn add_liquidity() {
 	let share_issued = Decimal::from(6);
 	let price = Decimal::from(5);
 	let total_inventory_in_quote = Decimal::from(40);
+	// SECURITY (C6): callbacks now expect pool_id (derived sub-account), not market_maker.
+	let (pool_id, _) = LiqudityMining::create_pool_account(&market_maker, trading_pair);
 	assert_ok!(LiqudityMining::add_liquidity_success(
 		trading_pair,
-		&market_maker,
+		&pool_id,
 		&user_who_wants_to_add_liq,
 		share_issued,
 		price,

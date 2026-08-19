@@ -386,3 +386,184 @@ impl OnRuntimeUpgrade for ClearOffenceReports {
         <Runtime as frame_system::Config>::DbWeight::get().writes(result.backend as u64 + 1)
     }
 }
+
+/// C6 Migration — RebuildLmpPoolIdIndex
+///
+/// Adds a reverse index `pool_id → (market, market_maker)` to the LMP pallet
+/// so that OCEX egress callbacks can resolve the correct `Pools` key.
+///
+/// Before spec 391 the index did not exist.  For any pools created before this
+/// upgrade the callbacks would have failed with `UnknownPool` (or been silently
+/// swallowed via the `()` no-op wiring).  On mainnet, zero pools existed at
+/// upgrade time (confirmed via RPC), so the migration is a zero-write no-op in
+/// practice.  It is included anyway so the index is populated if any pools were
+/// created on a fork or testnet.
+pub struct RebuildLmpPoolIdIndex;
+
+impl OnRuntimeUpgrade for RebuildLmpPoolIdIndex {
+    fn on_runtime_upgrade() -> Weight {
+        use pallet_lmp::pallet::{PoolIdIndex, Pools};
+
+        let db = <Runtime as frame_system::Config>::DbWeight::get();
+        let mut reads: u64 = 0;
+        let mut writes: u64 = 0;
+
+        // Iterate every (market, market_maker) → config entry and insert the
+        // reverse mapping.  This is safe to re-run: inserting the same key
+        // twice just overwrites with the same value.
+        for (market, market_maker, config) in Pools::<Runtime>::iter() {
+            reads += 1;
+            PoolIdIndex::<Runtime>::insert(&config.pool_id, (market, market_maker));
+            writes += 1;
+        }
+
+        log::info!(
+            target: "runtime::migration",
+            "🏊 RebuildLmpPoolIdIndex: populated {} pool_id → (market, market_maker) entries",
+            writes,
+        );
+
+        db.reads_writes(reads, writes)
+    }
+
+    #[cfg(feature = "try-runtime")]
+    fn pre_upgrade() -> Result<sp_std::vec::Vec<u8>, sp_runtime::TryRuntimeError> {
+        use pallet_lmp::pallet::Pools;
+        use parity_scale_codec::Encode;
+        let count = Pools::<Runtime>::iter().count() as u64;
+        log::info!(
+            target: "runtime::migration",
+            "RebuildLmpPoolIdIndex pre_upgrade: {} pools found",
+            count
+        );
+        Ok(count.encode())
+    }
+
+    #[cfg(feature = "try-runtime")]
+    fn post_upgrade(state: sp_std::vec::Vec<u8>) -> Result<(), sp_runtime::TryRuntimeError> {
+        use pallet_lmp::pallet::{PoolIdIndex, Pools};
+        use parity_scale_codec::Decode;
+        let pool_count = u64::decode(&mut &state[..]).unwrap_or(0);
+        let index_count = PoolIdIndex::<Runtime>::iter().count() as u64;
+        ensure!(
+            index_count == pool_count,
+            "RebuildLmpPoolIdIndex: index count does not match pool count"
+        );
+        log::info!(
+            target: "runtime::migration",
+            "RebuildLmpPoolIdIndex post_upgrade: {} index entries for {} pools ✅",
+            index_count, pool_count
+        );
+        Ok(())
+    }
+}
+
+/// C9 Migration — PruneStaleIngressMessages
+///
+/// `IngressMessages` was never pruned before spec 391.  Every block since
+/// genesis has accumulated an entry even after the enclave processed and
+/// discarded the corresponding messages.  This migration removes all entries
+/// for blocks up to and including `last_processed_blk` from the most recent
+/// accepted snapshot.
+///
+/// # Safety
+///
+/// We iterate only over *keys* (no value decode), so the Vec→BoundedVec type
+/// change introduced in spec 391 cannot cause a decode failure here.
+/// Any remaining entries (blocks not yet processed) have their values left
+/// untouched on disk; the new runtime decodes them as BoundedVec, which
+/// succeeds because each real block accumulates far fewer than OBIngressLimit
+/// (500) messages under normal operation and block-weight constraints.
+pub struct PruneStaleIngressMessages;
+
+impl OnRuntimeUpgrade for PruneStaleIngressMessages {
+    fn on_runtime_upgrade() -> Weight {
+        use pallet_ocex_lmp::{IngressMessages, SnapshotNonce, Snapshots};
+        use sp_runtime::SaturatedConversion;
+
+        let db = <Runtime as frame_system::Config>::DbWeight::get();
+        let mut reads: u64 = 0;
+        let mut writes: u64 = 0;
+
+        // Determine the last block whose ingress messages have been consumed.
+        let nonce = SnapshotNonce::<Runtime>::get();
+        reads += 1;
+
+        if nonce == 0 {
+            // No snapshot has ever been accepted — nothing to prune.
+            log::info!(target: "runtime::migration", "PruneStaleIngressMessages: no snapshot yet, nothing to prune");
+            return db.reads(reads);
+        }
+
+        let last_processed: polkadex_primitives::BlockNumber = match Snapshots::<Runtime>::get(nonce) {
+            Some(snapshot) => {
+                reads += 1;
+                snapshot.last_processed_blk
+            },
+            None => {
+                reads += 1;
+                log::warn!(
+                    target: "runtime::migration",
+                    "PruneStaleIngressMessages: snapshot {} not found, skipping",
+                    nonce
+                );
+                return db.reads(reads);
+            }
+        };
+
+        // Collect stale keys via key-only iteration (no value decode — safe across type change).
+        let stale_keys: sp_std::vec::Vec<frame_system::pallet_prelude::BlockNumberFor<Runtime>> =
+            IngressMessages::<Runtime>::iter_keys()
+                .filter(|k| {
+                    let block: polkadex_primitives::BlockNumber = (*k).saturated_into();
+                    block <= last_processed
+                })
+                .collect();
+
+        let removed = stale_keys.len();
+        reads += removed as u64;   // iter_keys reads each key
+        writes += removed as u64;  // one remove per stale entry
+
+        for key in stale_keys {
+            IngressMessages::<Runtime>::remove(key);
+        }
+
+        log::info!(
+            target: "runtime::migration",
+            "🧹 PruneStaleIngressMessages: removed {} stale IngressMessages entries (blocks ≤ {})",
+            removed,
+            last_processed,
+        );
+
+        db.reads_writes(reads, writes)
+    }
+
+    #[cfg(feature = "try-runtime")]
+    fn pre_upgrade() -> Result<sp_std::vec::Vec<u8>, sp_runtime::TryRuntimeError> {
+        use pallet_ocex_lmp::{IngressMessages, SnapshotNonce};
+        use parity_scale_codec::Encode;
+        let total = IngressMessages::<Runtime>::iter_keys().count() as u64;
+        let nonce = SnapshotNonce::<Runtime>::get();
+        log::info!(
+            target: "runtime::migration",
+            "PruneStaleIngressMessages pre_upgrade: {} IngressMessages entries, snapshot_nonce = {}",
+            total, nonce
+        );
+        Ok(total.encode())
+    }
+
+    #[cfg(feature = "try-runtime")]
+    fn post_upgrade(state: sp_std::vec::Vec<u8>) -> Result<(), sp_runtime::TryRuntimeError> {
+        use pallet_ocex_lmp::IngressMessages;
+        use parity_scale_codec::Decode;
+        let before = u64::decode(&mut &state[..]).unwrap_or(0);
+        let after = IngressMessages::<Runtime>::iter_keys().count() as u64;
+        log::info!(
+            target: "runtime::migration",
+            "PruneStaleIngressMessages post_upgrade: {} → {} IngressMessages entries ({} removed)",
+            before, after, before.saturating_sub(after),
+        );
+        Ok(())
+    }
+}
+
