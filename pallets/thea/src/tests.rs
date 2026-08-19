@@ -1345,3 +1345,158 @@ fn test_r2_h3_validators_rotated_matches_scheduled_rotate_per_network() {
 		assert_eq!(msg3.payload_type, PayloadType::ValidatorsRotated);
 	})
 }
+
+// R2-H4: fork_period accepts 0; executed messages removed so report returns MessageNotFound
+//
+// Two sub-fixes:
+//   (a) add_thea_network rejects fork_period < 2
+//   (b) report_misbehaviour returns MessageAlreadyExecuted (not MessageNotFound) when the
+//       nonce is in the executed-message archive
+
+#[test]
+fn test_r2_h4_add_thea_network_rejects_fork_period_below_minimum() {
+	// SECURITY (R2-H4): fork_period must be at least 2 so fishermen always have at least
+	// one block window between message submission and on_initialize execution.
+	// With N=0 or N=1 the message is executed in block B+1's on_initialize (before any
+	// extrinsic of B+1), giving fishermen zero blocks to react.
+	new_test_ext().execute_with(|| {
+		// fork_period 0 → rejected
+		assert_noop!(
+			Thea::add_thea_network(
+				RuntimeOrigin::root(),
+				1,
+				false,
+				0,
+				100 * UNIT_BALANCE,
+				10 * UNIT_BALANCE,
+			),
+			Error::<Test>::ForkPeriodTooShort
+		);
+
+		// fork_period 1 → also rejected (window = 0 blocks; on_initialize of B+1 still wins)
+		assert_noop!(
+			Thea::add_thea_network(
+				RuntimeOrigin::root(),
+				1,
+				false,
+				1,
+				100 * UNIT_BALANCE,
+				10 * UNIT_BALANCE,
+			),
+			Error::<Test>::ForkPeriodTooShort
+		);
+
+		// fork_period 2 → accepted (fisherman has exactly 1 block to act before B+N)
+		assert_ok!(Thea::add_thea_network(
+			RuntimeOrigin::root(),
+			1,
+			false,
+			2,
+			100 * UNIT_BALANCE,
+			10 * UNIT_BALANCE,
+		));
+
+		// Verify the network is active and config is stored correctly
+		let stored = <NetworkConfig<Test>>::get(1u8);
+		assert_eq!(stored.fork_period, 2);
+
+		// Any value above 2 is also fine
+		assert_ok!(Thea::add_thea_network(
+			RuntimeOrigin::root(),
+			2,
+			false,
+			20,
+			100 * UNIT_BALANCE,
+			10 * UNIT_BALANCE,
+		));
+	})
+}
+
+#[test]
+fn test_r2_h4_report_misbehaviour_returns_already_executed_when_in_archive() {
+	// SECURITY (R2-H4): When on_initialize has already processed a message (fork_period
+	// elapsed), the message moves from IncomingMessagesQueue to IncomingMessages (archive).
+	// A fisherman calling report_misbehaviour on an executed nonce used to receive the
+	// generic MessageNotFound error, hiding the real cause.
+	//
+	// After the fix, report_misbehaviour checks the archive and returns MessageAlreadyExecuted
+	// so the fisherman understands the message was executed rather than never submitted.
+	//
+	// Critically, the fisherman's stake must NOT be locked on a failed report (the
+	// #[transactional] wrapper rolls back the hold on any Err return).
+	new_test_ext().execute_with(|| {
+		let network = 2u8;
+		let nonce = 1u64;
+
+		// Set up network config (fork_period inserted directly into storage here,
+		// bypassing the extrinsic, because this test verifies report_misbehaviour
+		// not add_thea_network).
+		let config = thea_primitives::types::NetworkConfig {
+			fork_period: 20,
+			min_stake: 1_000_000,
+			fisherman_stake: 1_000_000,
+			network_type: NetworkType::Parachain,
+		};
+		<NetworkConfig<Test>>::insert(network, config);
+
+		// Simulate on_initialize having already processed the message by placing it
+		// directly in IncomingMessages (the archive).  Nothing in IncomingMessagesQueue.
+		let archived_message = Message {
+			block_no: 0,
+			nonce,
+			network,
+			payload_type: PayloadType::L1Deposit,
+			data: vec![],
+		};
+		<IncomingMessages<Test>>::insert(network, nonce, archived_message);
+
+		// Fund the fisherman with enough to cover the fisherman_stake.
+		let fisherman = 42u64;
+		let _ = Balances::deposit_creating(&fisherman, 10_000_000_000);
+		let balance_before = Balances::free_balance(&fisherman);
+
+		// report_misbehaviour must return MessageAlreadyExecuted.
+		assert_noop!(
+			Thea::report_misbehaviour(RuntimeOrigin::signed(fisherman), network, nonce),
+			Error::<Test>::MessageAlreadyExecuted
+		);
+
+		// The fisherman's balance must be unchanged — the transactional wrapper rolled
+		// back the hold taken before the archive check.
+		assert_eq!(
+			Balances::free_balance(&fisherman),
+			balance_before,
+			"fisherman stake must not be locked on a failed report"
+		);
+	})
+}
+
+#[test]
+fn test_r2_h4_report_misbehaviour_returns_not_found_for_truly_unknown_nonce() {
+	// Sanity check: when the nonce is absent from BOTH the live queue AND the archive,
+	// report_misbehaviour must still return the original MessageNotFound error.
+	new_test_ext().execute_with(|| {
+		let network = 2u8;
+
+		let config = thea_primitives::types::NetworkConfig {
+			fork_period: 20,
+			min_stake: 1_000_000,
+			fisherman_stake: 1_000_000,
+			network_type: NetworkType::Parachain,
+		};
+		<NetworkConfig<Test>>::insert(network, config);
+
+		let fisherman = 42u64;
+		let _ = Balances::deposit_creating(&fisherman, 10_000_000_000);
+		let balance_before = Balances::free_balance(&fisherman);
+
+		// Nonce 99 was never submitted — nothing in queue or archive.
+		assert_noop!(
+			Thea::report_misbehaviour(RuntimeOrigin::signed(fisherman), network, 99),
+			Error::<Test>::MessageNotFound
+		);
+
+		// Fisherman stake must not be locked here either.
+		assert_eq!(Balances::free_balance(&fisherman), balance_before);
+	})
+}
