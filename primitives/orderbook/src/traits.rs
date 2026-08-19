@@ -62,6 +62,10 @@ pub trait LiquidityMiningCrowdSourcePallet<AccountId> {
 	) -> DispatchResult;
 
 	fn stop_accepting_lmp_withdrawals(epoch: u16);
+
+	/// SECURITY (R2-H1): Returns true if `pool_id` is a registered pool sub-account.
+	/// Used by OCEX to validate egress message destinations before transferring funds.
+	fn is_valid_pool_id(pool_id: &AccountId) -> bool;
 }
 
 impl<AccountId> LiquidityMiningCrowdSourcePallet<AccountId> for () {
@@ -112,6 +116,11 @@ impl<AccountId> LiquidityMiningCrowdSourcePallet<AccountId> for () {
 	}
 
 	fn stop_accepting_lmp_withdrawals(_epoch: u16) {}
+
+	/// When LMP is disabled (`()`), no pool IDs are valid.
+	fn is_valid_pool_id(_pool_id: &AccountId) -> bool {
+		false
+	}
 }
 
 pub trait VerifyExtensionSignature<AccountId> {

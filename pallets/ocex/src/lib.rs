@@ -249,6 +249,23 @@ pub mod pallet {
 		#[pallet::constant]
 		type OBWithdrawalLimit: Get<u32>;
 
+		/// Maximum number of ingress messages that can be queued per block (C9).
+		/// Any extrinsic that would push a message beyond this limit returns
+		/// `Error::IngressQueueFull`.
+		#[pallet::constant]
+		type OBIngressLimit: Get<u32>;
+
+		/// Minimum deposit amount in raw balance units (C9).
+		/// Deposits below this threshold are rejected to prevent spam-driven
+		/// ingress-queue exhaustion.
+		#[pallet::constant]
+		type MinimumDeposit: Get<u128>;
+
+		/// Maximum number of egress messages allowed in a single snapshot (R2-H1).
+		/// Enforced at the start of `process_egress_msg` to bound per-block execution.
+		#[pallet::constant]
+		type MaxEgressMessages: Get<u32>;
+
 		/// Balances Pallet
 		type NativeCurrency: Currency<Self::AccountId>
 			+ ReservableCurrency<Self::AccountId>
@@ -401,6 +418,15 @@ pub mod pallet {
 		WithdrawalFeeBurnFailed,
 		/// Trading fees burn failed
 		TradingFeesBurnFailed,
+		/// Ingress message queue for this block is full; the operation can be retried
+		/// in the next block once the enclave has consumed the pending messages (C9)
+		IngressQueueFull,
+		/// Deposit amount is below the configured minimum (C9)
+		DepositAmountTooLow,
+		/// Snapshot egress message count exceeds MaxEgressMessages (R2-H1)
+		TooManyEgressMessages,
+		/// Egress message targets an account that is not a registered LMP pool (R2-H1)
+		InvalidEgressPoolId,
 	}
 
 	#[pallet::hooks]
@@ -488,14 +514,14 @@ pub mod pallet {
 					Error::<T>::ProxyLimitExceeded
 				);
 				let current_blk = frame_system::Pallet::<T>::current_block_number();
-				<IngressMessages<T>>::mutate(current_blk, |ingress_messages| {
-					ingress_messages.push(
-						orderbook_primitives::ingress::IngressMessages::AddProxy(
+				<IngressMessages<T>>::try_mutate(current_blk, |ingress_messages| {
+					ingress_messages
+						.try_push(orderbook_primitives::ingress::IngressMessages::AddProxy(
 							main_account.clone(),
 							proxy.clone(),
-						),
-					);
-				});
+						))
+						.map_err(|_| Error::<T>::IngressQueueFull)
+				})?;
 				<Accounts<T>>::insert(&main_account, account_info);
 				<Proxies<T>>::insert(&proxy, main_account.clone());
 				Self::deposit_event(Event::NewProxyAdded { main: main_account, proxy });
@@ -515,22 +541,22 @@ pub mod pallet {
 			ensure!(Self::orderbook_operational_state(), Error::<T>::ExchangeNotOperational);
 			ensure!(base != quote, Error::<T>::BothAssetsCannotBeSame);
 			ensure!(<TradingPairs<T>>::contains_key(base, quote), Error::<T>::TradingPairNotFound);
-			<TradingPairs<T>>::mutate(base, quote, |value| {
-				if let Some(trading_pair) = value {
-					trading_pair.operational_status = false;
-					let current_blk = frame_system::Pallet::<T>::current_block_number();
-					<IngressMessages<T>>::mutate(current_blk, |ingress_messages| {
-						ingress_messages.push(
-							orderbook_primitives::ingress::IngressMessages::CloseTradingPair(
-								*trading_pair,
-							),
-						);
-					});
-					Self::deposit_event(Event::ShutdownTradingPair { pair: *trading_pair });
-				} else {
-					//scope never executed, already ensured if trading pair exits above
-				}
-			});
+			// SECURITY (C9): restructured so IngressMessages push can be propagated as an error.
+			let mut trading_pair =
+				<TradingPairs<T>>::get(base, quote).ok_or(Error::<T>::TradingPairNotFound)?;
+			trading_pair.operational_status = false;
+			<TradingPairs<T>>::insert(base, quote, trading_pair);
+			let current_blk = frame_system::Pallet::<T>::current_block_number();
+			<IngressMessages<T>>::try_mutate(current_blk, |ingress_messages| {
+				ingress_messages
+					.try_push(
+						orderbook_primitives::ingress::IngressMessages::CloseTradingPair(
+							trading_pair,
+						),
+					)
+					.map_err(|_| Error::<T>::IngressQueueFull)
+			})?;
+			Self::deposit_event(Event::ShutdownTradingPair { pair: trading_pair });
 			Ok(())
 		}
 
@@ -546,23 +572,22 @@ pub mod pallet {
 			ensure!(Self::orderbook_operational_state(), Error::<T>::ExchangeNotOperational);
 			ensure!(base != quote, Error::<T>::BothAssetsCannotBeSame);
 			ensure!(<TradingPairs<T>>::contains_key(base, quote), Error::<T>::TradingPairNotFound);
-			//update the operational status of the trading pair as true.
-			<TradingPairs<T>>::mutate(base, quote, |value| {
-				if let Some(trading_pair) = value {
-					trading_pair.operational_status = true;
-					let current_blk = frame_system::Pallet::<T>::current_block_number();
-					<IngressMessages<T>>::mutate(current_blk, |ingress_messages| {
-						ingress_messages.push(
-							orderbook_primitives::ingress::IngressMessages::OpenTradingPair(
-								*trading_pair,
-							),
-						);
-					});
-					Self::deposit_event(Event::OpenTradingPair { pair: *trading_pair });
-				} else {
-					//scope never executed, already ensured if trading pair exits above
-				}
-			});
+			// SECURITY (C9): restructured so IngressMessages push can be propagated as an error.
+			let mut trading_pair =
+				<TradingPairs<T>>::get(base, quote).ok_or(Error::<T>::TradingPairNotFound)?;
+			trading_pair.operational_status = true;
+			<TradingPairs<T>>::insert(base, quote, trading_pair);
+			let current_blk = frame_system::Pallet::<T>::current_block_number();
+			<IngressMessages<T>>::try_mutate(current_blk, |ingress_messages| {
+				ingress_messages
+					.try_push(
+						orderbook_primitives::ingress::IngressMessages::OpenTradingPair(
+							trading_pair,
+						),
+					)
+					.map_err(|_| Error::<T>::IngressQueueFull)
+			})?;
+			Self::deposit_event(Event::OpenTradingPair { pair: trading_pair });
 			Ok(())
 		}
 
@@ -633,13 +658,15 @@ pub mod pallet {
 
 					<TradingPairs<T>>::insert(base, quote, trading_pair_info);
 					let current_blk = frame_system::Pallet::<T>::current_block_number();
-					<IngressMessages<T>>::mutate(current_blk, |ingress_messages| {
-						ingress_messages.push(
-							orderbook_primitives::ingress::IngressMessages::OpenTradingPair(
-								trading_pair_info,
-							),
-						);
-					});
+					<IngressMessages<T>>::try_mutate(current_blk, |ingress_messages| {
+						ingress_messages
+							.try_push(
+								orderbook_primitives::ingress::IngressMessages::OpenTradingPair(
+									trading_pair_info,
+								),
+							)
+							.map_err(|_| Error::<T>::IngressQueueFull)
+					})?;
 					Self::deposit_event(Event::TradingPairRegistered { base, quote });
 					Ok(())
 				},
@@ -710,13 +737,15 @@ pub mod pallet {
 
 					<TradingPairs<T>>::insert(base, quote, trading_pair_info);
 					let current_blk = frame_system::Pallet::<T>::current_block_number();
-					<IngressMessages<T>>::mutate(current_blk, |ingress_messages| {
-						ingress_messages.push(
-							orderbook_primitives::ingress::IngressMessages::UpdateTradingPair(
-								trading_pair_info,
-							),
-						);
-					});
+					<IngressMessages<T>>::try_mutate(current_blk, |ingress_messages| {
+						ingress_messages
+							.try_push(
+								orderbook_primitives::ingress::IngressMessages::UpdateTradingPair(
+									trading_pair_info,
+								),
+							)
+							.map_err(|_| Error::<T>::IngressQueueFull)
+					})?;
 					Self::deposit_event(Event::TradingPairUpdated { base, quote });
 
 					Ok(())
@@ -755,14 +784,16 @@ pub mod pallet {
 						.ok_or(Error::<T>::ProxyNotFound)?;
 					account_info.proxies.remove(proxy_positon);
 					let current_blk = frame_system::Pallet::<T>::current_block_number();
-					<IngressMessages<T>>::mutate(current_blk, |ingress_messages| {
-						ingress_messages.push(
-							orderbook_primitives::ingress::IngressMessages::RemoveProxy(
-								main_account.clone(),
-								proxy.clone(),
-							),
-						);
-					});
+					<IngressMessages<T>>::try_mutate(current_blk, |ingress_messages| {
+						ingress_messages
+							.try_push(
+								orderbook_primitives::ingress::IngressMessages::RemoveProxy(
+									main_account.clone(),
+									proxy.clone(),
+								),
+							)
+							.map_err(|_| Error::<T>::IngressQueueFull)
+					})?;
 					<Proxies<T>>::remove(proxy.clone());
 					Self::deposit_event(Event::ProxyRemoved { main: main_account.clone(), proxy });
 				}
@@ -794,10 +825,13 @@ pub mod pallet {
 			<ExchangeState<T>>::put(state);
 			let current_blk = frame_system::Pallet::<T>::current_block_number();
 			//SetExchangeState Ingress message store in queue
-			<IngressMessages<T>>::mutate(current_blk, |ingress_messages| {
+			<IngressMessages<T>>::try_mutate(current_blk, |ingress_messages| {
 				ingress_messages
-					.push(orderbook_primitives::ingress::IngressMessages::SetExchangeState(state))
-			});
+					.try_push(
+						orderbook_primitives::ingress::IngressMessages::SetExchangeState(state),
+					)
+					.map_err(|_| Error::<T>::IngressQueueFull)
+			})?;
 
 			Self::deposit_event(Event::ExchangeStateUpdated(state));
 			Ok(())
@@ -831,9 +865,12 @@ pub mod pallet {
 				if let Some(withdrawal_vector) = btree_map.remove(&account) {
 					let (failed_withdrawals, processed_withdrawals) =
 						Self::do_withdraw(snapshot_id, withdrawal_vector);
-					// Not removing key from BtreeMap so that failed withdrawals can still be
-					// tracked
-					btree_map.insert(account.clone(), failed_withdrawals);
+					// SECURITY (R4-A): only re-insert if there are genuinely failed withdrawals.
+					// The previous unconditional insert left an empty Vec when all withdrawals
+					// succeeded, leaving a ghost entry that could be called repeatedly as a no-op.
+					if !failed_withdrawals.is_empty() {
+						btree_map.insert(account.clone(), failed_withdrawals);
+					}
 
 					if !processed_withdrawals.is_empty() {
 						Self::deposit_event(Event::WithdrawalClaimed {
@@ -848,6 +885,13 @@ pub mod pallet {
 					Err(Error::<T>::InvalidWithdrawalIndex)
 				}
 			})?;
+
+			// SECURITY (R4-A): if no pending withdrawals remain for this snapshot, remove the
+			// storage entry entirely. Without this, an empty BTreeMap stays in storage with
+			// contains_key() still returning true, allowing repeated no-op calls.
+			if <Withdrawals<T>>::get(snapshot_id).is_empty() {
+				<Withdrawals<T>>::remove(snapshot_id);
+			}
 
 			Ok(Pays::Yes.into())
 		}
@@ -919,14 +963,31 @@ pub mod pallet {
 				Self::settle_withdrawal_fees(fees)?;
 			}
 			let id = summary.snapshot_id;
+			// SECURITY (C9): extract last_processed_blk before summary is moved into storage.
+			let last_processed_blk = summary.last_processed_blk;
 			<SnapshotNonce<T>>::put(id);
 			<Snapshots<T>>::insert(id, summary);
 			// Instruct engine to withdraw all the trading fees
 			let current_blk = frame_system::Pallet::<T>::current_block_number();
-			<IngressMessages<T>>::mutate(current_blk, |ingress_messages| {
+			<IngressMessages<T>>::try_mutate(current_blk, |ingress_messages| {
 				ingress_messages
-					.push(orderbook_primitives::ingress::IngressMessages::WithdrawTradingFees)
-			});
+					.try_push(
+						orderbook_primitives::ingress::IngressMessages::WithdrawTradingFees,
+					)
+					.map_err(|_| Error::<T>::IngressQueueFull)
+			})?;
+			// SECURITY (C9): prune IngressMessages for all blocks the enclave has
+			// already processed.  The snapshot's last_processed_blk is the
+			// highest block whose ingress messages are now part of accepted state.
+			// Collecting into a Vec first avoids mutating the map while iterating.
+			let prune_up_to: BlockNumberFor<T> = last_processed_blk.saturated_into();
+			let stale_keys: sp_std::vec::Vec<BlockNumberFor<T>> =
+				<IngressMessages<T>>::iter_keys()
+					.filter(|k| *k <= prune_up_to)
+					.collect();
+			for key in stale_keys {
+				<IngressMessages<T>>::remove(key);
+			}
 			Self::deposit_event(Event::<T>::SnapshotProcessed(id));
 			Ok(())
 		}
@@ -1224,14 +1285,19 @@ pub mod pallet {
 	pub(super) type Withdrawals<T: Config> =
 		StorageMap<_, Blake2_128Concat, u64, WithdrawalsMap<T>, ValueQuery>;
 
-	// Queue for enclave ingress messages
+	// Queue for enclave ingress messages.
+	// SECURITY (C9): bounded to prevent unbounded growth, OOM, and O(n²) re-encoding.
+	// Per-block limit is T::OBIngressLimit; pushes beyond that return IngressQueueFull.
 	#[pallet::storage]
 	#[pallet::getter(fn ingress_messages)]
-	pub(super) type IngressMessages<T: Config> = StorageMap<
+	pub type IngressMessages<T: Config> = StorageMap<
 		_,
 		Identity,
 		BlockNumberFor<T>,
-		Vec<orderbook_primitives::ingress::IngressMessages<T::AccountId>>,
+		BoundedVec<
+			orderbook_primitives::ingress::IngressMessages<T::AccountId>,
+			T::OBIngressLimit,
+		>,
 		ValueQuery,
 	>;
 
@@ -1526,6 +1592,12 @@ pub mod pallet {
 		}
 
 		pub fn process_egress_msg(msgs: &Vec<EgressMessages<T::AccountId>>) -> DispatchResult {
+			// SECURITY (R2-H1): bound per-snapshot egress processing to prevent a crafted
+			// snapshot (even one with valid validator signatures) from causing unbounded work.
+			ensure!(
+				msgs.len() <= T::MaxEgressMessages::get() as usize,
+				Error::<T>::TooManyEgressMessages
+			);
 			for msg in msgs {
 				// Process egress messages
 				match msg {
@@ -1619,6 +1691,13 @@ pub mod pallet {
 						base_free,
 						quote_free,
 					) => {
+						// SECURITY (R2-H1): verify pool is a registered LMP pool account
+						// before transferring funds to it. The `pool` field is caller-supplied
+						// in the snapshot; without this check any account could be targeted.
+						ensure!(
+							T::CrowdSourceLiqudityMining::is_valid_pool_id(pool),
+							Error::<T>::InvalidEgressPoolId
+						);
 						let unit = Decimal::from(UNIT_BALANCE);
 						// Transfer the assets from exchange to pool_id
 						let base_amount = base_free
@@ -1674,6 +1753,11 @@ pub mod pallet {
 						)?;
 					},
 					EgressMessages::PoolForceClosed(market, pool, base_freed, quote_freed) => {
+						// SECURITY (R2-H1): same pool-id validation as RemoveLiquidityResult.
+						ensure!(
+							T::CrowdSourceLiqudityMining::is_valid_pool_id(pool),
+							Error::<T>::InvalidEgressPoolId
+						);
 						let unit = Decimal::from(UNIT_BALANCE);
 						// Transfer the assets from exchange to pool_id
 						let base_amount = base_freed
@@ -1735,6 +1819,13 @@ pub mod pallet {
 			ensure!(Self::orderbook_operational_state(), Error::<T>::ExchangeNotOperational);
 			ensure!(<AllowlistedToken<T>>::get().contains(&asset), Error::<T>::TokenNotAllowlisted);
 			ensure!(amount.saturated_into::<u128>() <= DEPOSIT_MAX, Error::<T>::AmountOverflow);
+			// SECURITY (C9): reject dust deposits to prevent ingress-queue spam.
+			// Attackers could flood IngressMessages with zero/tiny deposits for free
+			// (funds returned on withdraw) causing O(n²) re-encoding and eventual OOM.
+			ensure!(
+				amount.saturated_into::<u128>() >= T::MinimumDeposit::get(),
+				Error::<T>::DepositAmountTooLow
+			);
 			let converted_amount = Decimal::from(amount.saturated_into::<u128>())
 				.checked_div(Decimal::from(UNIT_BALANCE))
 				.ok_or(Error::<T>::FailedToConvertDecimaltoBalance)?;
@@ -1754,14 +1845,16 @@ pub mod pallet {
 				return Err(Error::<T>::AmountOverflow.into());
 			}
 			let current_blk = frame_system::Pallet::<T>::current_block_number();
-			<IngressMessages<T>>::mutate(current_blk, |ingress_messages| {
-				ingress_messages.push(orderbook_primitives::ingress::IngressMessages::Deposit(
-					id,
-					user.clone(),
-					asset,
-					converted_amount,
-				));
-			});
+			<IngressMessages<T>>::try_mutate(current_blk, |ingress_messages| {
+				ingress_messages
+					.try_push(orderbook_primitives::ingress::IngressMessages::Deposit(
+						id,
+						user.clone(),
+						asset,
+						converted_amount,
+					))
+					.map_err(|_| Error::<T>::IngressQueueFull)
+			})?;
 			Self::deposit_event(Event::DepositSuccessful { id, user, asset, amount });
 			Ok(())
 		}
@@ -1780,14 +1873,14 @@ pub mod pallet {
 			<Accounts<T>>::insert(&main_account, account_info);
 
 			let current_blk = frame_system::Pallet::<T>::current_block_number();
-			<IngressMessages<T>>::mutate(current_blk, |ingress_messages| {
-				ingress_messages.push(
-					orderbook_primitives::ingress::IngressMessages::RegisterUser(
+			<IngressMessages<T>>::try_mutate(current_blk, |ingress_messages| {
+				ingress_messages
+					.try_push(orderbook_primitives::ingress::IngressMessages::RegisterUser(
 						main_account.clone(),
 						proxy.clone(),
-					),
-				);
-			});
+					))
+					.map_err(|_| Error::<T>::IngressQueueFull)
+			})?;
 			<Proxies<T>>::insert(&proxy, main_account.clone());
 			Self::deposit_event(Event::MainAccountRegistered { main: main_account, proxy });
 			Ok(())
@@ -1809,16 +1902,18 @@ pub mod pallet {
 				.checked_div(Decimal::from(UNIT_BALANCE))
 				.ok_or(Error::<T>::FailedToConvertDecimaltoBalance)?;
 			let current_blk = frame_system::Pallet::<T>::current_block_number();
-			<IngressMessages<T>>::mutate(current_blk, |ingress_messages| {
-				ingress_messages.push(
-					orderbook_primitives::ingress::IngressMessages::DirectWithdrawal(
-						proxy_account,
-						asset,
-						converted_amount,
-						do_force_withdraw,
-					),
-				);
-			});
+			<IngressMessages<T>>::try_mutate(current_blk, |ingress_messages| {
+				ingress_messages
+					.try_push(
+						orderbook_primitives::ingress::IngressMessages::DirectWithdrawal(
+							proxy_account,
+							asset,
+							converted_amount,
+							do_force_withdraw,
+						),
+					)
+					.map_err(|_| Error::<T>::IngressQueueFull)
+			})?;
 			Self::deposit_event(Event::WithdrawFromOrderbook(user, asset, amount));
 			Ok(())
 		}
@@ -2239,21 +2334,55 @@ impl<T: Config + frame_system::offchain::CreateTransactionBase<Call<T>>> Pallet<
 			return InvalidTransaction::Custom(13).into();
 		}
 
-		// Check if this validator was part of that authority set
-		let authorities = <Authorities<T>>::get(snapshot_summary.validator_set_id).validators;
+		// AUTHENTICATION HARDENING (2026-08-12).
+		//
+		// This function is the ENTIRE gate protecting the custody pool: submit_snapshot
+		// is unsigned and its dispatch body trusts whatever passes here, so every check
+		// below is load-bearing. Removing any one of them reopens an unauthenticated
+		// settlement path. The incident of 28 May 2026 exploited the original version,
+		// which took validator_set_id from the submitter and never bound it to the
+		// active set: a non-existent id (2^63) resolved to an EMPTY authority list, so
+		// threshold = 51% * 0 = 0, the `threshold > signatures.len()` check read
+		// `0 > 0` (false, i.e. accept), and the signature loop iterated over an empty
+		// vector and verified nothing. Result: any account could drain custody with a
+		// zero-signature snapshot.
 
-		//Check threshold
+		// (1) The validator set id MUST be the chain's current active set. This is the
+		// single fix that closes the reported exploit; the rest are defence in depth.
+		let active_set_id = <ValidatorSetId<T>>::get();
+		if snapshot_summary.validator_set_id != active_set_id {
+			return InvalidTransaction::Custom(14).into();
+		}
 
+		let authorities = <Authorities<T>>::get(active_set_id).validators;
+
+		// (2) An empty authority set can never authorise a settlement. Without this,
+		// threshold collapses to zero and every check below passes vacuously.
+		if authorities.is_empty() {
+			return InvalidTransaction::Custom(15).into();
+		}
+
+		// (3) Threshold over the REAL set. With a non-empty set this is at least 1.
 		const THRESHOLD: u8 = 51;
-		let p = Percent::from_percent(THRESHOLD);
-		let threshold = p * authorities.len();
+		let threshold = Percent::from_percent(THRESHOLD) * authorities.len();
+		// max(1) guarantees that even a degenerate single-authority set cannot be
+		// satisfied by zero signatures.
+		let required = core::cmp::max(threshold, 1);
 
-		if threshold > signatures.len() {
+		if signatures.len() < required {
 			return InvalidTransaction::Custom(11).into();
 		}
 
-		// Check signatures
+		// (4) Verify every signature AND reject duplicate signer indices. The original
+		// loop counted entries, not distinct signers, so a single compromised key could
+		// be replayed `required` times to fake a majority. A BTreeSet enforces
+		// distinctness; any repeat is rejected outright, which keeps signatures.len()
+		// equal to the number of distinct valid signers.
+		let mut seen = sp_std::collections::btree_set::BTreeSet::<u16>::new();
 		for (index, signature) in signatures {
+			if !seen.insert(*index) {
+				return InvalidTransaction::Custom(16).into();
+			}
 			match authorities.get(*index as usize) {
 				None => return InvalidTransaction::Custom(12).into(),
 				Some(auth) => {

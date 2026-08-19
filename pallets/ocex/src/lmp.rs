@@ -531,16 +531,18 @@ impl<T: Config> LiquidityMining<T::AccountId, BalanceOf<T>> for Pallet<T> {
 			quote_amount_in_u128.saturated_into(),
 		)?;
 		let current_blk = frame_system::Pallet::<T>::current_block_number();
-		<IngressMessages<T>>::mutate(current_blk, |messages| {
-			messages.push(orderbook_primitives::ingress::IngressMessages::AddLiquidity(
-				TradingPairConfig::default(market.base, market.quote),
-				pool,
-				lp,
-				total_shares_issued,
-				base_amount,
-				quote_amount,
-			));
-		});
+		<IngressMessages<T>>::try_mutate(current_blk, |messages| {
+			messages
+				.try_push(orderbook_primitives::ingress::IngressMessages::AddLiquidity(
+					TradingPairConfig::default(market.base, market.quote),
+					pool,
+					lp,
+					total_shares_issued,
+					base_amount,
+					quote_amount,
+				))
+				.map_err(|_| Error::<T>::IngressQueueFull)
+		})?;
 		Ok(())
 	}
 
@@ -556,25 +558,33 @@ impl<T: Config> LiquidityMining<T::AccountId, BalanceOf<T>> for Pallet<T> {
 		let burn_frac = burned.checked_div(total).unwrap_or_default();
 
 		let current_blk = frame_system::Pallet::<T>::current_block_number();
-		<IngressMessages<T>>::mutate(current_blk, |messages| {
-			messages.push(orderbook_primitives::ingress::IngressMessages::RemoveLiquidity(
-				TradingPairConfig::default(market.base, market.quote),
-				pool,
-				lp,
-				burn_frac,
-				total,
-			));
-		});
+		if let Err(_) = <IngressMessages<T>>::try_mutate(current_blk, |messages| {
+			messages
+				.try_push(orderbook_primitives::ingress::IngressMessages::RemoveLiquidity(
+					TradingPairConfig::default(market.base, market.quote),
+					pool,
+					lp,
+					burn_frac,
+					total,
+				))
+				.map_err(|_| ())
+		}) {
+			log::error!(target: "ocex", "C9: IngressMessages full — RemoveLiquidity message dropped");
+		}
 	}
 
 	fn force_close_pool(market: TradingPair, pool: T::AccountId) {
 		let current_blk = frame_system::Pallet::<T>::current_block_number();
-		<IngressMessages<T>>::mutate(current_blk, |messages| {
-			messages.push(orderbook_primitives::ingress::IngressMessages::ForceClosePool(
-				TradingPairConfig::default(market.base, market.quote),
-				pool,
-			));
-		});
+		if let Err(_) = <IngressMessages<T>>::try_mutate(current_blk, |messages| {
+			messages
+				.try_push(orderbook_primitives::ingress::IngressMessages::ForceClosePool(
+					TradingPairConfig::default(market.base, market.quote),
+					pool,
+				))
+				.map_err(|_| ())
+		}) {
+			log::error!(target: "ocex", "C9: IngressMessages full — ForceClosePool message dropped");
+		}
 	}
 
 	fn claim_rewards(

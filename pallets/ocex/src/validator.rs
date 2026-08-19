@@ -23,7 +23,7 @@ use crate::{
         get_fees_paid_by_main_account_in_quote, get_maker_volume_by_main_account,
         get_q_score_and_uptime, store_q_score_and_uptime,
     },
-    pallet::{Accounts, AllowlistedToken, FinalizeLMPScore, LMPConfig, ValidatorSetId},
+    pallet::{Accounts, AllowlistedToken, FinalizeLMPScore, LMPConfig, OrderbookOperatorPublicKey, ValidatorSetId},
     settlement::{add_balance, get_balance, sub_balance},
     snapshot::StateInfo,
     storage::{store_trie_root, OffchainState},
@@ -231,7 +231,14 @@ impl<T: Config> Pallet<T> {
                         log::error!(target:"ocex","No user actions found for nonce: {:?}",nonce);
                         return Ok(true);
                     },
-                    Some(batch) => batch,
+                    Some(batch) => {
+                        // SECURITY (H4): verify operator ECDSA signature before processing
+                        if !Self::verify_batch_signature(&batch) {
+                            log::error!(target:"ocex","Invalid operator signature on batch nonce: {:?}", nonce);
+                            return Err("Invalid batch signature");
+                        }
+                        batch
+                    },
                 };
                 sp_runtime::print("Processing nonce");
                 sp_runtime::print(nonce);
@@ -265,7 +272,14 @@ impl<T: Config> Pallet<T> {
                 log::debug!(target:"ocex","Stored state root: {:?}",root);
                 return Ok(true);
             },
-            Some(batch) => batch,
+            Some(batch) => {
+                // SECURITY (H4): verify operator ECDSA signature before processing
+                if !Self::verify_batch_signature(&batch) {
+                    log::error!(target:"ocex","Invalid operator signature on batch nonce: {:?}", next_nonce);
+                    return Err("Invalid batch signature");
+                }
+                batch
+            },
         };
 
         log::info!(target:"ocex","Processing user actions for nonce: {:?}",next_nonce);
@@ -751,6 +765,26 @@ impl<T: Config> Pallet<T> {
         let mut withdrawal = request.convert(stid).map_err(|_| "Withdrawal conversion error")?;
         withdrawal.amount = actual_deducted; // The actual deducted balance
         Ok(withdrawal)
+    }
+
+    /// SECURITY (H4): Verifies the ECDSA operator signature on a `UserActionBatch`.
+    ///
+    /// Reads `OrderbookOperatorPublicKey` from on-chain storage and uses ECDSA public-key
+    /// recovery to confirm the batch was signed by the registered operator key.
+    /// Returns `false` if no key is registered (defensive — governance should set one before
+    /// activating the enclave) or if the recovered public key does not match.
+    fn verify_batch_signature(batch: &UserActionBatch<T::AccountId>) -> bool {
+        match <OrderbookOperatorPublicKey<T>>::get() {
+            None => {
+                log::error!(
+                    target: "ocex",
+                    "No operator public key registered — rejecting batch nonce {:?}",
+                    batch.snapshot_id
+                );
+                false
+            },
+            Some(key) => batch.verify(&key),
+        }
     }
 
     /// Processes a batch of user actions, updating the offchain state accordingly.
