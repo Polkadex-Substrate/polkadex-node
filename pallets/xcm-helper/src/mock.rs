@@ -111,6 +111,9 @@ parameter_types! {
 	pub const AssetHandlerPalletId: PalletId = PalletId(*b"XcmHandl");
 	pub const WithdrawalExecutionBlockDiff: u32 = 1000;
 	pub const NativeAssetId: u128 = 100;
+	/// SECURITY (R2-H5): cap the drain in handle_new_pending_withdrawals and reject
+	/// oversized deposit batches in execute_deposits.
+	pub const MaxWithdrawalsPerBlock: u32 = 100;
 }
 
 impl xcm_helper::Config for Test {
@@ -129,6 +132,7 @@ impl xcm_helper::Config for Test {
 	type NativeAssetId = NativeAssetId;
 	type WeightInfo = crate::weights::WeightInfo<Test>;
 	type SiblingAddressConverter = ();
+	type MaxWithdrawalsPerBlock = MaxWithdrawalsPerBlock;
 }
 
 parameter_types! {

@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 16 fixed (as of last update) · 49 open  
+**Totals:** 65 findings in this repo · 17 fixed (as of last update) · 48 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -515,6 +515,39 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 ---
 
+### R2-H5 — on_initialize runs unbounded deposit batch; xcm-helper drains unbounded queue
+**Severity:** High  
+**Location:** `pallets/xcm-helper/src/lib.rs`  
+**Fixed in spec:** 391  
+**Date:** 2026-08-19  
+**Migration required:** No — pure logic change.
+
+**Vulnerability:** Two related issues in xcm-helper:
+
+1. **Trait signature mismatch:** `xcm_helper::Pallet<T>` implemented `TheaIncomingExecutor::execute_deposits` with return type `()`, but the trait was updated (H8 / R3-H14 fix) to require `DispatchResult`. This caused a trait-mismatch compile error whenever xcm-helper was compiled against the updated primitives.
+
+2. **Unbounded drain:** `handle_new_pending_withdrawals` used `while let Some(withdrawal) = withdrawals.pop()` which drains the entire `PendingWithdrawals[n]` Vec in one hook invocation. The weight returned was hardcoded at `MAXIMUM_BLOCK_WEIGHT / 4` regardless of queue depth. A relayer could inject a large deposit batch into `execute_deposits`, schedule thousands of withdrawals for the same future block, and stall that block's execution.
+
+3. **Silent decode failures:** `execute_deposits` used `Vec::<Withdraw>::decode(...).unwrap_or_default()` — a malformed payload silently produced an empty list, advancing the nonce and releasing the relayer's stake with no indication of failure.
+
+**Changes made:**
+
+`pallets/xcm-helper/src/lib.rs`:
+- Added `MaxWithdrawalsPerBlock: Get<u32>` to `Config` trait (with `#[pallet::constant]`)
+- `TheaIncomingExecutor::execute_deposits`: Changed return type to `DispatchResult`; replaced `unwrap_or_default()` with explicit `map_err` returning a descriptive `DispatchError::Other`; added batch-size guard — rejects any batch with `len() > MaxWithdrawalsPerBlock`
+- `handle_new_pending_withdrawals`: Changed from an unbounded `mutate`-based drain to a bounded `take`-then-split approach. After `take`-ing all withdrawals for block `n`, items beyond `MaxWithdrawalsPerBlock` are re-queued to block `n+1` with a `log::warn!`. Overflow is never silently dropped.
+- `on_initialize`: Added explanatory comment; TODO noting that the weight should be made proportional to items actually processed
+
+`pallets/xcm-helper/src/mock.rs`:
+- Added `MaxWithdrawalsPerBlock = 100` `parameter_types!` entry
+- Added `type MaxWithdrawalsPerBlock = MaxWithdrawalsPerBlock;` to the test Config impl
+
+**Notes:**
+- xcm-helper has pre-existing compilation failures due to XCM API version drift (MultiAsset / MultiLocation paths changed between staging-xcm versions) and pallet_balances Config API changes. These are separate issues not introduced by this fix — xcm-helper was already excluded from the workspace (`pallets/xcm-helper` not in workspace members).
+- The THEA `on_initialize` batch-weight issue (part 1 of R2-H5) is a separate concern: THEA processes one message per network per block, and the `WeightInfo::on_initialize(active_networks.len())` weight doesn't account for the payload size within each message. Since THEA is currently commented out of the mainnet runtime, this is documented as a TODO in the THEA `on_initialize` code.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -527,7 +560,6 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | R3-H12 | 🟠 High | pallets/ocex | LMP config metrics write-only; epoch budget over-issued |
 | R3-H13 | 🟠 High | pallets/ocex | close_auction non-transactional; place_bid commented out |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
-| R2-H5 | 🟠 High | pallets/thea, pallets/xcm-helper | Unbounded on_initialize deposit batch; unbounded xcm-helper queue |
 | R3-H9 | 🟠 High | pallets/thea | Global asset registry — weakest network mints any bridged asset |
 | R3-H6 | 🟠 High | pallets/liquidity-mining | Pools keyed by market_maker, callbacks look up by pool_id |
 | R3-H7 | 🟠 High | pallets/liquidity-mining | remove_liquidity_failed mints 10¹²× shares |

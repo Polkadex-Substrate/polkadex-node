@@ -225,6 +225,15 @@ pub mod pallet {
 		type WeightInfo: XcmHelperWeightInfo;
 		/// Sibling Address Converter
 		type SiblingAddressConverter: xcm_executor::traits::ConvertLocation<Self::AccountId>;
+		/// SECURITY (R2-H5): Maximum number of pending withdrawals processed per block's
+		/// `on_initialize` and the maximum batch size accepted by `execute_deposits`.
+		///
+		/// When the live queue for a block exceeds this limit, the excess items are
+		/// re-queued to the NEXT block rather than being silently dropped or overflowing
+		/// the block weight.  Governance should set this to a value consistent with the
+		/// weight budget available in `on_initialize` after all other hooks have run.
+		#[pallet::constant]
+		type MaxWithdrawalsPerBlock: Get<u32>;
 	}
 
 	/// Pending Withdrawals
@@ -346,10 +355,15 @@ pub mod pallet {
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
+			// SECURITY (R2-H5): handle_new_pending_withdrawals is now bounded by
+			// MaxWithdrawalsPerBlock.  Overflow items are re-queued to n+1 so they
+			// are never silently dropped.
+			//
+			// TODO: Replace the fixed weight with a proper benchmark that accounts
+			// for the actual number of items processed.  The cap makes the worst
+			// case bounded (MaxWithdrawalsPerBlock items per block), but the weight
+			// should ideally be `items_processed * per_item_weight`.
 			Self::handle_new_pending_withdrawals(n);
-			// Only update the storage if vector is not empty
-			// TODO: We are currently over estimating the weight here to 1/4th of total block time
-			// 	Need a better way to estimate this hook
 			MAXIMUM_BLOCK_WEIGHT.saturating_div(4)
 		}
 	}
@@ -695,8 +709,40 @@ pub mod pallet {
 		}
 
 		pub fn handle_new_pending_withdrawals(n: BlockNumberFor<T>) {
+			// SECURITY (R2-H5): Drain at most MaxWithdrawalsPerBlock items so a
+			// large queue cannot consume an entire block.  Any overflow is
+			// re-inserted at block n+1 and will be retried next block.
+			let max = T::MaxWithdrawalsPerBlock::get() as usize;
+
+			// Take the full list out of storage, then split it:
+			//   to_process = last `max` items (popped in LIFO order by the loop below)
+			//   overflow    = earlier items, re-queued to n+1
+			let mut all = <PendingWithdrawals<T>>::take(n);
+			let overflow = if all.len() > max {
+				let split_at = all.len() - max;
+				let leftover = all.drain(..split_at).collect::<Vec<_>>();
+				leftover
+			} else {
+				Vec::new()
+			};
+
+			if !overflow.is_empty() {
+				let next = n.saturating_add(sp_runtime::traits::One::one());
+				<PendingWithdrawals<T>>::mutate(next, |q| q.extend(overflow.iter().cloned()));
+				log::warn!(
+					target: "xcm-helper",
+					"SECURITY (R2-H5): {} pending withdrawals exceeded the block cap of {} \
+					 and have been re-queued to block {:?}",
+					overflow.len(),
+					max,
+					next,
+				);
+			}
+
 			let mut failed_withdrawal: Vec<Withdraw> = Vec::default();
-			<PendingWithdrawals<T>>::mutate(n, |withdrawals| {
+			// `all` now holds at most `max` items — the ones we will process this block.
+			{
+				let withdrawals = &mut all;
 				while let Some(withdrawal) = withdrawals.pop() {
 					if !withdrawal.is_blocked {
 						let destination = match VersionedMultiLocation::decode(
@@ -876,7 +922,7 @@ pub mod pallet {
 						log::error!(target:"xcm-helper","Withdrawal failed: Withdrawal is blocked");
 					}
 				}
-			});
+			}
 			// Only update the storage if vector is not empty
 			if !failed_withdrawal.is_empty() {
 				<FailedWithdrawals<T>>::insert(n, failed_withdrawal);
@@ -910,8 +956,46 @@ pub mod pallet {
 	}
 
 	impl<T: Config> TheaIncomingExecutor for Pallet<T> {
-		fn execute_deposits(_: Network, deposits: Vec<u8>) {
-			let deposits = Vec::<Withdraw>::decode(&mut &deposits[..]).unwrap_or_default();
+		fn execute_deposits(_: Network, deposits: Vec<u8>) -> sp_runtime::DispatchResult {
+			// SECURITY (R2-H5): Fix trait compliance and add safety guards.
+			//
+			// (1) Return DispatchResult as required by the TheaIncomingExecutor trait.
+			//     The previous `()` return caused a trait-mismatch compile error when
+			//     the trait was updated as part of the H8 / R3-H14 security fix.
+			//
+			// (2) Fail-fast on SCALE decode errors instead of silently dropping the
+			//     entire batch with `unwrap_or_default()`.  A decode failure means the
+			//     relayer submitted a malformed payload; returning Err causes THEA's
+			//     on_initialize to emit DepositExecutionFailed and advance the nonce
+			//     without crediting any funds.
+			//
+			// (3) Reject oversized batches upfront so a single THEA message cannot
+			//     saturate the PendingWithdrawals queue for a future block beyond what
+			//     handle_new_pending_withdrawals can process in one hook invocation.
+			let deposits = Vec::<Withdraw>::decode(&mut &deposits[..]).map_err(|_| {
+				log::error!(
+					target: "xcm-helper",
+					"SECURITY (R2-H5): execute_deposits: SCALE decode failed"
+				);
+				sp_runtime::DispatchError::Other(
+					"xcm-helper execute_deposits: SCALE decode failed",
+				)
+			})?;
+
+			let max = T::MaxWithdrawalsPerBlock::get() as usize;
+			if deposits.len() > max {
+				log::error!(
+					target: "xcm-helper",
+					"SECURITY (R2-H5): execute_deposits: batch size {} exceeds \
+					 MaxWithdrawalsPerBlock {}; rejecting entire batch",
+					deposits.len(),
+					max,
+				);
+				return Err(sp_runtime::DispatchError::Other(
+					"xcm-helper execute_deposits: batch too large",
+				));
+			}
+
 			for deposit in deposits {
 				// Calculate the withdrawal execution delay
 				let withdrawal_execution_block: BlockNumberFor<T> =
@@ -929,6 +1013,7 @@ pub mod pallet {
 					},
 				);
 			}
+			Ok(())
 		}
 	}
 
