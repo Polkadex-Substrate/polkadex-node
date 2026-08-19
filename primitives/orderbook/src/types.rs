@@ -217,6 +217,15 @@ impl<AccountId: Ord + Clone + Codec + TypeInfo> UserActionBatch<AccountId> {
 		data.append(&mut self.snapshot_id.encode());
 		sp_io::hashing::blake2_256(&data)
 	}
+
+	/// SECURITY (H4): Verifies the operator ECDSA signature over this batch.
+	/// Recovers the signer from `self.signature` and compares against `public_key`.
+	pub fn verify(&self, public_key: &sp_core::ecdsa::Public) -> bool {
+		match self.signature.recover_prehashed(&self.sign_data()) {
+			None => false,
+			Some(recovered) => &recovered == public_key,
+		}
+	}
 }
 
 #[cfg(feature = "std")]

@@ -166,6 +166,12 @@ parameter_types! {
 	//pub const TreasuryPalletId: PalletId = PalletId(*b"OCEX_CRW");
 	pub const MsPerDay: u64 = 86_400_000;
 	pub const OBWithdrawalLimit: u32 = 50;
+	// C9: cap ingress queue at 100 messages per block in tests
+	pub const OBIngressLimit: u32 = 100;
+	// C9: minimum deposit set to 1 planck for tests so existing test deposits pass
+	pub const MinimumDeposit: u128 = 1;
+	// R2-H1: cap egress messages per snapshot at 1000 in tests
+	pub const MaxEgressMessages: u32 = 1000;
 }
 
 impl pallet_lmp::pallet::Config for Test {
@@ -187,6 +193,9 @@ impl Config for Test {
 	type CrowdSourceLiqudityMining = LiqudityMining;
 	type WeightInfo = crate::weights::WeightInfo<Test>;
 	type OBWithdrawalLimit = OBWithdrawalLimit;
+	type OBIngressLimit = OBIngressLimit;
+	type MinimumDeposit = MinimumDeposit;
+	type MaxEgressMessages = MaxEgressMessages;
 	type CrossChainGadget = ();
 }
 

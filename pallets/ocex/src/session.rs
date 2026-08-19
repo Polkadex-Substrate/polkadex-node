@@ -49,13 +49,21 @@ impl<T: Config> Pallet<T> {
 			// Notify Liquidity Crowd sourcing pallet about new epoch
 			T::CrowdSourceLiqudityMining::new_epoch(current_epoch);
 
-			<IngressMessages<T>>::mutate(n, |ingress_messages| {
-				ingress_messages.push(orderbook_primitives::ingress::IngressMessages::NewLMPEpoch(
-					current_epoch,
-				));
+			if let Err(_) = <IngressMessages<T>>::try_mutate(n, |ingress_messages| {
 				ingress_messages
-					.push(orderbook_primitives::ingress::IngressMessages::LMPConfig(config))
-			});
+					.try_push(
+						orderbook_primitives::ingress::IngressMessages::NewLMPEpoch(current_epoch),
+					)
+					.map_err(|_| ())?;
+				ingress_messages
+					.try_push(orderbook_primitives::ingress::IngressMessages::LMPConfig(config))
+					.map_err(|_| ())
+			}) {
+				log::error!(
+					target: "ocex",
+					"C9: IngressMessages full at epoch boundary — NewLMPEpoch/LMPConfig dropped"
+				);
+			}
 		}
 	}
 

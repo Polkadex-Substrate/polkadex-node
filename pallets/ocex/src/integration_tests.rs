@@ -27,6 +27,7 @@ use crate::validator::{LAST_PROCESSED_SNAPSHOT, WORKER_STATUS};
 use frame_support::assert_ok;
 use frame_support::traits::fungible::Mutate;
 use frame_support::traits::fungibles::Mutate as FunMutate;
+use frame_support::BoundedVec;
 use num_traits::{FromPrimitive, One};
 use orderbook_primitives::ingress::{EgressMessages, IngressMessages};
 use orderbook_primitives::lmp::LMPMarketConfigWrapper;
@@ -47,10 +48,23 @@ use sp_core::{Pair, H160, H256};
 use sp_runtime::offchain::storage::StorageValueRef;
 use std::collections::BTreeMap;
 
+// SECURITY (H4): deterministic test operator ECDSA keypair.
+fn test_operator_pair() -> sp_core::ecdsa::Pair {
+	sp_core::ecdsa::Pair::from_string("//test-operator-h4", None).unwrap()
+}
+
+/// Register the test operator public key in on-chain storage so that
+/// `verify_batch_signature` succeeds during integration tests.
+fn register_test_operator() {
+	<crate::pallet::OrderbookOperatorPublicKey<Test>>::put(test_operator_pair().public());
+}
+
 #[test]
 #[sequential]
 fn test_run_on_chain_validation_trades_happy_path() {
 	new_test_ext().execute_with(|| {
+		// SECURITY (H4): register operator key before validation runs
+		register_test_operator();
 		// previous block: 4768084, third argument
 		push_trade_user_actions(1, 0, 1);
 		assert_ok!(OCEX::run_on_chain_validation(1));
@@ -91,6 +105,8 @@ fn test_run_on_chain_validation_trades_happy_path() {
 #[sequential]
 fn test_on_chain_validation_with_auction() {
 	new_test_ext().execute_with(|| {
+		// SECURITY (H4): register operator key before validation runs
+		register_test_operator();
 		let recipient_address = AccountId32::new([2; 32]);
 		let pot_account: AccountId32 = OCEX::get_pot_account();
 		let pallet_account: AccountId32 = OCEX::get_pallet_account();
@@ -226,19 +242,21 @@ fn push_trade_user_actions_with_fee(stid: u64, snapshot_id: u64, block_no: u64) 
 	ie_map.insert(ingress_message.clone(), egress_message);
 	<crate::pallet::IngressMessages<Test>>::insert(
 		block_no.saturating_add(1),
-		vec![ingress_message],
+		BoundedVec::try_from(vec![ingress_message]).expect("within bounds"),
 	);
 	let block_import_action =
 		UserActions::BlockImport(block_no as u32, BTreeMap::new(), BTreeMap::new());
 	let block_import_with_tp =
 		UserActions::BlockImport(block_no.saturating_add(1) as u32, ie_map, BTreeMap::new());
 	let trade_action = UserActions::Trade(vec![trade]);
-	let user_action_batch = UserActionBatch {
+	let mut user_action_batch = UserActionBatch {
 		actions: vec![block_import_action, trade_action, block_import_with_tp],
 		stid,
 		snapshot_id,
 		signature: sp_core::ecdsa::Signature::from_raw([0; 65]),
 	};
+	// SECURITY (H4): sign with the test operator key so verify_batch_signature passes
+	user_action_batch.signature = test_operator_pair().sign_prehashed(&user_action_batch.sign_data());
 	AggregatorClient::<Test>::mock_get_user_action_batch(user_action_batch);
 }
 
@@ -256,12 +274,14 @@ fn push_trade_user_actions(stid: u64, snapshot_id: u64, block_no: u64) {
 	let block_import_action =
 		UserActions::BlockImport(block_no as u32, BTreeMap::new(), BTreeMap::new());
 	let trade_action = UserActions::Trade(vec![trade]);
-	let user_action_batch = UserActionBatch {
+	let mut user_action_batch = UserActionBatch {
 		actions: vec![block_import_action, trade_action],
 		stid,
 		snapshot_id,
 		signature: sp_core::ecdsa::Signature::from_raw([0; 65]),
 	};
+	// SECURITY (H4): sign with the test operator key so verify_batch_signature passes
+	user_action_batch.signature = test_operator_pair().sign_prehashed(&user_action_batch.sign_data());
 	AggregatorClient::<Test>::mock_get_user_action_batch(user_action_batch);
 }
 
@@ -282,7 +302,8 @@ fn get_block_import(block_no: u64) -> u64 {
 	);
 	<IngressMessagesStorage<Test>>::insert(
 		block_no,
-		vec![maker_ingress_message, taker_ingress_message],
+		BoundedVec::try_from(vec![maker_ingress_message, taker_ingress_message])
+			.expect("within bounds"),
 	);
 	block_no
 }

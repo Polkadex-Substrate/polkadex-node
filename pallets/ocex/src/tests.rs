@@ -2024,10 +2024,183 @@ fn get_dummy_snapshot(
 fn test_submit_snapshot_bad_origin() {
 	new_test_ext().execute_with(|| {
 		let (snapshot, _public, signature) = get_dummy_snapshot(1);
+		// Unchanged by the 2026-08-12 hardening, and that is the point: new_test_ext()
+		// seeds Authorities(0) with one validator and ValidatorSetId defaults to 0, so
+		// the snapshot's validator_set_id: 0 matches the ACTIVE set, the set is not
+		// empty, and 51% * 1 = 0 -> required = max(0,1) = 1, which one signature
+		// satisfies. Execution therefore still reaches the signature loop and rejects
+		// the unrelated key with Custom(12), exactly as before the fix.
 		assert_noop!(
 			OCEX::validate_snapshot(&snapshot, &vec![(0, signature.into())]),
 			InvalidTransaction::Custom(12)
 		);
+	});
+}
+
+// ── Authentication-bypass regression tests (incident of 28 May 2026) ──────────
+//
+// These pin the fix in validate_snapshot. Each reproduces one leg of the
+// original exploit, or a defence-in-depth guard added alongside it. If any of
+// these ever fails, the custody pool is unprotected again.
+
+fn hardening_authorities(n: usize) -> Vec<(sp_core::sr25519::Pair, AuthorityId)> {
+	(0..n)
+		.map(|_| {
+			let pair = sp_core::sr25519::Pair::generate().0;
+			let id = AuthorityId::from(pair.public());
+			(pair, id)
+		})
+		.collect()
+}
+
+#[test]
+fn exploit_fabricated_validator_set_id_is_rejected() {
+	// THE REPORTED EXPLOIT. A real 3-validator set is active at id 0, but the
+	// snapshot names 2^63 - a set that does not exist. Pre-fix this resolved to an
+	// empty authority list and a zero threshold, and a zero-signature snapshot was
+	// accepted. Post-fix the set-id mismatch is rejected with Custom(14).
+	let auths = hardening_authorities(3);
+	let mut snapshot = SnapshotSummary {
+		validator_set_id: 9_223_372_036_854_775_808, // 2^63
+		snapshot_id: 1,
+		state_hash: Default::default(), // null state hash, exactly as in the incident
+		state_change_id: 0,
+		last_processed_blk: 1,
+		withdrawals: vec![],
+		egress_messages: vec![],
+		trader_metrics: None,
+	};
+	snapshot.snapshot_id = 1;
+	new_test_ext().execute_with(|| {
+		<Authorities<Test>>::insert(
+			0,
+			ValidatorSet::new(auths.iter().map(|(_, id)| id.clone()), 0),
+		);
+		<ValidatorSetId<Test>>::put(0);
+		<SnapshotNonce<Test>>::put(0);
+		assert_noop!(
+			// Zero signatures, just like the on-chain exploit transaction.
+			OCEX::validate_snapshot(&snapshot, &Vec::new()),
+			InvalidTransaction::Custom(14)
+		);
+	});
+}
+
+#[test]
+fn empty_active_authority_set_is_rejected() {
+	// Even if the submitter names the correct active set id, an empty authority
+	// set can never authorise a settlement.
+	let snapshot = SnapshotSummary {
+		validator_set_id: 7,
+		snapshot_id: 1,
+		state_hash: Default::default(),
+		state_change_id: 0,
+		last_processed_blk: 1,
+		withdrawals: vec![],
+		egress_messages: vec![],
+		trader_metrics: None,
+	};
+	new_test_ext().execute_with(|| {
+		<ValidatorSetId<Test>>::put(7);
+		// Authorities(7) is left unset -> empty.
+		<SnapshotNonce<Test>>::put(0);
+		assert_noop!(
+			OCEX::validate_snapshot(&snapshot, &Vec::new()),
+			InvalidTransaction::Custom(15)
+		);
+	});
+}
+
+#[test]
+fn zero_signatures_rejected_even_with_correct_set() {
+	// Correct set id, non-empty set, but no signatures: threshold >= 1 must reject.
+	let auths = hardening_authorities(3);
+	let snapshot = SnapshotSummary {
+		validator_set_id: 0,
+		snapshot_id: 1,
+		state_hash: H256::random(),
+		state_change_id: 0,
+		last_processed_blk: 1,
+		withdrawals: vec![],
+		egress_messages: vec![],
+		trader_metrics: None,
+	};
+	new_test_ext().execute_with(|| {
+		<Authorities<Test>>::insert(
+			0,
+			ValidatorSet::new(auths.iter().map(|(_, id)| id.clone()), 0),
+		);
+		<ValidatorSetId<Test>>::put(0);
+		<SnapshotNonce<Test>>::put(0);
+		assert_noop!(
+			OCEX::validate_snapshot(&snapshot, &Vec::new()),
+			InvalidTransaction::Custom(11)
+		);
+	});
+}
+
+#[test]
+fn duplicate_signer_index_is_rejected() {
+	// One compromised key must not be replayable to fake a majority. With 4
+	// authorities the threshold is 2; submitting the same signer twice must be
+	// rejected with Custom(16) rather than counted as two signers.
+	let auths = hardening_authorities(4);
+	let snapshot = SnapshotSummary {
+		validator_set_id: 0,
+		snapshot_id: 1,
+		state_hash: H256::random(),
+		state_change_id: 0,
+		last_processed_blk: 1,
+		withdrawals: vec![],
+		egress_messages: vec![],
+		trader_metrics: None,
+	};
+	let sig0 = auths[0].0.sign(&snapshot.encode());
+	new_test_ext().execute_with(|| {
+		<Authorities<Test>>::insert(
+			0,
+			ValidatorSet::new(auths.iter().map(|(_, id)| id.clone()), 0),
+		);
+		<ValidatorSetId<Test>>::put(0);
+		<SnapshotNonce<Test>>::put(0);
+		assert_noop!(
+			OCEX::validate_snapshot(
+				&snapshot,
+				&vec![(0, sig0.clone().into()), (0, sig0.into())]
+			),
+			InvalidTransaction::Custom(16)
+		);
+	});
+}
+
+#[test]
+fn genuine_majority_snapshot_still_validates() {
+	// The hardening must NOT break the legitimate path: correct set id, distinct
+	// valid signatures meeting threshold.
+	let auths = hardening_authorities(3); // threshold = 51% * 3 = 1
+	let snapshot = SnapshotSummary {
+		validator_set_id: 0,
+		snapshot_id: 1,
+		state_hash: H256::random(),
+		state_change_id: 0,
+		last_processed_blk: 1,
+		withdrawals: vec![],
+		egress_messages: vec![],
+		trader_metrics: None,
+	};
+	let sig0 = auths[0].0.sign(&snapshot.encode());
+	let sig1 = auths[1].0.sign(&snapshot.encode());
+	new_test_ext().execute_with(|| {
+		<Authorities<Test>>::insert(
+			0,
+			ValidatorSet::new(auths.iter().map(|(_, id)| id.clone()), 0),
+		);
+		<ValidatorSetId<Test>>::put(0);
+		<SnapshotNonce<Test>>::put(0);
+		assert_ok!(OCEX::validate_snapshot(
+			&snapshot,
+			&vec![(0, sig0.into()), (1, sig1.into())]
+		));
 	});
 }
 
@@ -2150,6 +2323,46 @@ fn test_withdrawal_bad_origin() {
 		assert_noop!(OCEX::claim_withdraw(RuntimeOrigin::root(), 1, account_id.clone()), BadOrigin);
 
 		assert_noop!(OCEX::claim_withdraw(RuntimeOrigin::none(), 1, account_id.clone()), BadOrigin);
+	});
+}
+
+/// SECURITY (R4-A): regression test — claim_withdraw must not be callable repeatedly
+/// after all withdrawals in a snapshot have been successfully processed.
+///
+/// Before the fix, `do_withdraw` returning an empty `failed_withdrawals` vec was still
+/// unconditionally re-inserted into the BTreeMap, leaving a ghost entry that allowed
+/// infinite no-op calls to `claim_withdraw` for the same (snapshot_id, account) pair.
+#[test]
+fn test_claim_withdraw_no_double_claim_after_all_succeed() {
+	let account_id = create_account_id();
+	let custodian_account = OCEX::get_pallet_account();
+	new_test_ext().execute_with(|| {
+		// Step 1: submit snapshot WITHOUT funding the custodian.
+		// do_withdraw fails → the withdrawal goes into Withdrawals storage for retry.
+		let (snapshot, _, _) = get_dummy_snapshot(1);
+		assert_ok!(OCEX::submit_snapshot(RuntimeOrigin::none(), snapshot.clone(), Vec::new()));
+		assert!(Withdrawals::<Test>::contains_key(1), "withdrawal should be stored after failed do_withdraw");
+
+		// Step 2: fund the custodian so the retry via claim_withdraw can succeed.
+		mint_into_account(custodian_account.clone());
+
+		// Step 3: first claim_withdraw — should succeed and process the withdrawal.
+		assert_ok!(OCEX::claim_withdraw(
+			RuntimeOrigin::signed(account_id.clone().into()),
+			1,
+			account_id.clone()
+		));
+
+		// Step 4: storage must now be gone — either the account key or the whole snapshot entry.
+		// A second call must fail with InvalidWithdrawalIndex, not silently succeed as a no-op.
+		assert_noop!(
+			OCEX::claim_withdraw(
+				RuntimeOrigin::signed(account_id.clone().into()),
+				1,
+				account_id.clone()
+			),
+			Error::<Test>::InvalidWithdrawalIndex
+		);
 	});
 }
 
@@ -2521,6 +2734,7 @@ fn test_process_remove_liquidity_result() {
 		};
 		let pool = AccountId32::new([3; 32]);
 		let lp = AccountId32::new([4; 32]);
+		let market_maker = AccountId32::new([5; 32]);
 		let pallet_account = OCEX::get_pallet_account();
 		let base_free = Decimal::from(1);
 		let quote_free = Decimal::from(1);
@@ -2528,6 +2742,16 @@ fn test_process_remove_liquidity_result() {
 		Balances::mint_into(&pool, 1 * UNIT_BALANCE).unwrap();
 		Assets::mint_into(asset_id, &pool, 1 * UNIT_BALANCE).unwrap();
 		Assets::mint_into(asset_id, &pallet_account, 200 * UNIT_BALANCE).unwrap();
+		// SECURITY (R2-H1): register the pool account in PoolIdIndex so
+		// is_valid_pool_id() returns true before the transfer is made.
+		let trading_pair = orderbook_primitives::types::TradingPair {
+			base: AssetId::Polkadex,
+			quote: AssetId::Asset(asset_id),
+		};
+		pallet_lmp::pallet::PoolIdIndex::<Test>::insert(
+			&pool,
+			(trading_pair, market_maker.clone()),
+		);
 		let message = EgressMessages::RemoveLiquidityResult(
 			market,
 			pool.clone(),
