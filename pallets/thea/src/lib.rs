@@ -350,6 +350,19 @@ pub mod pallet {
 		/// the last finalized nonce, which would re-use already-finalized nonce
 		/// slots and expose the overwrite vulnerability above.
 		OutgoingNonceBelowFinalized,
+		/// SECURITY (R2-H4): fork_period must be at least 2 blocks.
+		/// With fork_period N and a message submitted at block B, execute_at = B + N.
+		/// on_initialize of block B+N executes the message *before* any extrinsics in
+		/// that block, so fishermen can only act in blocks B+1 … B+N-1.  A fork_period
+		/// of 0 or 1 gives fishermen zero blocks to react.
+		ForkPeriodTooShort,
+		/// SECURITY (R2-H4): The requested nonce is not in the incoming message queue.
+		/// It IS present in the executed-message archive, meaning on_initialize already
+		/// processed and finalized it.  The fisherman's stake was not charged (the
+		/// #[transactional] wrapper rolled it back).
+		/// The relayer's stake was released at execution time, so no automated slashing
+		/// is possible; governance must handle remediation off-chain.
+		MessageAlreadyExecuted,
 	}
 
 	#[pallet::hooks]
@@ -612,6 +625,21 @@ pub mod pallet {
 			fisherman_stake: u128,
 		) -> DispatchResult {
 			ensure_root(origin)?;
+			// SECURITY (R2-H4): Enforce a minimum fork_period of 2.
+			//
+			// Timeline for a message submitted at block B with fork_period N:
+			//   execute_at = B + N
+			//   on_initialize of block B+N runs BEFORE extrinsics and executes the message.
+			//   Fishermen can only report during blocks B+1 … B+N-1 (N-1 blocks of window).
+			//
+			//   N=0 → window = 0 blocks (on_initialize of B+1 executes immediately)
+			//   N=1 → window = 0 blocks (on_initialize of B+1 executes immediately)
+			//   N=2 → window = 1 block  (fisherman can act in B+1)
+			//
+			// In production, networks should use a much larger value (≥ 20 blocks, roughly
+			// 4 minutes at a 12 s block time) to account for propagation delays and
+			// variable transaction inclusion times.
+			ensure!(fork_period >= 2, Error::<T>::ForkPeriodTooShort);
 			<NetworkConfig<T>>::insert(
 				network,
 				thea_primitives::types::NetworkConfig::new(
@@ -723,9 +751,23 @@ pub mod pallet {
 				&fisherman,
 				config.fisherman_stake.saturated_into(),
 			)?;
-			// Message from incoming message queue
+			// SECURITY (R2-H4): Try the live queue first.  If the message is not there,
+			// check the executed-message archive so we can return a meaningful error
+			// rather than the generic MessageNotFound.  When a message was already
+			// executed (fork_period window elapsed), the relayer's stake was released at
+			// execution time — no automated slashing is possible from this path; the
+			// caller gets MessageAlreadyExecuted so governance can investigate separately.
+			// Because this function is #[transactional], any Err return rolls back the
+			// fisherman's stake hold taken above — their funds are never locked on a
+			// failed report attempt.
 			match <IncomingMessagesQueue<T>>::take(network, nonce) {
-				None => return Err(Error::<T>::MessageNotFound.into()),
+				None => {
+					// Not in the live queue — check whether it was already executed.
+					if <IncomingMessages<T>>::contains_key(network, nonce) {
+						return Err(Error::<T>::MessageAlreadyExecuted.into());
+					}
+					return Err(Error::<T>::MessageNotFound.into());
+				},
 				Some(reported_msg) => {
 					// Place it in misbehaviour reports
 					let report = MisbehaviourReport {

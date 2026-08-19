@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 15 fixed (as of last update) · 50 open  
+**Totals:** 65 findings in this repo · 16 fixed (as of last update) · 49 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -473,6 +473,35 @@ No additional code changes required — the full fix is in the H8 commit.
 
 ---
 
+### R2-H4 — fork_period accepts 0; executed messages removed so report returns MessageNotFound
+**Severity:** High  
+**Location:** `pallets/thea/src/lib.rs` — `add_thea_network`, `report_misbehaviour`  
+**Fixed in spec:** 391  
+**Date:** 2026-08-19  
+**Migration required:** No — pure logic change.
+
+**Vulnerability:** Two related defects:
+
+1. `add_thea_network` accepted `fork_period = 0` (or 1). With `fork_period N` and a message submitted at block B, `execute_at = B + N`.  `on_initialize` of block `B + N` runs **before** any extrinsics of that block, so fishermen can only react in blocks `B+1 … B+N-1` (N − 1 blocks). With N = 0 or N = 1 the window is zero — fishermen physically cannot submit a challenge before the message is executed.
+
+2. Once `on_initialize` executes a message it calls `IncomingMessagesQueue::take` (removing it from the queue) and stores the bare `Message` in `IncomingMessages` (the archive). `report_misbehaviour` called `IncomingMessagesQueue::take` for the same nonce and returned the generic `MessageNotFound` error when the message was already executed, hiding the true cause. The relayer's stake was released at execution time, leaving no automated slashing path.
+
+**Changes made:**
+
+`pallets/thea/src/lib.rs`:
+- Added two new error variants: `ForkPeriodTooShort` (index 9) and `MessageAlreadyExecuted` (index 10), both with explanatory SECURITY comments
+- `add_thea_network`: Added `ensure!(fork_period >= 2, Error::<T>::ForkPeriodTooShort)` before inserting the network config, with an inline comment explaining the minimum-2 timing rationale and the recommendation to use ≥ 20 blocks in production
+- `report_misbehaviour`: After a queue miss, added a check of `IncomingMessages::contains_key(network, nonce)`. If present → returns `MessageAlreadyExecuted` (informing the caller that the window expired). If absent → returns `MessageNotFound` (nonce was never submitted). In both error cases the `#[transactional]` wrapper rolls back the fisherman's stake hold, so the fisherman is never charged on a failed report.
+
+`pallets/thea/src/tests.rs`:
+- Added `test_r2_h4_add_thea_network_rejects_fork_period_below_minimum`: verifies fork_period 0 and 1 return `ForkPeriodTooShort`, and fork_period 2+ is accepted
+- Added `test_r2_h4_report_misbehaviour_returns_already_executed_when_in_archive`: places a message directly in `IncomingMessages`, verifies `MessageAlreadyExecuted` is returned and fisherman balance is unchanged
+- Added `test_r2_h4_report_misbehaviour_returns_not_found_for_truly_unknown_nonce`: verifies absent nonce still returns `MessageNotFound` with no stake loss
+
+**Design note — no automated clawback for already-executed messages:** Because `IncomingMessages` stores only the bare `Message` (no relayer account or stake amount), and the relayer's stake hold is released in `on_initialize` upon successful execution, there is no in-protocol mechanism to automatically slash a relayer after their message has been executed. This is a known design limitation. The correct mitigation is the fork_period minimum: if the window is always ≥ 2 blocks, honest fishermen can always intervene *before* execution. Off-chain remediation (governance slash via other means) remains available if a fraudulent message slips through under exceptional circumstances.
+
+---
+
 ## One-shot migrations — must be removed before spec 392
 
 The following migrations are in `runtimes/mainnet/src/migrations.rs` and wired into the `Migrations` tuple in `runtimes/mainnet/src/lib.rs`. They are idempotent but execute on **every** runtime upgrade. They must be **removed from the tuple before the next spec version bump** (≥ 392):
@@ -498,10 +527,8 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | R3-H12 | 🟠 High | pallets/ocex | LMP config metrics write-only; epoch budget over-issued |
 | R3-H13 | 🟠 High | pallets/ocex | close_auction non-transactional; place_bid commented out |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
-| R2-H4 | 🟠 High | pallets/thea | fork_period accepts 0; no clawback path |
 | R2-H5 | 🟠 High | pallets/thea, pallets/xcm-helper | Unbounded on_initialize deposit batch; unbounded xcm-helper queue |
 | R3-H9 | 🟠 High | pallets/thea | Global asset registry — weakest network mints any bridged asset |
-| H8 | 🟠 High | pallets/thea | do_deposit #[transactional] — one failure reverts all deposits |
 | R3-H6 | 🟠 High | pallets/liquidity-mining | Pools keyed by market_maker, callbacks look up by pool_id |
 | R3-H7 | 🟠 High | pallets/liquidity-mining | remove_liquidity_failed mints 10¹²× shares |
 | R3-H8 | 🟠 High | pallets/liquidity-mining | force_close_pool sends funds to personal account |
