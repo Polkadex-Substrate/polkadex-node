@@ -23,7 +23,8 @@ use crate::{
 	constants::currency::*, AccountId, AssetsConfig,
 	BabeConfig, Balance, BalancesConfig, ElectionsConfig, /* NominationPoolsConfig, */
 	RuntimeGenesisConfig, SessionConfig, SessionKeys, SocietyConfig, StakingConfig,
-	SudoConfig, TechnicalCommitteeConfig, BABE_GENESIS_EPOCH_CONFIG, PDEXMigrationConfig,
+	SudoConfig, TechnicalCommitteeConfig, BABE_GENESIS_EPOCH_CONFIG,
+	// PDEXMigrationConfig, // pallet removed from construct_runtime
 };
 pub use pallet_staking::StakerStatus;
 use frame_support::build_struct_json_patch;
@@ -38,7 +39,7 @@ use sp_genesis_builder::PresetId;
 use sp_keyring::Sr25519Keyring;
 use sp_mixnet::types::AuthorityId as MixnetId;
 use sp_runtime::Perbill;
-use pallet_ocex_lmp::sr25519::AuthorityId as OrderbookId;
+// use pallet_ocex_lmp::sr25519::AuthorityId as OrderbookId; // OCEX removed from construct_runtime
 
 // Template constants
 //pub const ENDOWMENT: Balance = 10_000_000 * DOLLARS;
@@ -76,6 +77,7 @@ pub fn kitchensink_genesis(
 	//	.map(|_| BeefyId::from([0u8; 33])) // dummy 33-byte key
 	//	.collect();
 
+	#[allow(dead_code)]
 	const ERC20_PDEX_SUPPLY: u128 = 3_172_895 * PDEX;
 
 	let collective = collective(&endowed_accounts);
@@ -129,7 +131,7 @@ pub fn kitchensink_genesis(
 		beefy: Default::default(),
 		// Custom
 		orderbook_committee: Default::default(),
-		pdex_migration: PDEXMigrationConfig { max_tokens: ERC20_PDEX_SUPPLY, operational: false },
+		// pdex_migration: PDEXMigrationConfig { max_tokens: ERC20_PDEX_SUPPLY, operational: false }, // pallet removed
 	})
 }
 
@@ -236,15 +238,14 @@ pub fn session_keys(
 	authority_discovery: AuthorityDiscoveryId,
 	mixnet: MixnetId,
 	beefy: BeefyId,
-	// Custom
-	orderbook: OrderbookId,
+	// orderbook: OrderbookId, // OCEX removed from construct_runtime
 ) -> SessionKeys {
 	SessionKeys {
 		grandpa,
 		babe,
 		im_online,
 		authority_discovery,
-		orderbook,
+		// orderbook, // OCEX removed from construct_runtime
 		mixnet,
 		beefy,
 	}
@@ -262,7 +263,7 @@ pub fn session_keys_from_seed(seed: &str) -> SessionKeys {
 		get_public_from_string_or_panic::<AuthorityDiscoveryId>(seed),
 		get_public_from_string_or_panic::<MixnetId>(seed),
 		get_public_from_string_or_panic::<BeefyId>(seed),
-		get_public_from_string_or_panic::<OrderbookId>(seed),
+		// get_public_from_string_or_panic::<OrderbookId>(seed), // OCEX removed
 	)
 }
 

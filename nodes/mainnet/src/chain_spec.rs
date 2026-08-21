@@ -38,7 +38,7 @@ use sp_core::crypto::UncheckedInto;
 use sp_mixnet::types::AuthorityId as MixnetId;
 
 pub use polkadex_primitives::{AccountId, Balance};
-use pallet_ocex_lmp::sr25519::AuthorityId as OrderbookId;
+// use pallet_ocex_lmp::sr25519::AuthorityId as OrderbookId; // OCEX removed from runtime
 
 const STAGING_TELEMETRY_URL: &str = "wss://telemetry.polkadot.io/submit/";
 
@@ -74,7 +74,7 @@ fn configure_accounts_for_staging_testnet() -> (
 		AuthorityDiscoveryId,
 		MixnetId,
 		BeefyId,
-		OrderbookId,
+		// OrderbookId, // OCEX removed from runtime
 	)>,
 	AccountId,
 	Vec<AccountId>,
@@ -101,7 +101,7 @@ fn configure_accounts_for_staging_testnet() -> (
 		AuthorityDiscoveryId,
 		MixnetId,
 		BeefyId,
-		OrderbookId,
+		// OrderbookId, // OCEX removed from runtime
 	)> = vec![
 		(
 			// 5Fbsd6WXDGiLTxunqeK5BATNiocfCqu9bS1yArVjCgeBLkVy
@@ -123,12 +123,10 @@ fn configure_accounts_for_staging_testnet() -> (
 			// 5EZaeQ8djPcq9pheJUhgerXQZt9YaHnMJpiHMRhwQeinqUW8
 			array_bytes::hex2array_unchecked("6e7e4eb42cbd2e0ab4cae8708ce5509580b8c04d11f6758dbf686d50fe9f9106")
 				.unchecked_into(),
-			// 5DMLFcDdLLQbw696YfHaWBpQR99HwR456ycSCfr6L7KXGYK8
+			// 5DMLFcDdLLQbw696YfHaWBpQR99HwR456ycSCfr6L7KXGYK8 (beefy)
 			array_bytes::hex2array_unchecked("035560fafa241739869360aa4b32bc98953172ceb41a19c6cc1a27962fb3d1ecec")
 				.unchecked_into(),
-			// 5EZaeQ8djPcq9pheJUhgerXQZt9YaHnMJpiHMRhwQeinqUW8
-			array_bytes::hex2array_unchecked("6e7e4eb42cbd2e0ab4cae8708ce5509580b8c04d11f6758dbf686d50fe9f9106")
-				.unchecked_into(),
+			// orderbook key removed — OCEX pallet removed from runtime
 		),
 		(
 			// 5ERawXCzCWkjVq3xz1W5KGNtVx2VdefvZ62Bw1FEuZW4Vny2
@@ -150,12 +148,10 @@ fn configure_accounts_for_staging_testnet() -> (
 			// 5DhLtiaQd1L1LU9jaNeeu9HJkP6eyg3BwXA7iNMzKm7qqruQ
 			array_bytes::hex2array_unchecked("482dbd7297a39fa145c570552249c2ca9dd47e281f0c500c971b59c9dcdcd82e")
 				.unchecked_into(),
-			// 5FYk11kNtB4178wLKJ2RNoUzzcjgRUciFe3SJDVZXhqX4dzG
+			// 5FYk11kNtB4178wLKJ2RNoUzzcjgRUciFe3SJDVZXhqX4dzG (beefy)
 			array_bytes::hex2array_unchecked("02da1ab255ed888ee3e19b73d335fc13160b3eb10456c2d17c6a8ea7de403d2445")
 				.unchecked_into(),
-			// 5DhLtiaQd1L1LU9jaNeeu9HJkP6eyg3BwXA7iNMzKm7qqruQ
-			array_bytes::hex2array_unchecked("482dbd7297a39fa145c570552249c2ca9dd47e281f0c500c971b59c9dcdcd82e")
-				.unchecked_into(),
+			// orderbook key removed — OCEX pallet removed from runtime
 		),
 		(
 			// 5DyVtKWPidondEu8iHZgi6Ffv9yrJJ1NDNLom3X9cTDi98qp
@@ -177,12 +173,10 @@ fn configure_accounts_for_staging_testnet() -> (
 			// 5DhKqkHRkndJu8vq7pi2Q5S3DfftWJHGxbEUNH43b46qNspH
 			array_bytes::hex2array_unchecked("482a3389a6cf42d8ed83888cfd920fec738ea30f97e44699ada7323f08c3380a")
 				.unchecked_into(),
-			// 5GQx4FToRBPqfani6o7owFJE1UstiviqbPP7HPWyvtXWWukn
+			// 5GQx4FToRBPqfani6o7owFJE1UstiviqbPP7HPWyvtXWWukn (beefy)
 			array_bytes::hex2array_unchecked("036a818b3f59579c5fbbe4fede64f49dbf090ba883eb2a175d5ca90e5adb5f0b3e")
 				.unchecked_into(),
-			// 5DhKqkHRkndJu8vq7pi2Q5S3DfftWJHGxbEUNH43b46qNspH
-			array_bytes::hex2array_unchecked("482a3389a6cf42d8ed83888cfd920fec738ea30f97e44699ada7323f08c3380a")
-				.unchecked_into(),
+			// orderbook key removed — OCEX pallet removed from runtime
 		),
 		(
 			// 5HYZnKWe5FVZQ33ZRJK1rG3WaLMztxWrrNDb1JRwaHHVWyP9
@@ -204,12 +198,10 @@ fn configure_accounts_for_staging_testnet() -> (
 			// 5C4vDQxA8LTck2xJEy4Yg1hM9qjDt4LvTQaMo4Y8ne43aU6x
 			array_bytes::hex2array_unchecked("00299981a2b92f878baaf5dbeba5c18d4e70f2a1fcd9c61b32ea18daf38f4378")
 				.unchecked_into(),
-			// 5FCu2pY928VVHPgnNVJssvxFJZECyNe1CyH3WTG79Wisx58B
+			// 5FCu2pY928VVHPgnNVJssvxFJZECyNe1CyH3WTG79Wisx58B (beefy)
 			array_bytes::hex2array_unchecked("020ce02b963548f9f8ade8765f7a4a06638c17819c78422a1cc35b647873583eef")
 				.unchecked_into(),
-			// 5C4vDQxA8LTck2xJEy4Yg1hM9qjDt4LvTQaMo4Y8ne43aU6x
-			array_bytes::hex2array_unchecked("00299981a2b92f878baaf5dbeba5c18d4e70f2a1fcd9c61b32ea18daf38f4378")
-				.unchecked_into(),
+			// orderbook key removed — OCEX pallet removed from runtime
 		),
 	];
 
@@ -257,7 +249,7 @@ fn configure_accounts(
 		AuthorityDiscoveryId,
 		MixnetId,
 		BeefyId,
-		OrderbookId,
+		// OrderbookId, // OCEX removed from runtime
 	)>,
 	initial_nominators: Vec<AccountId>,
 	endowed_accounts: Vec<AccountId>,
@@ -272,7 +264,7 @@ fn configure_accounts(
 		AuthorityDiscoveryId,
 		MixnetId,
 		BeefyId,
-		OrderbookId,
+		// OrderbookId, // OCEX removed from runtime
 	)>,
 	Vec<AccountId>,
 	Vec<Staker>,
@@ -322,7 +314,7 @@ pub fn testnet_genesis(
 		AuthorityDiscoveryId,
 		MixnetId,
 		BeefyId,
-		OrderbookId,
+		// OrderbookId, // OCEX removed from runtime
 	)>,
 	initial_nominators: Vec<AccountId>,
 	root_key: AccountId,
@@ -350,7 +342,7 @@ pub fn testnet_genesis(
 						x.5.clone(),
 						x.6.clone(),
 						x.7.clone(),
-						x.8.clone(),
+						// x.8.clone(), // orderbook — OCEX removed from runtime
 					),
 				)
 			})
