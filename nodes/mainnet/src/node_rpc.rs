@@ -272,16 +272,17 @@ use sp_consensus::SelectChain;
 use sp_consensus_babe::BabeApi;
 use sp_consensus_beefy::AuthorityIdBound;
 use sp_keystore::KeystorePtr;
-use sp_core::H256;
+// use sp_core::H256; // unused after Ismp RPC removal
 use sp_runtime::{OpaqueExtrinsic, traits::{BlakeTwo256}};
 //use pallet_ismp_rpc::{IsmpApiServer, IsmpRpcHandler};
 use rpc_assets::{PolkadexAssetHandlerRpc, PolkadexAssetHandlerRpcApiServer};
 use swap_rpc::{PolkadexSwapRpc, PolkadexSwapRpcApiServer};
-use ismp_rpc::{IsmpApiServer, IsmpRpcHandler};
-use pallet_rewards_rpc::PolkadexRewardsRpc;
-use pallet_ocex_rpc::PolkadexOcexRpc;
-use pallet_ocex_rpc::PolkadexOcexRpcApiServer;
-use pallet_rewards_rpc::PolkadexRewardsRpcApiServer;
+// ismp/ocex/rewards RPC handlers — commented out while pallets are removed from runtime
+// use ismp_rpc::{IsmpApiServer, IsmpRpcHandler};
+// use pallet_rewards_rpc::PolkadexRewardsRpc;
+// use pallet_ocex_rpc::PolkadexOcexRpc;
+// use pallet_ocex_rpc::PolkadexOcexRpcApiServer;
+// use pallet_rewards_rpc::PolkadexRewardsRpcApiServer;
 
 /// Extra dependencies for BABE.
 pub struct BabeDeps {
@@ -374,10 +375,10 @@ where
 	SC: SelectChain<Block> + 'static,
 	B: sc_client_api::Backend<Block> + Send + Sync + 'static,
 	B::State: sc_client_api::backend::StateBackend<sp_runtime::traits::HashingFor<Block>>,
-	C::Api: pallet_ismp_runtime_api::IsmpRuntimeApi<Block, H256>,
+	// C::Api: pallet_ismp_runtime_api::IsmpRuntimeApi<Block, H256>, // Ismp pallet removed
 	C::Api: rpc_assets::PolkadexAssetHandlerRuntimeApi<Block, AccountId, Hash>,
-	C::Api: pallet_rewards_rpc::PolkadexRewardsRuntimeApi<Block, AccountId, Hash>,
-	C::Api: pallet_ocex_rpc::PolkadexOcexRuntimeApi<Block, AccountId, Hash>,
+	// C::Api: pallet_rewards_rpc::PolkadexRewardsRuntimeApi<Block, AccountId, Hash>, // Rewards pallet removed
+	// C::Api: pallet_ocex_rpc::PolkadexOcexRuntimeApi<Block, AccountId, Hash>, // OCEX pallet removed
 	AuthorityId: AuthorityIdBound,
 	<AuthorityId as RuntimeAppPublic>::Signature: Send + Sync,
 	C: ProofProvider<sp_runtime::generic::Block<sp_runtime::generic::Header<u32, BlakeTwo256>, OpaqueExtrinsic>>
@@ -421,7 +422,7 @@ where
 		.into_rpc(),
 	)?;
 	io.merge(TransactionPayment::new(client.clone()).into_rpc())?;
-	io.merge(IsmpRpcHandler::new(client.clone(), backend.clone())?.into_rpc())?;
+	// io.merge(IsmpRpcHandler::new(client.clone(), backend.clone())?.into_rpc())?; // Ismp pallet removed
 	io.merge(
 		Babe::new(client.clone(), babe_worker_handle.clone(), keystore, select_chain).into_rpc(),
 	)?;
@@ -462,16 +463,16 @@ where
 
 	io.merge(PolkadexSwapRpc::new(client.clone()).into_rpc())?;
 	io.merge(PolkadexAssetHandlerRpc::new(client.clone()).into_rpc())?;
-	io.merge(PolkadexRewardsRpc::new(client.clone()).into_rpc())?;
-	io.merge(
-		PolkadexOcexRpc::new(
-			client.clone(),
-			backend
-				.offchain_storage()
-				.ok_or("Backend doesn't provide an offchain storage")?,
-		)
-		.into_rpc(),
-	)?;
+	// io.merge(PolkadexRewardsRpc::new(client.clone()).into_rpc())?; // Rewards pallet removed
+	// io.merge(
+	// 	PolkadexOcexRpc::new(
+	// 		client.clone(),
+	// 		backend
+	// 			.offchain_storage()
+	// 			.ok_or("Backend doesn't provide an offchain storage")?,
+	// 	)
+	// 	.into_rpc(),
+	// )?; // OCEX pallet removed
 
 	Ok(io)
 }

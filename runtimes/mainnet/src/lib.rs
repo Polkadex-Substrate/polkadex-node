@@ -73,7 +73,7 @@ use frame_system::{
 	EnsureRoot, EnsureSigned, RawOrigin, EnsureRootWithSuccess
 };
 
-use orderbook_primitives::types::TradingPair;
+// use orderbook_primitives::types::TradingPair; // unused after OCEX removal
 #[cfg(any(feature = "std", test))]
 pub use pallet_balances::Call as BalancesCall;
 use pallet_grandpa::{ AuthorityId as GrandpaId };
@@ -86,18 +86,18 @@ use parity_scale_codec::{Decode, Encode, MaxEncodedLen, DecodeWithMemTracking};
 pub use polkadex_primitives::{
 	AccountId, AccountIndex, Balance, BlockNumber, Hash, Index, Moment, Signature
 };
-use polkadex_primitives::{AssetId, Nonce};
-use rust_decimal::Decimal;
+use polkadex_primitives::Nonce; // AssetId unused after OCEX removal
+// use rust_decimal::Decimal; // unused after OCEX removal
 use sp_api::impl_runtime_apis;
 use sp_authority_discovery::AuthorityId as AuthorityDiscoveryId;
-use sp_core::{crypto::KeyTypeId, OpaqueMetadata, H256};
+use sp_core::{crypto::KeyTypeId, OpaqueMetadata}; // H256 unused after ismp removal
 use sp_inherents::{CheckInherentsResult, InherentData};
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
 use sp_runtime::{
     curve::PiecewiseLinear, generic, impl_opaque_keys,
     transaction_validity::{TransactionPriority, TransactionSource, TransactionValidity},
-    ApplyExtrinsicResult, DispatchError, FixedPointNumber, Perbill, Percent, Permill, Perquintill, FixedU128,
+    ApplyExtrinsicResult, FixedPointNumber, Perbill, Percent, Permill, Perquintill, FixedU128, // DispatchError unused after ismp removal
     traits::{
         self, AccountIdConversion, BlakeTwo256, Block as BlockT, BlockNumberProvider, NumberFor,
         OpaqueKeys, SaturatedConversion, StaticLookup, Keccak256,
@@ -120,14 +120,15 @@ use sp_consensus_beefy::{
 	ecdsa_crypto::{AuthorityId as BeefyId, Signature as BeefySignature},
 	mmr::MmrLeafVersion,
 };
-use ismp::Error as IsmpError;
-use ismp::host::StateMachine;
-use ismp::module::IsmpModule;
-use ismp::router::{GetResponse, IsmpRouter, Request};
-use ismp::consensus::{ConsensusClientId, StateMachineHeight, StateMachineId};
-use pallet_ismp::ModuleId;
+// ismp imports — commented out with Ismp/IsmpGrandpa/HyperFungibleToken pallets
+// use ismp::Error as IsmpError;
+use ismp::host::StateMachine; // still referenced by some type bounds
+// use ismp::module::IsmpModule;
+// use ismp::router::{GetResponse, IsmpRouter, Request};
+// use ismp::consensus::{ConsensusClientId, StateMachineHeight, StateMachineId};
+// use pallet_ismp::ModuleId;
 //use weights::{ismp_parachain as ismp_parachain_weight};
-use weights::{ismp_grandpa as ismp_grandpa_weight};
+// use weights::{ismp_grandpa as ismp_grandpa_weight}; // unused after IsmpGrandpa removal
 
 /// Implementations of some helper traits passed into runtime modules as associated types.
 pub mod impls;
@@ -171,10 +172,13 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 391,
+    spec_version: 392,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
-    transaction_version: 2,
+    // Bumped 2→3: TxExtension tuple changed vs old SignedExtra —
+    // SkipCheckIfFeeless wrapper added around ChargeAssetTxPayment (pos 8),
+    // and WeightReclaim added as new pos 10. Both change transaction encoding.
+    transaction_version: 3,
     //state_version: 0,
     system_version: 0,
 };
@@ -285,7 +289,7 @@ parameter_types! {
     pub const MaxReserves: u32 = 50;
     pub const TransactionByteFee: Balance = 10 * MILLICENTS;
     pub const TargetBlockFullness: Perquintill = Perquintill::from_percent(25);
-    pub AdjustmentVariable: Multiplier = Multiplier::saturating_from_rational(1, 100_000); // NOTE: Changed from 5 to 1
+    pub AdjustmentVariable: Multiplier = Multiplier::saturating_from_rational(5, 100_000);
     pub MinimumMultiplier: Multiplier = Multiplier::saturating_from_rational(1, 1_000_000_000u128);
     pub MaximumMultiplier: Multiplier = Bounded::max_value();
     pub const OperationalFeeMultiplier: u8 = 5;
@@ -569,12 +573,12 @@ const_assert!(DesiredMembers::get() <= CouncilMaxMembers::get());
 // 	type IsmpHost = Ismp;
 // }
 
-impl ismp_grandpa::Config for Runtime {
-	type IsmpHost = Ismp;
-	type WeightInfo = ismp_grandpa_weight::WeightInfo<Runtime>;
-	// type RootOrigin = EnsureRoot<AccountId>;
-	type RootOrigin = EnsureRootOrHalfCouncil;
-}
+// impl ismp_grandpa::Config for Runtime {
+// 	type IsmpHost = Ismp;
+// 	type WeightInfo = ismp_grandpa_weight::WeightInfo<Runtime>;
+// 	// type RootOrigin = EnsureRoot<AccountId>;
+// 	type RootOrigin = EnsureRootOrHalfCouncil;
+// }
 
 /// Should provide an account that is funded and can be used to pay for asset creation
 pub struct AssetAdmin;
@@ -586,59 +590,48 @@ impl Get<AccountId> for AssetAdmin {
 }
 
 
-impl pallet_hyper_fungible_token::Config for Runtime {
-    type Dispatcher = Ismp;
-    type Assets = Assets;
-    type NativeCurrency = Balances;
-    type NativeAssetId = PolkadexAssetId;
-    type CreateOrigin = EnsureRootOrHalfCouncil;
-    type Decimals = Decimals;
-    type EvmToSubstrate = ();
-    type WeightInfo = ();
-}
+// impl pallet_hyper_fungible_token::Config for Runtime {
+//     type Dispatcher = Ismp;
+//     type Assets = Assets;
+//     type NativeCurrency = Balances;
+//     type NativeAssetId = PolkadexAssetId;
+//     type CreateOrigin = EnsureRootOrHalfCouncil;
+//     type Decimals = Decimals;
+//     type EvmToSubstrate = ();
+//     type WeightInfo = ();
+// }
 
-impl pallet_ismp::Config for Runtime {
-    // Permissioned origin who can create or update consensus clients
-    // type AdminOrigin = EnsureRoot<AccountId>;
-	type AdminOrigin = EnsureRootOrHalfCouncil;
-    // The state machine identifier for this state machine
-    type HostStateMachine = HostStateMachine;
-    // The pallet_timestamp pallet
-    type TimestampProvider = Timestamp;
-    // The currency implementation that is offered to relayers
-    type Currency = Balances;
-    // The balance type for the currency implementation
-    type Balance = Balance;
-    // Router implementation for routing requests/responses to their respective modules
-    type Router = Router;
-    // Optional coprocessor for incoming requests/responses
-    type Coprocessor = Coprocessor;
-    // Supported consensus clients
-	//type ConsensusClients = (ismp_parachain::ParachainConsensusClient<Runtime, IsmpParachain>,);
-	type ConsensusClients = (
-        ismp_grandpa::consensus::GrandpaConsensusClient<Runtime>,
-    );
-    // Offchain database implementation. Outgoing requests and responses are
-    // inserted in this database, while their commitments are stored onchain.
-    type OffchainDB = ();
-    // The fee handler implementation
-    type FeeHandler = ();
-    type MigrationWeightInfo = ();
-}
+// impl pallet_ismp::Config for Runtime {
+//     // type AdminOrigin = EnsureRoot<AccountId>;
+// 	type AdminOrigin = EnsureRootOrHalfCouncil;
+//     type HostStateMachine = HostStateMachine;
+//     type TimestampProvider = Timestamp;
+//     type Currency = Balances;
+//     type Balance = Balance;
+//     type Router = Router;
+//     type Coprocessor = Coprocessor;
+// 	//type ConsensusClients = (ismp_parachain::ParachainConsensusClient<Runtime, IsmpParachain>,);
+// 	type ConsensusClients = (
+//         ismp_grandpa::consensus::GrandpaConsensusClient<Runtime>,
+//     );
+//     type OffchainDB = ();
+//     type FeeHandler = ();
+//     type MigrationWeightInfo = ();
+// }
 
-#[derive(Default)]
-pub struct Router;
-impl IsmpRouter for Router {
-    fn module_for_id(&self, id: Vec<u8>) -> Result<Box<dyn IsmpModule>, anyhow::Error> {
-        let module_id = ModuleId::from_bytes(&id).map_err(|e| anyhow::anyhow!("{}", e))?;
-        let module = match module_id {
-            pallet_hyper_fungible_token::PALLET_ID =>
-                Box::new(pallet_hyper_fungible_token::Pallet::<Runtime>::default()),
-            _ => Err(IsmpError::ModuleNotFound(id))?
-        };
-        Ok(module)
-    }
-}
+// #[derive(Default)]
+// pub struct Router;
+// impl IsmpRouter for Router {
+//     fn module_for_id(&self, id: Vec<u8>) -> Result<Box<dyn IsmpModule>, anyhow::Error> {
+//         let module_id = ModuleId::from_bytes(&id).map_err(|e| anyhow::anyhow!("{}", e))?;
+//         let module = match module_id {
+//             pallet_hyper_fungible_token::PALLET_ID =>
+//                 Box::new(pallet_hyper_fungible_token::Pallet::<Runtime>::default()),
+//             _ => Err(IsmpError::ModuleNotFound(id))?
+//         };
+//         Ok(module)
+//     }
+// }
 
 // #[derive(Default)]
 // pub struct Router;
@@ -1114,7 +1107,7 @@ impl_opaque_keys! {
 		pub babe: Babe,
 		pub im_online: ImOnline,
 		pub authority_discovery: AuthorityDiscovery,
-		pub orderbook: OCEX,
+		// pub orderbook: OCEX, // pallet_ocex_lmp removed from construct_runtime
 		pub mixnet: Mixnet,
 		pub beefy: Beefy,
 	}
@@ -1952,10 +1945,10 @@ impl EnsureOrigin<RuntimeOrigin> for EnsureRootOrTreasury {
 //	type BlockNumberProvider = SubstrateBlockNumberProvider;
 //}
 
-impl pdex_migration::pallet::Config for Runtime {
-	type MaxRelayers = MaxRelayers;
-	type LockPeriod = LockPeriod;
-}
+// impl pdex_migration::pallet::Config for Runtime {
+// 	type MaxRelayers = MaxRelayers;
+// 	type LockPeriod = LockPeriod;
+// }
 
 //impl pallet_randomness_collective_flip::Config for Runtime {}
 
@@ -1964,43 +1957,44 @@ impl pdex_migration::pallet::Config for Runtime {
 //	type RuntimeCall = RuntimeCall;
 //}
 
-impl pallet_ocex_lmp::Config for Runtime {
-	type PalletId = OcexPalletId;
-	type TreasuryPalletId = TreasuryPalletId;
-	type LMPRewardsPalletId = LMPRewardsPalletId;
-	type NativeCurrency = Balances;
-	type OtherAssets = Assets;
-	type EnclaveOrigin = EnsureSigned<AccountId>;
-	type AuthorityId = pallet_ocex_lmp::sr25519::AuthorityId;
-	type GovernanceOrigin = EnsureRootOrHalfCouncil;
-	// SECURITY (C6): was () — callbacks were never fired; shares never minted,
-	// withdrawn funds stuck in pool accounts.  Now wired to the real pallet.
-	type CrowdSourceLiqudityMining = CrowdSourceLMP;
-	type OBWithdrawalLimit = OBWithdrawalLimit;
-	type OBIngressLimit = OBIngressLimit;
-	type MinimumDeposit = OcexMinimumDeposit;
-	type MaxEgressMessages = MaxEgressMessages;
-	type WeightInfo = pallet_ocex_lmp::weights::WeightInfo<Runtime>;
-	//type CrossChainGadget = TheaExecutor;
-	type CrossChainGadget = ();
-}
+// impl pallet_ocex_lmp::Config for Runtime {
+// 	type PalletId = OcexPalletId;
+// 	type TreasuryPalletId = TreasuryPalletId;
+// 	type LMPRewardsPalletId = LMPRewardsPalletId;
+// 	type NativeCurrency = Balances;
+// 	type OtherAssets = Assets;
+// 	type EnclaveOrigin = EnsureSigned<AccountId>;
+// 	type AuthorityId = pallet_ocex_lmp::sr25519::AuthorityId;
+// 	type GovernanceOrigin = EnsureRootOrHalfCouncil;
+// 	// type CrowdSourceLiqudityMining = CrowdSourceLMP;
+// 	type CrowdSourceLiqudityMining = ();
+// 	type OBWithdrawalLimit = OBWithdrawalLimit;
+// 	type OBIngressLimit = OBIngressLimit;
+// 	type MinimumDeposit = OcexMinimumDeposit;
+// 	type MaxEgressMessages = MaxEgressMessages;
+// 	type WeightInfo = pallet_ocex_lmp::weights::WeightInfo<Runtime>;
+// 	type CrossChainGadget = ();
+// }
 
-//Install rewards Pallet
-impl pallet_rewards::Config for Runtime {
-	type PalletId = RewardsPalletId;
-	type NativeCurrency = Balances;
-	type Public = <Signature as traits::Verify>::Signer;
-	type Signature = Signature;
-	type GovernanceOrigin = EnsureRootOrHalfCouncil;
-	type WeightInfo = pallet_rewards::weights::WeightInfo<Runtime>;
-}
+// //Install rewards Pallet
+// impl pallet_rewards::Config for Runtime {
+// 	type PalletId = RewardsPalletId;
+// 	type NativeCurrency = Balances;
+// 	type Public = <Signature as traits::Verify>::Signer;
+// 	type Signature = Signature;
+// 	type GovernanceOrigin = EnsureRootOrHalfCouncil;
+// 	type WeightInfo = pallet_rewards::weights::WeightInfo<Runtime>;
+// }
 
-impl pallet_lmp::pallet::Config for Runtime {
-	type OCEX = OCEX;
-	type PalletId = CrowdSourcingRewardsPalletId;
-	type NativeCurrency = Balances;
-	type OtherAssets = Assets;
-}
+// impl pallet_lmp::pallet::Config for Runtime {
+// 	type OCEX = OCEX;
+// 	type PalletId = CrowdSourcingRewardsPalletId;
+// 	type NativeCurrency = Balances;
+// 	type OtherAssets = Assets;
+// }
+
+// OCEX type alias removed — pallet_ocex_lmp::Config not implemented for Runtime while
+// pallet is out of construct_runtime. Re-add both together when re-enabling OCEX.
 
 use polkadex_primitives::POLKADEX_NATIVE_ASSET_ID;
 
@@ -2566,8 +2560,8 @@ mod runtime {
 
     // #28 was OrmlVesting - REMOVED
 
-    #[runtime::pallet_index(29)]
-    pub type PDEXMigration = pdex_migration::pallet::Pallet<Runtime>;
+    // #[runtime::pallet_index(29)]
+    // pub type PDEXMigration = pdex_migration::pallet::Pallet<Runtime>;
 
     #[runtime::pallet_index(30)]
     pub type Democracy = pallet_democracy::Pallet<Runtime>;
@@ -2583,16 +2577,16 @@ mod runtime {
     #[runtime::pallet_index(34)]
     pub type Assets = pallet_assets::Pallet<Runtime, Instance1>;
 
-    #[runtime::pallet_index(35)]
-    pub type OCEX = pallet_ocex_lmp::Pallet<Runtime>;
+    // #[runtime::pallet_index(35)]
+    // pub type OCEX = pallet_ocex_lmp::Pallet<Runtime>;
 
     #[runtime::pallet_index(36)]
     pub type OrderbookCommittee = pallet_collective::Pallet<Runtime, Instance4>;
 
     // #39 was Thea - REMOVED
 
-    #[runtime::pallet_index(40)]
-    pub type Rewards = pallet_rewards::Pallet<Runtime>;
+    // #[runtime::pallet_index(40)]
+    // pub type Rewards = pallet_rewards::Pallet<Runtime>;
 
     // #44 was TheaExecutor - REMOVED
 
@@ -2610,8 +2604,8 @@ mod runtime {
 
     // #49 was AssetTxPayment - REMOVED
 
-    #[runtime::pallet_index(50)]
-    pub type CrowdSourceLMP = pallet_lmp::pallet::Pallet<Runtime>;
+    // #[runtime::pallet_index(50)]
+    // pub type CrowdSourceLMP = pallet_lmp::pallet::Pallet<Runtime>;
 
     // ===== NEW PALLETS START AT #51+ =====
 
@@ -2666,11 +2660,11 @@ mod runtime {
     #[runtime::pallet_index(67)]
     pub type Society = pallet_society::Pallet<Runtime>;
 
-    #[runtime::pallet_index(68)]
-    pub type Ismp = pallet_ismp::Pallet<Runtime>;
+    // #[runtime::pallet_index(68)]
+    // pub type Ismp = pallet_ismp::Pallet<Runtime>;
 
-    #[runtime::pallet_index(69)]
-    pub type IsmpGrandpa = ismp_grandpa::Pallet<Runtime>;
+    // #[runtime::pallet_index(69)]
+    // pub type IsmpGrandpa = ismp_grandpa::Pallet<Runtime>;
 
     // #[runtime::pallet_index(70)]
     // pub type Hyperbridge = pallet_hyperbridge::Pallet<Runtime>;
@@ -2678,8 +2672,8 @@ mod runtime {
     // #[runtime::pallet_index(71)]
 	// pub type TokenGateway = pallet_token_gateway::Pallet<Runtime>;
 
-    #[runtime::pallet_index(72)]
-    pub type HyperFungibleToken = pallet_hyper_fungible_token::Pallet<Runtime>;
+    // #[runtime::pallet_index(72)]
+    // pub type HyperFungibleToken = pallet_hyper_fungible_token::Pallet<Runtime>;
 
 }
 
@@ -2961,13 +2955,13 @@ pub type Executive = frame_executive::Executive<
 >;
 
 // We don't have a limit in the Relay Chain.
-const IDENTITY_MIGRATION_KEY_LIMIT: u64 = u64::MAX;
+// const IDENTITY_MIGRATION_KEY_LIMIT: u64 = u64::MAX; // unused — V0ToV1 migration removed
 
 // All migrations executed on runtime upgrade as a nested tuple of types implementing
 // `OnRuntimeUpgrade`. Note: These are examples and do not need to be run directly
 // after the genesis block.
 type Migrations = (
-	migrations::InitOcexFeeConfig<Runtime>,
+	// migrations::InitOcexFeeConfig<Runtime>, // OCEX removed from runtime
 	migrations::UpgradeSessionKeys,
     // Pallet storage version migrations
     migrations::StakingStorageVersionMigration<Runtime>,
@@ -2995,18 +2989,17 @@ type Migrations = (
     migrations::FixCouncilPrime,
     // Clear undecodable offence reports (IdentificationTuple type changed between spec versions)
     migrations::ClearOffenceReports,
-    // C6: build reverse index pool_id → (market, market_maker) in the LMP pallet
-    // so that OCEX egress callbacks can correctly look up pool config.
-    // Zero pools existed on mainnet at upgrade time; this is a no-op in practice.
-    migrations::RebuildLmpPoolIdIndex,
-    // C9: prune IngressMessages entries for all blocks already processed by the enclave
-    // (storage was never pruned before spec 391; safe across Vec→BoundedVec type change
-    // because only keys are iterated — values are never decoded during this migration)
-    migrations::PruneStaleIngressMessages,
+    // migrations::RebuildLmpPoolIdIndex, // CrowdSourceLMP removed from runtime
+    // migrations::PruneStaleIngressMessages, // OCEX removed from runtime
+    // OrmlVesting was removed from construct_runtime without a cleanup migration.
+    // This removes the "ormlvest" Currency lock from all 13 affected accounts so their
+    // tokens are not permanently frozen, then wipes the orphaned storage.
+    migrations::ClearOrmlVestingLocks<Runtime>,
     // Existing migrations
     pallet_alliance::migration::Migration<Runtime>,
     pallet_contracts::Migration<Runtime>,
-    pallet_identity::migration::versioned::V0ToV1<Runtime, IDENTITY_MIGRATION_KEY_LIMIT>,
+    // pallet_identity::migration::versioned::V0ToV1<Runtime, IDENTITY_MIGRATION_KEY_LIMIT>,
+    // ^ Removed: try-runtime confirmed on-chain identity storage already at v2; V0→V1 is a stale no-op.
 );
 
 type EventRecord = frame_system::EventRecord<
@@ -3033,7 +3026,7 @@ impl HandleCredit<AccountId, Assets> for CreditToBlockAuthor {
 	}
 }
 
-use orderbook_primitives::ObCheckpointRaw;
+// use orderbook_primitives::ObCheckpointRaw; // unused after OCEX runtime API removal
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benches {
@@ -3761,91 +3754,71 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl pallet_rewards_runtime_api::PolkadexRewardsRuntimeApi<Block, AccountId, Hash> for Runtime {
-		fn account_info(account_id : AccountId, reward_id: u32) ->  Result<polkadex_primitives::rewards::RewardsInfoByAccount<u128>, DispatchError> {
-			Rewards::account_info(account_id, reward_id)
-		}
-	}
+	// impl pallet_rewards_runtime_api::PolkadexRewardsRuntimeApi<Block, AccountId, Hash> for Runtime {
+	// 	fn account_info(account_id : AccountId, reward_id: u32) ->  Result<polkadex_primitives::rewards::RewardsInfoByAccount<u128>, DispatchError> {
+	// 		Rewards::account_info(account_id, reward_id)
+	// 	}
+	// }
 
-	impl pallet_ocex_runtime_api::PolkadexOcexRuntimeApi<Block, AccountId, Hash> for Runtime {
-		fn get_ob_recover_state() ->  Result<Vec<u8>, DispatchError> { Ok(OCEX::get_ob_recover_state()?.encode()) }
-		fn get_balance(from: AccountId, of: AssetId) -> Result<Decimal, DispatchError> { OCEX::get_balance(from, of) }
-		fn fetch_checkpoint() -> Result<ObCheckpointRaw, DispatchError> {
-			OCEX::fetch_checkpoint()
-		}
-		fn calculate_inventory_deviation() -> Result<sp_std::collections::btree_map::BTreeMap<AssetId,Decimal>,
-		DispatchError> {
-			OCEX::calculate_inventory_deviation()
-		}
+	// impl pallet_ocex_runtime_api::PolkadexOcexRuntimeApi<Block, AccountId, Hash> for Runtime {
+	// 	fn get_ob_recover_state() ->  Result<Vec<u8>, DispatchError> { Ok(OCEX::get_ob_recover_state()?.encode()) }
+	// 	fn get_balance(from: AccountId, of: AssetId) -> Result<Decimal, DispatchError> { OCEX::get_balance(from, of) }
+	// 	fn fetch_checkpoint() -> Result<ObCheckpointRaw, DispatchError> {
+	// 		OCEX::fetch_checkpoint()
+	// 	}
+	// 	fn calculate_inventory_deviation() -> Result<sp_std::collections::btree_map::BTreeMap<AssetId,Decimal>,
+	// 	DispatchError> {
+	// 		OCEX::calculate_inventory_deviation()
+	// 	}
+	// 	fn top_lmp_accounts(epoch: u16, market: TradingPair, sorted_by_mm_score: bool, limit: u16) -> Vec<AccountId> {
+	// 		OCEX::top_lmp_accounts(epoch.saturated_into(), market, sorted_by_mm_score, limit as usize)
+	// 	}
+	// 	fn calculate_lmp_rewards(main: AccountId, epoch: u16, market: TradingPair) -> (Decimal, Decimal, bool) {
+	// 		OCEX::get_lmp_rewards(&main, epoch.saturated_into(), market)
+	// 	}
+	// 	fn get_fees_paid_by_user_per_epoch(epoch: u32,market: TradingPair, main: AccountId) -> Decimal {
+	// 		OCEX::get_fees_paid_by_user_per_epoch(epoch.saturated_into(),market,main)
+	// 	}
+	// 	fn get_volume_by_user_per_epoch(epoch: u32, market: TradingPair, main: AccountId) -> Decimal{
+	// 		OCEX::get_volume_by_user_per_epoch(epoch,market, main)
+	// 	}
+	// 	fn get_total_score(epoch: u16, market: TradingPair) -> (Decimal, Decimal) {
+	// 		OCEX::get_total_score(epoch,market)
+	// 	}
+	// 	fn get_trader_metrics(epoch: u16, market: TradingPair, main: AccountId) -> (Decimal, Decimal, bool){
+	// 		OCEX::get_trader_metrics(epoch,market,main)
+	// 	}
+	// }
 
-		fn top_lmp_accounts(epoch: u16, market: TradingPair, sorted_by_mm_score: bool, limit: u16) -> Vec<AccountId> {
-			OCEX::top_lmp_accounts(epoch.saturated_into(), market, sorted_by_mm_score, limit as usize)
-		}
-
-		fn calculate_lmp_rewards(main: AccountId, epoch: u16, market: TradingPair) -> (Decimal, Decimal, bool) {
-			OCEX::get_lmp_rewards(&main, epoch.saturated_into(), market)
-		}
-
-		fn get_fees_paid_by_user_per_epoch(epoch: u32,market: TradingPair, main: AccountId) -> Decimal {
-			OCEX::get_fees_paid_by_user_per_epoch(epoch.saturated_into(),market,main)
-		}
-
-		fn get_volume_by_user_per_epoch(epoch: u32, market: TradingPair, main: AccountId) -> Decimal{
-			OCEX::get_volume_by_user_per_epoch(epoch,market, main)
-		}
-
-		fn get_total_score(epoch: u16, market: TradingPair) -> (Decimal, Decimal) {
-			OCEX::get_total_score(epoch,market)
-		}
-		fn get_trader_metrics(epoch: u16, market: TradingPair, main: AccountId) -> (Decimal, Decimal, bool){
-			OCEX::get_trader_metrics(epoch,market,main)
-		}
-	}
-
-    impl pallet_ismp_runtime_api::IsmpRuntimeApi<Block, <Block as BlockT>::Hash> for Runtime {
-        fn host_state_machine() -> StateMachine {
-          <Runtime as pallet_ismp::Config>::HostStateMachine::get()
-        }
-
-        fn challenge_period(state_machine_id: StateMachineId) -> Option<u64> {
-          pallet_ismp::Pallet::<Runtime>::challenge_period(state_machine_id)
-        }
-
-        /// Fetch all ISMP events in the block, should only be called from runtime-api.
-        fn block_events() -> Vec<::ismp::events::Event> {
-          pallet_ismp::Pallet::<Runtime>::block_events()
-        }
-
-        /// Fetch all ISMP events and their extrinsic metadata, should only be called from runtime-api.
-        fn block_events_with_metadata() -> Vec<(::ismp::events::Event, Option<u32>)> {
-          pallet_ismp::Pallet::<Runtime>::block_events_with_metadata()
-        }
-
-        /// Return the scale encoded consensus state
-        fn consensus_state(id: ConsensusClientId) -> Option<Vec<u8>> {
-          pallet_ismp::Pallet::<Runtime>::consensus_states(id)
-        }
-
-        /// Return the timestamp this client was last updated in seconds
-        fn state_machine_update_time(height: StateMachineHeight) -> Option<u64> {
-          pallet_ismp::Pallet::<Runtime>::state_machine_update_time(height)
-        }
-
-        /// Return the latest height of the state machine
-        fn latest_state_machine_height(id: StateMachineId) -> Option<u64> {
-          pallet_ismp::Pallet::<Runtime>::latest_state_machine_height(id)
-        }
-
-        /// Get actual requests
-        fn requests(commitments: Vec<H256>) -> Vec<Request> {
-          pallet_ismp::Pallet::<Runtime>::requests(commitments)
-        }
-
-        /// Get actual requests
-        fn responses(commitments: Vec<H256>) -> Vec<GetResponse> {
-          pallet_ismp::Pallet::<Runtime>::responses(commitments)
-        }
-    }
+    // impl pallet_ismp_runtime_api::IsmpRuntimeApi<Block, <Block as BlockT>::Hash> for Runtime {
+    //     fn host_state_machine() -> StateMachine {
+    //       <Runtime as pallet_ismp::Config>::HostStateMachine::get()
+    //     }
+    //     fn challenge_period(state_machine_id: StateMachineId) -> Option<u64> {
+    //       pallet_ismp::Pallet::<Runtime>::challenge_period(state_machine_id)
+    //     }
+    //     fn block_events() -> Vec<::ismp::events::Event> {
+    //       pallet_ismp::Pallet::<Runtime>::block_events()
+    //     }
+    //     fn block_events_with_metadata() -> Vec<(::ismp::events::Event, Option<u32>)> {
+    //       pallet_ismp::Pallet::<Runtime>::block_events_with_metadata()
+    //     }
+    //     fn consensus_state(id: ConsensusClientId) -> Option<Vec<u8>> {
+    //       pallet_ismp::Pallet::<Runtime>::consensus_states(id)
+    //     }
+    //     fn state_machine_update_time(height: StateMachineHeight) -> Option<u64> {
+    //       pallet_ismp::Pallet::<Runtime>::state_machine_update_time(height)
+    //     }
+    //     fn latest_state_machine_height(id: StateMachineId) -> Option<u64> {
+    //       pallet_ismp::Pallet::<Runtime>::latest_state_machine_height(id)
+    //     }
+    //     fn requests(commitments: Vec<H256>) -> Vec<Request> {
+    //       pallet_ismp::Pallet::<Runtime>::requests(commitments)
+    //     }
+    //     fn responses(commitments: Vec<H256>) -> Vec<GetResponse> {
+    //       pallet_ismp::Pallet::<Runtime>::responses(commitments)
+    //     }
+    // }
 
 
 	#[cfg(feature = "try-runtime")]

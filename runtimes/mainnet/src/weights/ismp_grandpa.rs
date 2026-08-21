@@ -47,6 +47,7 @@ use frame_support::{traits::Get, weights::Weight};
 use core::marker::PhantomData;
 
 /// Weight functions for `ismp_parachain`.
+#[allow(dead_code)]
 pub struct WeightInfo<T>(PhantomData<T>);
 impl<T: frame_system::Config> ismp_grandpa::WeightInfo for WeightInfo<T> {
 	/// Storage: `ParachainInfo::ParachainId` (r:1 w:0)
