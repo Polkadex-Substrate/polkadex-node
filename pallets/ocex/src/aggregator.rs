@@ -153,6 +153,13 @@ impl<T: Config> AggregatorClient<T> {
 		}
 	}
 
+	/// Maximum number of bytes accepted from the aggregator in a single response.
+	/// A legitimate batch or checkpoint will never approach this size; anything
+	/// larger is either a bug or a malicious aggregator trying to OOM the validator.
+	/// 10 MB is generous — real snapshots are typically < 1 MB.
+	#[cfg(not(test))]
+	const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024; // 10 MB
+
 	/// Send request to aggregator
 	/// # Parameters
 	/// * `log_target`: Log target for debug logs
@@ -186,7 +193,22 @@ impl<T: Config> AggregatorClient<T> {
 			return Err("request failed");
 		}
 
-		let body = response.body().collect::<Vec<u8>>();
+		// SECURITY (R3-H3): cap the response to MAX_RESPONSE_BYTES before collecting into
+		// memory. The previous `.collect::<Vec<u8>>()` had no size limit — a compromised or
+		// malicious aggregator could return an arbitrarily large body and OOM the validator
+		// process. ResponseBody implements Iterator<Item = u8>, so `.take(N)` is exact.
+		// We read one extra byte beyond the cap to detect truncation and return an error
+		// rather than silently processing a partial response.
+		let body: Vec<u8> = response.body().take(Self::MAX_RESPONSE_BYTES + 1).collect();
+		if body.len() > Self::MAX_RESPONSE_BYTES {
+			log::error!(
+				target: "ocex",
+				"{} response exceeded {} byte cap — possible malicious aggregator",
+				log_target,
+				Self::MAX_RESPONSE_BYTES
+			);
+			return Err("aggregator response too large");
+		}
 
 		// Create a str slice from the body.
 		let body_str = sp_std::str::from_utf8(body.as_slice()).map_err(|_| {

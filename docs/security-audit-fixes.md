@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 19 fixed (as of last update) · 46 open  
+**Totals:** 65 findings in this repo · 20 fixed (as of last update) · 45 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -502,6 +502,29 @@ No additional code changes required — the full fix is in the H8 commit.
 
 ---
 
+### R3-H3 — Aggregator HTTP response uncapped
+**Severity:** High  
+**Location:** `pallets/ocex/src/aggregator.rs` — `send_request`  
+**Fixed in spec:** N/A (node binary fix, no on-chain migration)  
+**Date:** 2026-09-08  
+**Migration required:** No
+
+**Vulnerability:**  
+`send_request` called `response.body().collect::<Vec<u8>>()` with no size limit. `ResponseBody` is an `Iterator<Item = u8>` — `.collect()` reads every byte the aggregator returns into a heap-allocated `Vec` before any processing happens.
+
+**Impact:**  
+A compromised or malicious aggregator endpoint (MITM, DNS hijack, or a rogue operator) could return an arbitrarily large HTTP body — gigabytes if needed. The validator's OCW would attempt to allocate that entire response into memory before checking any content, leading to an out-of-memory crash of the validator process. Since the OCW runs inside the node process (not a separate sandbox), an OOM kill takes the entire validator offline. All three aggregator endpoints (`/snapshots`, `/latest_checkpoint`, `/submit_snapshot`) called `send_request` and were equally affected.
+
+**Changes made:**
+
+`pallets/ocex/src/aggregator.rs`:
+- Added `const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024` (10 MB) — generous for any legitimate snapshot or checkpoint, which are typically < 1 MB
+- Replaced `.collect::<Vec<u8>>()` with `.take(MAX_RESPONSE_BYTES + 1).collect()` — reads at most one byte beyond the cap so truncation is detectable
+- Added an explicit size check: if `body.len() > MAX_RESPONSE_BYTES`, logs an error naming the endpoint and returns `Err("aggregator response too large")` — prevents silent partial-response processing
+- All three aggregator call sites (`get_user_action_batch`, `get_checkpoint`, `load_signed_summary_and_send`) benefit automatically as they all go through `send_request`
+
+---
+
 ### R3-H2 — OCW mutex retry backoff missing; Dev RPC always exposed
 **Severity:** High  
 **Location:** `pallets/ocex/src/rpc.rs`, `nodes/mainnet/src/node_rpc.rs`  
@@ -611,7 +634,6 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | C7 | 🔴 Critical | nodes/, session-keys/ | Master BIP39 seed committed in repo — rotate all session keys |
 | H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
 | R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
-| R3-H3 | 🟠 High | pallets/ocex | Aggregator HTTP response uncapped |
 | R3-H12 | 🟠 High | pallets/ocex | LMP config metrics write-only; epoch budget over-issued |
 | R3-H13 | 🟠 High | pallets/ocex | close_auction non-transactional; place_bid commented out |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
