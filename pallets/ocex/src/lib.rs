@@ -2113,10 +2113,24 @@ pub mod pallet {
 			let market_making_portion = score.checked_div(total_score).unwrap_or_default();
 			let trading_rewards_portion =
 				fees_paid.checked_div(total_fees_paid).unwrap_or_default();
-			let mm_rewards =
-				config.total_liquidity_mining_rewards.saturating_mul(market_making_portion);
-			let trading_rewards =
-				config.total_trading_rewards.saturating_mul(trading_rewards_portion);
+			// SECURITY (R3-H12): apply market weightage so each market receives its
+			// configured share of the epoch budget. Previously `weightage` was validated
+			// to sum to 1.0 across all markets but was never applied here — each market
+			// independently multiplied by the FULL epoch budget, causing total payouts
+			// of epoch_budget × number_of_markets (over-issuance).
+			let market_weightage = config
+				.config
+				.get(&market)
+				.map(|c| c.weightage)
+				.unwrap_or_default();
+			let mm_rewards = config
+				.total_liquidity_mining_rewards
+				.saturating_mul(market_weightage)
+				.saturating_mul(market_making_portion);
+			let trading_rewards = config
+				.total_trading_rewards
+				.saturating_mul(market_weightage)
+				.saturating_mul(trading_rewards_portion);
 			(mm_rewards, trading_rewards, is_claimed)
 		}
 
@@ -2138,10 +2152,20 @@ pub mod pallet {
 			let market_making_portion = score.checked_div(total_score).unwrap_or_default();
 			let trading_rewards_portion =
 				fees_paid.checked_div(total_fees_paid).unwrap_or_default();
-			let mm_rewards =
-				config.total_liquidity_mining_rewards.saturating_mul(market_making_portion);
-			let trading_rewards =
-				config.total_trading_rewards.saturating_mul(trading_rewards_portion);
+			// SECURITY (R3-H12): apply market weightage (mirrors fix in calculate_lmp_rewards)
+			let market_weightage = config
+				.config
+				.get(&market)
+				.map(|c| c.weightage)
+				.unwrap_or_default();
+			let mm_rewards = config
+				.total_liquidity_mining_rewards
+				.saturating_mul(market_weightage)
+				.saturating_mul(market_making_portion);
+			let trading_rewards = config
+				.total_trading_rewards
+				.saturating_mul(market_weightage)
+				.saturating_mul(trading_rewards_portion);
 			(mm_rewards, trading_rewards, is_claimed)
 		}
 

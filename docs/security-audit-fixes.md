@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 20 fixed (as of last update) · 45 open  
+**Totals:** 65 findings in this repo · 21 fixed (as of last update) · 44 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -502,6 +502,38 @@ No additional code changes required — the full fix is in the H8 commit.
 
 ---
 
+### R3-H12 — LMP market weightage never applied; epoch budget over-issued
+**Severity:** High  
+**Location:** `pallets/ocex/src/lib.rs` — `calculate_lmp_rewards`, `get_lmp_rewards`; `primitives/orderbook/src/lmp.rs` — `LMPEpochConfig::verify`  
+**Fixed in spec:** N/A (pallet disconnected; fix ships when OCEX re-enabled in spec 393+)  
+**Date:** 2026-09-08  
+**Migration required:** No — pure logic fix; no storage layout change.
+
+**Vulnerability:**  
+`LMPEpochConfig` holds a `config: BTreeMap<TradingPair, LMPMarketConfig>` where each market carries a `weightage: Decimal` (e.g. 0.5 for ETH/PDEX, 0.5 for BTC/PDEX). The `verify()` check enforces that all weightages sum to exactly 1.0. However, `weightage` was never applied in the reward calculation functions — making it write-only.
+
+**Impact:**  
+`calculate_lmp_rewards` (on-chain claim path) and `get_lmp_rewards` (RPC preview path) both computed rewards as:
+
+```
+mm_rewards = total_liquidity_mining_rewards × (user_score / market_total_score)
+```
+
+Without applying `market_weightage`. Since `Σ(user_score / market_total_score) = 1.0` for each market independently, total payouts across N markets = `total_liquidity_mining_rewards × N`. With 3 active markets, the epoch budget would be over-issued by 3×. Depending on the LMP rewards pot balance, this either drains the pot faster than intended (for the first claimants) or fails with insufficient balance errors for later claimants once the pot is drained.
+
+Additionally, `verify()` accepted `total_liquidity_mining_rewards = 0`, allowing governance to misconfigure an epoch with a zero budget — it would silently accept the transaction and distribute zero rewards to all participants.
+
+**Changes made:**
+
+`pallets/ocex/src/lib.rs`:
+- `calculate_lmp_rewards`: Added `market_weightage = config.config.get(&market).map(|c| c.weightage).unwrap_or_default()`; applied it as a multiplier before `market_making_portion` and `trading_rewards_portion`. Total payout across all markets now correctly equals the epoch budget.
+- `get_lmp_rewards` (RPC path): Same fix applied so the preview shown to users matches what they will actually receive on-chain.
+
+`primitives/orderbook/src/lmp.rs`:
+- `verify()`: Added `total_liquidity_mining_rewards <= 0` guard — returns `false` so governance submission is rejected. `total_trading_rewards < 0` is also rejected (negative values are nonsensical); zero is allowed for epochs that have no trading rewards component.
+
+---
+
 ### R3-H3 — Aggregator HTTP response uncapped
 **Severity:** High  
 **Location:** `pallets/ocex/src/aggregator.rs` — `send_request`  
@@ -634,7 +666,6 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | C7 | 🔴 Critical | nodes/, session-keys/ | Master BIP39 seed committed in repo — rotate all session keys |
 | H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
 | R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
-| R3-H12 | 🟠 High | pallets/ocex | LMP config metrics write-only; epoch budget over-issued |
 | R3-H13 | 🟠 High | pallets/ocex | close_auction non-transactional; place_bid commented out |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
 | R3-H6 | 🟠 High | pallets/liquidity-mining | Pools keyed by market_maker, callbacks look up by pool_id |

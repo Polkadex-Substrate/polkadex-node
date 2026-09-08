@@ -143,6 +143,21 @@ impl LMPEpochConfig {
 			return false;
 		}
 
+		// SECURITY (R3-H12): the reward budget fields were previously write-only —
+		// they were accepted as any value including zero without validation. A zero
+		// total_liquidity_mining_rewards means no rewards are distributed even if the
+		// epoch runs successfully, which is a misconfiguration that should be caught
+		// at governance submission time rather than silently producing zero payouts.
+		if self.total_liquidity_mining_rewards <= Decimal::zero() {
+			return false;
+		}
+
+		// total_trading_rewards can legitimately be zero (trading-only epochs may
+		// omit market-making rewards), so we only reject strictly negative values.
+		if self.total_trading_rewards < Decimal::zero() {
+			return false;
+		}
+
 		true
 	}
 }
