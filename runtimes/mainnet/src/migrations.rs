@@ -680,6 +680,7 @@ where
 
     #[cfg(feature = "try-runtime")]
     fn post_upgrade(state: sp_std::vec::Vec<u8>) -> Result<(), sp_runtime::TryRuntimeError> {
+        use frame_support::ensure;
         // twox128("OrmlVesting") = d84892f1db5f9dfd80c521d0a5647650
         const PALLET_PREFIX: [u8; 16] = [
             0xd8, 0x48, 0x92, 0xf1, 0xdb, 0x5f, 0x9d, 0xfd,
