@@ -116,14 +116,16 @@ impl<T: Config> LiquidityMiningCrowdSourcePallet<T::AccountId> for Pallet<T> {
 		base_required: Decimal,
 		quote_required: Decimal,
 	) -> DispatchResult {
-		let shares_burned = total_shares.saturating_mul(burn_frac);
-		let burn_frac = burn_frac
-			.saturating_mul(Decimal::from(UNIT_BALANCE))
+		// SECURITY (R3-H7): total_shares arrives in planck units from the matching engine.
+		// OCEX's remove_liquidity (lmp.rs) converts BalanceOf<T> to Decimal without dividing
+		// by UNIT_BALANCE, so the engine stores and returns planck counts directly.
+		// Multiplying by UNIT_BALANCE here would cause 10¹²× share inflation.
+		// shares_burned = total_shares × burn_frac is already in planck — cast directly.
+		let shares_burned: u128 = total_shares
+			.saturating_mul(burn_frac)
 			.to_u128()
-			.ok_or(Error::<T>::ConversionError)?
-			.saturated_into();
-
-		let shares_burned = shares_burned
+			.ok_or(Error::<T>::ConversionError)?;
+		let burn_frac = burn_frac
 			.saturating_mul(Decimal::from(UNIT_BALANCE))
 			.to_u128()
 			.ok_or(Error::<T>::ConversionError)?
@@ -135,7 +137,7 @@ impl<T: Config> LiquidityMiningCrowdSourcePallet<T::AccountId> for Pallet<T> {
 			<PoolIdIndex<T>>::get(pool).ok_or(Error::<T>::UnknownPool)?;
 		let pool_config =
 			<Pools<T>>::get(market, &market_maker).ok_or(Error::<T>::UnknownPool)?;
-		T::OtherAssets::mint_into(pool_config.share_id.try_into().unwrap(), lp, shares_burned)?;
+		T::OtherAssets::mint_into(pool_config.share_id.try_into().unwrap(), lp, shares_burned.saturated_into())?;
 
 		let base_free = base_free
 			.saturating_mul(Decimal::from(UNIT_BALANCE))

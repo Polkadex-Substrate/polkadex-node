@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 22 fixed (as of last update) · 43 open  
+**Totals:** 65 findings in this repo · 26 fixed (as of last update) · 39 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -557,6 +557,89 @@ If any operation in the sequence fails midway — for example `NativeCurrency::s
 
 ---
 
+### R3-H6 — LMP callbacks look up Pools by pool_id but storage is keyed by market_maker
+**Severity:** High  
+**Location:** `pallets/liquidity-mining/src/callback.rs` — `add_liquidity_success`, `remove_liquidity_failed`, `pool_force_close_success`  
+**Fixed in spec:** 391  
+**Date:** 2026-08-17  
+**Fixed via:** C6 (same commit — the PoolIdIndex reverse map introduced for C6 directly resolves this finding)
+
+**Vulnerability:** OCEX calls all three LMP callbacks with the *pool_id* (the derived PalletId sub-account) as the `pool` parameter. But the LMP `Pools` storage map is keyed by `(TradingPair, market_maker)`. A direct `Pools::get(market, pool_id)` would always return `None`, causing all three callbacks to silently fail.
+
+**Impact:** Share minting, share refund on failed removal, and pool-force-close state update all silently no-op'd whenever the pool_id was passed — which is every call.
+
+**Changes made (as part of C6):**
+
+`pallets/liquidity-mining/src/callback.rs`:
+- All three callbacks now perform a reverse-index lookup via `PoolIdIndex::get(pool_id)` to resolve `market_maker`, then look up `Pools::get(market, market_maker)` with the correct key
+
+---
+
+### R3-H7 — remove_liquidity_failed re-scales already-planck shares — mints 10¹²× shares
+**Severity:** High  
+**Location:** `pallets/liquidity-mining/src/callback.rs` — `remove_liquidity_failed`  
+**Fixed in spec:** N/A (pallet disconnected; fix ships when OCEX re-enabled in spec 393+)  
+**Date:** 2026-09-08  
+**Migration required:** No — pure logic fix; no storage layout change.
+
+**Vulnerability:**  
+`remove_liquidity` queues `(lp, burned_amt, total)` in `WithdrawalRequests` where both values are `BalanceOf<T>` — planck units. OCEX's `lmp.rs::remove_liquidity` converts these to `Decimal` via `Decimal::from(burned.saturated_into::<u128>())` **without dividing by UNIT_BALANCE**, so the matching engine receives and stores shares in planck units (e.g., `10_500_000_000_000` not `10.5`). The matching engine echoes these planck values back in `RemoveLiquidityFailed`.
+
+**Impact:**  
+The `remove_liquidity_failed` callback then computed:
+```
+shares_burned = total_shares × burn_frac × UNIT_BALANCE
+             = planck_total × frac × 10¹²
+```
+The extra `× UNIT_BALANCE` inflated the minted-back share count by 10¹². An LP holding 10.5 shares (10_500_000_000_000 planck) after a failed removal would receive 10_500_000_000_000_000_000_000_000 planck shares back — effectively infinite supply inflation of the share token.
+
+**Changes made:**
+
+`pallets/liquidity-mining/src/callback.rs`:
+- Removed the `.saturating_mul(Decimal::from(UNIT_BALANCE))` from the `shares_burned` conversion — casts the Decimal directly to u128 (already in planck) before calling `mint_into`
+
+---
+
+### R3-H8 — force_close_pool passes market_maker to OCEX instead of pool_id
+**Severity:** High  
+**Location:** `pallets/liquidity-mining/src/lib.rs` — `force_close_pool`  
+**Fixed in spec:** N/A (pallet disconnected; fix ships when OCEX re-enabled in spec 393+)  
+**Date:** 2026-09-08  
+**Migration required:** No — pure logic fix; no storage layout change.
+
+**Vulnerability:**  
+`force_close_pool` called `T::OCEX::force_close_pool(market, market_maker)` with the market maker's personal account. The matching engine expects the `pool_id` (the derived PalletId sub-account). It stores `ForceClosePool(config, market_maker)` in `IngressMessages`.
+
+**Impact:**  
+When OCEX processes the egress `PoolForceClosed` message, it validates `is_valid_pool_id(pool)` which checks `PoolIdIndex::contains_key(pool)`. The market_maker's personal account is never in `PoolIdIndex` — only pool sub-accounts are. The validation fails and the force-close egress is rejected, leaving the pool stuck in limbo even after the governance root called `force_close_pool`. The pool remains open to new activity while governance believes it is closed.
+
+**Changes made:**
+
+`pallets/liquidity-mining/src/lib.rs`:
+- `force_close_pool`: Look up `pool_config` via `Pools::get(market, market_maker)` and pass `pool_config.pool_id` to `T::OCEX::force_close_pool` — removed the now-redundant `Pools::contains_key` guard (the `get` returns an error if not found)
+
+---
+
+### R3-H11 — claim_force_closed_pool_funds reads market.base for both asset legs
+**Severity:** High  
+**Location:** `pallets/liquidity-mining/src/lib.rs` — `claim_force_closed_pool_funds`  
+**Fixed in spec:** N/A (pallet disconnected; fix ships when OCEX re-enabled in spec 393+)  
+**Date:** 2026-09-08  
+**Migration required:** No — pure logic fix; no storage layout change.
+
+**Vulnerability:**  
+`claim_force_closed_pool_funds` read both `base_balance` and `quote_balance` using `market.base.asset_id()`. The `quote_balance` line erroneously used `market.base` instead of `market.quote`.
+
+**Impact:**  
+`quote_amt_to_claim` was computed from the base asset's pool balance, not the quote asset. The function then transferred `quote_amt_to_claim` (based on base) from the **quote** asset of the pool to the LP — the LP receives the wrong amount from the quote leg (typically a massive overpay or shortfall depending on the base/quote price ratio), and the correct quote balance is never drawn down, leaving quote funds permanently stuck in the pool sub-account.
+
+**Changes made:**
+
+`pallets/liquidity-mining/src/lib.rs`:
+- `claim_force_closed_pool_funds`: Changed the `quote_balance` `reducible_balance` call from `market.base.asset_id()` to `market.quote.asset_id()`
+
+---
+
 ### R3-H3 — Aggregator HTTP response uncapped
 **Severity:** High  
 **Location:** `pallets/ocex/src/aggregator.rs` — `send_request`  
@@ -690,10 +773,6 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
 | R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
-| R3-H6 | 🟠 High | pallets/liquidity-mining | Pools keyed by market_maker, callbacks look up by pool_id |
-| R3-H7 | 🟠 High | pallets/liquidity-mining | remove_liquidity_failed mints 10¹²× shares |
-| R3-H8 | 🟠 High | pallets/liquidity-mining | force_close_pool sends funds to personal account |
-| R3-H11 | 🟠 High | pallets/liquidity-mining | claim_force_closed_pool_funds reads wrong asset |
 | H5 | 🟠 High | pallets/liquidity-mining | requests[num_requests..] panics on caller u16 |
 | H6 | 🟠 High | pallets/liquidity-mining | dev_mode + flat weight live at mainnet index 50 |
 | H3 | 🟠 High | pallets/rewards | Vesting: entire lock removed on first claim |

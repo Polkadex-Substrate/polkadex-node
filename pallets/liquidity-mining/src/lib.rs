@@ -523,8 +523,12 @@ pub mod pallet {
 			market_maker: T::AccountId,
 		) -> DispatchResult {
 			ensure_root(origin)?;
-			ensure!(<Pools<T>>::contains_key(market, &market_maker), Error::<T>::UnknownPool);
-			T::OCEX::force_close_pool(market, market_maker);
+			// SECURITY (R3-H8): pass pool_id (the derived sub-account), not market_maker.
+			// The matching engine keys ForceClosePool by pool_id; passing market_maker causes
+			// the engine to reference the wrong account and OCEX's is_valid_pool_id check to fail.
+			let pool_config =
+				<Pools<T>>::get(market, &market_maker).ok_or(Error::<T>::UnknownPool)?;
+			T::OCEX::force_close_pool(market, pool_config.pool_id);
 			Ok(())
 		}
 
@@ -724,8 +728,11 @@ pub mod pallet {
 				.checked_div(&total_issuance)
 				.ok_or(Error::<T>::InvalidTotalIssuance)?;
 
+			// SECURITY (R3-H11): was market.base.asset_id() — both legs queried the base
+			// asset, so quote_amt_to_claim was computed from the base balance and the LP
+			// received the wrong amount from the quote transfer.
 			let quote_balance = T::OtherAssets::reducible_balance(
-				market.base.asset_id().ok_or(Error::<T>::ConversionError)?.try_into().unwrap(),
+				market.quote.asset_id().ok_or(Error::<T>::ConversionError)?.try_into().unwrap(),
 				&pool_config.pool_id,
 				Preservation::Expendable,
 				Fortitude::Force,
