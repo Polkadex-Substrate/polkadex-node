@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 21 fixed (as of last update) · 44 open  
+**Totals:** 65 findings in this repo · 22 fixed (as of last update) · 43 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -534,6 +534,29 @@ Additionally, `verify()` accepted `total_liquidity_mining_rewards = 0`, allowing
 
 ---
 
+### R3-H13 — close_auction non-transactional; place_bid commented out
+**Severity:** High  
+**Location:** `pallets/ocex/src/lib.rs` — `close_auction`, `place_bid`  
+**Fixed in spec:** N/A (pallet disconnected; fix ships when OCEX re-enabled in spec 393+)  
+**Date:** 2026-09-08  
+**Migration required:** No — pure logic change; no storage layout change.
+
+**Vulnerability:**  
+`close_auction` performs a sequence of operations: iterates fee-asset transfers from the auction pot to the highest bidder, then calls `NativeCurrency::settle` to burn the native token amount. The function had no `#[transactional]` attribute.
+
+**Impact:**  
+If any operation in the sequence fails midway — for example `NativeCurrency::settle` returns `Err` after several fee-asset transfers have already completed — those earlier transfers are already committed to storage. The bidder receives assets for free (the native payment never burned) and the auction pallet's internal state is left inconsistent. Without the transactional savepoint, there is no rollback path.
+
+`place_bid` is separately fully commented out at call index 22 pending frontend readiness. It also performs a multi-step operation (`reserve` new bidder → `unreserve` old bidder → `Auction::put`) with the same non-transactional risk: if `Auction::put` or `unreserve` fail after `reserve` has committed, the new bidder's funds remain locked with no auction entry pointing at them.
+
+**Changes made:**
+
+`pallets/ocex/src/lib.rs`:
+- Added `#[transactional]` attribute to `close_auction` — wraps the entire function in a storage-layer savepoint so any failure rolls back all partial fee-asset transfers atomically
+- Added detailed security comment above the commented-out `place_bid` block documenting the transactional requirement and the `#[transactional]` line that must be included when the extrinsic is re-enabled. Added `// #[transactional]` inside the commented block so it ships with the correct attribute when uncommented
+
+---
+
 ### R3-H3 — Aggregator HTTP response uncapped
 **Severity:** High  
 **Location:** `pallets/ocex/src/aggregator.rs` — `send_request`  
@@ -666,7 +689,6 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | C7 | 🔴 Critical | nodes/, session-keys/ | Master BIP39 seed committed in repo — rotate all session keys |
 | H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
 | R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
-| R3-H13 | 🟠 High | pallets/ocex | close_auction non-transactional; place_bid commented out |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
 | R3-H6 | 🟠 High | pallets/liquidity-mining | Pools keyed by market_maker, callbacks look up by pool_id |
 | R3-H7 | 🟠 High | pallets/liquidity-mining | remove_liquidity_failed mints 10¹²× shares |

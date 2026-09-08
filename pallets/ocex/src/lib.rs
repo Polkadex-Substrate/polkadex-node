@@ -1085,9 +1085,16 @@ pub mod pallet {
 			Ok(())
 		}
 
-		// /// Place Bid TODO: Enable it after frontend is ready.
+		// SECURITY (R3-H13): place_bid is intentionally disabled pending frontend readiness.
+		// When re-enabling, it MUST carry #[transactional] — the reserve(new_bidder) +
+		// unreserve(old_bidder) + Auction::put sequence must be atomic. If unreserve or
+		// Auction::put were to fail after reserve, the new bidder's funds would be locked
+		// with no auction entry pointing at them.
+		//
+		// TODO: Enable after frontend is ready. Add #[transactional] before uncommenting.
 		// #[pallet::call_index(22)]
 		// #[pallet::weight(< T as Config >::WeightInfo::place_bid())]
+		// #[transactional]
 		// pub fn place_bid(origin: OriginFor<T>, bid_amount: BalanceOf<T>) -> DispatchResult {
 		// 	let bidder = ensure_signed(origin)?;
 		// 	let mut auction_info = <Auction<T>>::get().ok_or(Error::<T>::AuctionNotFound)?;
@@ -2288,6 +2295,14 @@ pub mod pallet {
 			Ok(())
 		}
 
+		// SECURITY (R3-H13): close_auction must be transactional. It performs multiple
+		// asset transfers and a burn in sequence. Without #[transactional], a failure
+		// midway (e.g. on the NativeCurrency::settle burn) leaves earlier fee-asset
+		// transfers to the bidder committed on-chain — bidder receives assets for free
+		// or the pallet state is left inconsistent. The `#[transactional]` attribute
+		// wraps the entire function in a storage-layer savepoint so all-or-nothing
+		// semantics are enforced across every operation inside.
+		#[transactional]
 		pub fn close_auction() -> DispatchResult {
 			let auction_info = <Auction<T>>::get().ok_or(Error::<T>::AuctionNotFound)?;
 			if let Some(bidder) = auction_info.highest_bidder {
