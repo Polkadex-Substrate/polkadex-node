@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 18 fixed (as of last update) · 47 open  
+**Totals:** 65 findings in this repo · 19 fixed (as of last update) · 46 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -502,6 +502,37 @@ No additional code changes required — the full fix is in the H8 commit.
 
 ---
 
+### R3-H2 — OCW mutex retry backoff missing; Dev RPC always exposed
+**Severity:** High  
+**Location:** `pallets/ocex/src/rpc.rs`, `nodes/mainnet/src/node_rpc.rs`  
+**Fixed in spec:** N/A (node binary fix, no on-chain migration)  
+**Date:** 2026-09-08  
+**Migration required:** No
+
+**Vulnerability 1 — Mutex retry backoff missing:**  
+`acquire_offchain_lock` logs "retrying after 1 sec" but had no `sleep_until` between the 3 retry iterations. All 3 retries ran back-to-back in microseconds.
+
+**Impact:** If the OCW lock was held by a running worker (normal during active block processing), all 3 retries would see `WORKER_STATUS = true` and fail in under a millisecond — identical to having no retries at all. The calling worker returned `Err` immediately, skipped snapshot processing for that block, and the orderbook OCW silently fell behind. On a busy validator node where the OCW regularly ran longer than one block time, this caused systematic snapshot processing gaps that could desync the off-chain state from the on-chain snapshot.
+
+**Vulnerability 2 — Dev RPC registered unconditionally:**  
+`sc_rpc::Dev` is explicitly labelled "All methods are unsafe" in the Substrate source. It was registered unconditionally in `create_full` on every node including production validators. Any caller who could reach port 9944 had access to Dev API methods regardless of whether `--unsafe-rpc-methods` was set.
+
+**Impact:** The Dev API exposes `dev_getBlockStats` which reveals internal block execution details (extrinsic weights, storage proof sizes, DB reads/writes per block). On a validator with port 9944 publicly reachable, an attacker could use this to profile the validator's block execution timing and resource usage — information useful for targeted DoS (crafting extrinsics that maximise validator load) or for inferring validator hardware and configuration. The Polkadex README already warns operators to firewall port 9944 after key submission (`ufw deny 9944`), but nothing prevented a misconfigured validator from leaving it open and unknowingly exposing the Dev API.
+
+**Changes made:**
+
+`pallets/ocex/src/rpc.rs`:
+- Added `sp_io::offchain::sleep_until(timestamp + 1s)` between each retry iteration in `acquire_offchain_lock` so the log message matches the actual behaviour and the lock can be released by the running worker between attempts
+
+`nodes/mainnet/src/node_rpc.rs`:
+- Moved `use sc_rpc::dev::{Dev, DevApiServer}` behind `#[cfg(feature = "dev-rpc")]`
+- Moved `io.merge(Dev::new(client.clone()).into_rpc())?` behind `#[cfg(feature = "dev-rpc")]`
+
+`nodes/mainnet/Cargo.toml`:
+- Added `dev-rpc = []` feature with a security comment — never enable on production validator nodes
+
+---
+
 ## One-shot migrations — must be removed before spec 392
 
 The following migrations are in `runtimes/mainnet/src/migrations.rs` and wired into the `Migrations` tuple in `runtimes/mainnet/src/lib.rs`. They are idempotent but execute on **every** runtime upgrade. They must be **removed from the tuple before the next spec version bump** (≥ 392):
@@ -580,7 +611,6 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | C7 | 🔴 Critical | nodes/, session-keys/ | Master BIP39 seed committed in repo — rotate all session keys |
 | H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
 | R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
-| R3-H2 | 🟠 High | pallets/ocex | OCW mutex released on failed acquisition; unsafe RPC namespaces |
 | R3-H3 | 🟠 High | pallets/ocex | Aggregator HTTP response uncapped |
 | R3-H12 | 🟠 High | pallets/ocex | LMP config metrics write-only; epoch budget over-issued |
 | R3-H13 | 🟠 High | pallets/ocex | close_auction non-transactional; place_bid commented out |

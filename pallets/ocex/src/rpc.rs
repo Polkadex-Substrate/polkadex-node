@@ -41,6 +41,13 @@ impl<T: Config> Pallet<T> {
 		// Check if another worker is already running or not
 		let s_info = StorageValueRef::persistent(&WORKER_STATUS);
 		for _ in 0..3 {
+			// `mutate` uses compare-and-set under the hood.
+			// - Closure returns Ok(true)  → write succeeds → mutate returns Ok(true)   → lock acquired.
+			// - Closure returns Err(())   → no write       → mutate returns Err(ValueFunctionFailed) → not acquired, retry.
+			// - CAS conflict              → no write       → mutate returns Err(ConcurrentModification) → retry.
+			// SECURITY (R3-H2): Add a backoff between retries so "retrying after 1 sec" is accurate.
+			// Previously the loop spun without sleeping, making all 3 retries effectively
+			// simultaneous — a held lock would never be released between them.
 			if s_info
 				.mutate(|value: Result<Option<bool>, StorageRetrievalError>| -> Result<bool, ()> {
 					match value {
@@ -59,6 +66,11 @@ impl<T: Config> Pallet<T> {
 			{
 				return Ok(());
 			}
+			// SECURITY (R3-H2): sleep 1 second between retries so a briefly-held lock can be
+			// released by the running worker before we give up and return Err.
+			sp_io::offchain::sleep_until(
+				sp_io::offchain::timestamp().add(sp_runtime::offchain::Duration::from_millis(1000)),
+			);
 		}
 		Err(DispatchError::Other("Offchain storage mutex error"))
 	}

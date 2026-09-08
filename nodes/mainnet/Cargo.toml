@@ -121,3 +121,6 @@ futures = { workspace = true }
 default = []
 runtime-benchmarks = ["node-polkadex-runtime/runtime-benchmarks", "frame-benchmarking-cli/runtime-benchmarks", "frame-benchmarking"]
 try-runtime = ["node-polkadex-runtime/try-runtime"]
+# SECURITY (R3-H2): dev-rpc enables the sc-rpc Dev API (labelled "All methods are unsafe").
+# Never enable on production validator nodes. For local development only.
+dev-rpc = []

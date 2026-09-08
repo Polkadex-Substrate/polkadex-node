@@ -388,11 +388,9 @@ where
 	use sc_consensus_babe_rpc::{Babe, BabeApiServer};
 	use sc_consensus_beefy_rpc::{Beefy, BeefyApiServer};
 	use sc_consensus_grandpa_rpc::{Grandpa, GrandpaApiServer};
-	use sc_rpc::{
-		dev::{Dev, DevApiServer},
-		mixnet::MixnetApiServer,
-		statement::StatementApiServer,
-	};
+	#[cfg(feature = "dev-rpc")]
+	use sc_rpc::dev::{Dev, DevApiServer};
+	use sc_rpc::{mixnet::MixnetApiServer, statement::StatementApiServer};
 	use sc_sync_state_rpc::{SyncState, SyncStateApiServer};
 	use substrate_frame_rpc_system::{System, SystemApiServer};
 	use substrate_state_trie_migration_rpc::{StateMigration, StateMigrationApiServer};
@@ -443,6 +441,11 @@ where
 	)?;
 
 	io.merge(StateMigration::new(client.clone(), backend.clone()).into_rpc())?;
+	// SECURITY (R3-H2): Dev API is explicitly labelled "All methods are unsafe" in sc-rpc.
+	// It must not be registered on production validator nodes where port 9944 could be
+	// reachable. It is left here behind a compile-time feature flag so local dev nodes
+	// (cargo run --features dev-rpc) can still use it.
+	#[cfg(feature = "dev-rpc")]
 	io.merge(Dev::new(client.clone()).into_rpc())?;
 	let statement_store = sc_rpc::statement::StatementStore::new(statement_store).into_rpc();
 	io.merge(statement_store)?;
