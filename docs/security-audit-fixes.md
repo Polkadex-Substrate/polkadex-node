@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 29 fixed (as of last update) · 36 open  
+**Totals:** 65 findings in this repo · 30 fixed (as of last update) · 35 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -765,6 +765,28 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 ---
 
+### R4-B — crowdloan HASHMAP accessible for any reward_id; full re-pay on second cycle
+**Severity:** High  
+**Location:** `pallets/rewards/src/lib.rs` — `do_initialize_claim_rewards`  
+**Fixed in spec:** N/A (no migration; fix active on next node deploy)  
+**Date:** 2026-09-09  
+**Migration required:** No — pure logic fix; no storage layout change.
+
+**Vulnerability:**  
+`do_initialize_claim_rewards` looked up the caller in `crowdloan_rewardees::HASHMAP` regardless of the `reward_id` argument. The `Distributor` storage is a double map keyed by `(reward_id, AccountId)`, so the existing guard (`contains_key(reward_id, user)`) only prevents double-initialization for the **same** `reward_id`. It does not prevent a contributor from initializing under a different `reward_id`.
+
+**Impact:**  
+Whenever governance calls `create_reward_cycle` with a new `reward_id` (e.g., `2` for a second parachain auction or a different rewards programme), all 3,631 accounts in the crowdloan HASHMAP can call `initialize_claim_rewards(2)`. Each receives the same `total_rewards_in_pdex`, `initial_rewards_claimable`, and `factor` as the first crowdloan — the pallet transfers that amount from its account and sets a new lock. With ~2M PDEX total across contributors, a second cycle would fully drain the rewards pot and mint a second round of crowdloan allocations to all 3,631 participants.
+
+**Changes made:**
+
+`pallets/rewards/src/lib.rs`:
+- Added `const CROWDLOAN_REWARD_ID: u32 = 1` with a security comment explaining the guard
+- Added `Error::NotCrowdloanRewardId` variant to the Error enum
+- Added `ensure!(reward_id == CROWDLOAN_REWARD_ID, Error::<T>::NotCrowdloanRewardId)` at the top of `do_initialize_claim_rewards` — rejects any call that supplies a `reward_id` other than the first crowdloan cycle before reaching the HASHMAP lookup
+
+---
+
 ### H3 — do_claim removes entire vesting lock on first claim — 96-week vest bypassed
 **Severity:** High  
 **Location:** `pallets/rewards/src/lib.rs` — `do_claim`  
@@ -853,7 +875,6 @@ The pallet was declared with `#[frame_support::pallet(dev_mode)]`. In FRAME, `de
 | H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
 | R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
-| R4-B | 🟠 High | pallets/rewards | Crowdloan re-pay on second cycle (~2M PDEX) |
 | R4-C | 🟠 High | scripts/ | Crowdloan verifier always prints success |
 | H2 | 🟠 High | pallets/pdex-migration | Third approver's beneficiary used for mint |
 | H9 | 🟠 High | pallets/xcm-helper | XCM fee whitelist commented out; zero fee hardcoded |

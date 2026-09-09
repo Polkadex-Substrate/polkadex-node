@@ -70,6 +70,11 @@ pub mod weights;
 
 const MIN_REWARDS_CLAIMABLE_AMOUNT: u128 = polkadex_primitives::UNIT_BALANCE;
 pub const REWARDS_LOCK_ID: LockIdentifier = *b"REWARDID";
+// SECURITY (R4-B): the crowdloan HASHMAP is specific to the first parachain crowdloan.
+// Allowing any reward_id to access it means all 3631 contributors can re-claim their
+// full allocation whenever governance creates a second reward cycle. Gating by this
+// constant ensures the HASHMAP is only reachable for reward_id == 1.
+const CROWDLOAN_REWARD_ID: u32 = 1;
 // Definition of the pallet logic, to be aggregated at runtime definition through
 // `construct_runtime`.
 #[frame_support::pallet]
@@ -309,6 +314,8 @@ pub mod pallet {
 		RewardsAlreadyInitialized,
 		/// Amount to low to initialize the rewards
 		AmountToLowtoInitializeRewards,
+		/// reward_id does not correspond to the crowdloan reward cycle
+		NotCrowdloanRewardId,
 	}
 
 	#[derive(Clone, Encode, Decode, MaxEncodedLen, TypeInfo, Debug, PartialEq, Default)]
@@ -488,6 +495,12 @@ impl<T: Config> Pallet<T> {
 	}
 
 	fn do_initialize_claim_rewards(user: T::AccountId, reward_id: u32) -> DispatchResult {
+		// SECURITY (R4-B): the crowdloan HASHMAP is only valid for the first crowdloan
+		// cycle (reward_id == CROWDLOAN_REWARD_ID). Without this guard any governance-
+		// created reward cycle (reward_id = 2, 3 …) would allow all 3631 contributors
+		// to re-initialize and drain the new pot with their original crowdloan amounts.
+		ensure!(reward_id == CROWDLOAN_REWARD_ID, Error::<T>::NotCrowdloanRewardId);
+
 		// check if rewards can be unlocked at current block
 		if let Some(reward_info) = <InitializeRewards<T>>::get(reward_id) {
 			ensure!(
