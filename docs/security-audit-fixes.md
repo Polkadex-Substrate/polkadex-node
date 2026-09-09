@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 30 fixed (as of last update) · 35 open  
+**Totals:** 65 findings in this repo · 31 fixed (as of last update) · 34 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -765,6 +765,35 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 ---
 
+### R4-C — crowdloan verifier: reader exhausted, wrong columns, always prints success
+**Severity:** High  
+**Location:** `misc/crowdloan-verifier/src/main.rs`  
+**Fixed in spec:** N/A (off-chain tool)  
+**Date:** 2026-09-09  
+**Migration required:** No — off-chain script only.
+
+**Vulnerability:**  
+The verification branch (`!args.convert`) had three stacked bugs that rendered it completely non-functional:
+
+1. **Reader exhausted**: The first `for result in rdr.records()` loop (building the dedup map) consumed the entire CSV reader. `csv::Reader` is an iterator — once exhausted, subsequent iterations yield nothing. The second `for result in rdr.records()` loop at line 103 silently iterated zero rows.
+
+2. **Wrong column indices**: The second loop read `record.get(1)` as `total_rewards`, `record.get(2)` as `cliff_amt`, `record.get(3)` as `claim_per_blk`, and `record.get(4)` as `dot_contributed`. The actual CSV layout is `col0=accountId, col1=DOTs contributed, col2=Total PDEX, col3=Initial cliff, col4=Factor` — so the second loop would have read DOT amounts as PDEX totals, etc.
+
+3. **Always printed success**: Because the second loop never ran (bug 1), execution fell through to `println!("Excel and Source code account lists match, All good!")` unconditionally — regardless of any mismatches between the CSV and the HASHMAP.
+
+**Impact:**  
+The verifier tool gave false confidence that the hardcoded `HASHMAP` in `crowdloan_rewardees.rs` correctly matched the source CSV. Any discrepancy (wrong amounts, missing accounts, transposed entries) would be silently reported as success. This tool was the only automated check between the source spreadsheet and the on-chain reward allocations for 3,631 crowdloan contributors.
+
+**Changes made:**
+
+`misc/crowdloan-verifier/src/main.rs`:
+- Removed the second `rdr.records()` loop entirely — the reader cannot be rewound
+- After the single-pass dedup map is built (using the correct columns 2, 3, 4), verify each map entry against HASHMAP directly using the already-collected values
+- Added `found_error` flag — errors are now all printed (not just the first), and the process exits with code 1 at the end if any mismatch was found
+- Success message (`All good!`) is now only printed when `found_error` is false
+
+---
+
 ### R4-B — crowdloan HASHMAP accessible for any reward_id; full re-pay on second cycle
 **Severity:** High  
 **Location:** `pallets/rewards/src/lib.rs` — `do_initialize_claim_rewards`  
@@ -875,7 +904,6 @@ The pallet was declared with `#[frame_support::pallet(dev_mode)]`. In FRAME, `de
 | H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
 | R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
-| R4-C | 🟠 High | scripts/ | Crowdloan verifier always prints success |
 | H2 | 🟠 High | pallets/pdex-migration | Third approver's beneficiary used for mint |
 | H9 | 🟠 High | pallets/xcm-helper | XCM fee whitelist commented out; zero fee hardcoded |
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |

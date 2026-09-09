@@ -78,9 +78,19 @@ fn main() {
 	let unit_balance = Decimal::from(UNIT_BALANCE);
 
 	if !args.convert {
+		// SECURITY (R4-C): the original code had three bugs:
+		// 1. Reader exhausted — first loop consumed rdr; second loop iterated nothing.
+		// 2. Wrong columns — second loop read col 1 as total_rewards but CSV layout is
+		//    col0=account, col1=DOTs, col2=total_pdex, col3=cliff, col4=factor.
+		// 3. Always printed success — because the second loop never ran, the success
+		//    message was unconditional regardless of any mismatches.
+		//
+		// Fix: single pass builds the deduplicated map with the correct columns (2,3,4),
+		// then verify the map entries against HASHMAP directly — no second CSV read needed.
 		let mut map: BTreeMap<AccountId, (u128, u128, u128)> = BTreeMap::new();
 		for result in rdr.records() {
 			let record = result.unwrap();
+			// CSV layout: 0=accountId, 1=DOTs contributed, 2=Total PDEX, 3=Initial cliff, 4=Factor
 			let user = AccountId::from_str(record.get(0).unwrap()).unwrap();
 			let total_rewards = Decimal::from_str(record.get(2).unwrap()).unwrap();
 			let cliff_amt = Decimal::from_str(record.get(3).unwrap()).unwrap();
@@ -99,23 +109,23 @@ fn main() {
 				.or_insert((t_new, i_new, f_new));
 		}
 		assert_eq!(map_len, map.len(), "Number of users doesn't match!");
-		// Check all addresses and their corresponding reward details, print to screen on error.
-		for result in rdr.records() {
-			let record = result.unwrap();
-			let user = AccountId::from_str(record.get(0).unwrap()).unwrap();
-			let total_rewards = Decimal::from_str(record.get(1).unwrap()).unwrap();
-			let cliff_amt = Decimal::from_str(record.get(2).unwrap()).unwrap();
-			let claim_per_blk = Decimal::from_str(record.get(3).unwrap()).unwrap();
-			let dot_contributed = Decimal::from_str(record.get(4).unwrap()).unwrap();
-			#[allow(clippy::borrow_interior_mutable_const)]
-			if let Some((_, details)) = HASHMAP.iter().find(|inner| inner.0 == user) {
+
+		// Verify each deduplicated map entry against HASHMAP.
+		let mut found_error = false;
+		#[allow(clippy::borrow_interior_mutable_const)]
+		for (user, (t_csv, i_csv, f_csv)) in &map {
+			if let Some((_, details)) = HASHMAP.iter().find(|inner| inner.0 == *user) {
 				let total_rewards_list = Decimal::from(details.0).div(unit);
 				let cliff_amt_list = Decimal::from(details.1).div(unit);
 				let claim_per_blk_list = Decimal::from(details.2).div(unit);
+				let total_rewards = Decimal::from(*t_csv).div(unit);
+				let cliff_amt = Decimal::from(*i_csv).div(unit);
+				let claim_per_blk = Decimal::from(*f_csv).div(unit);
 				if (total_rewards != total_rewards_list)
 					|| (cliff_amt != cliff_amt_list)
 					|| (claim_per_blk != claim_per_blk_list)
 				{
+					found_error = true;
 					println!("ERROR IN REWARDS INFO");
 					println!(
 						"---------------------------------------------------------------------------"
@@ -144,10 +154,9 @@ fn main() {
 					println!("Total Rewards: {total_rewards:?} PDEX");
 					println!("25% Cliff: {cliff_amt:?} PDEX");
 					println!("Amount claimable per block: {claim_per_blk:?} PDEX");
-					println!("DOT contributed: {dot_contributed:?} DOT");
-					return;
 				}
 			} else {
+				found_error = true;
 				println!("User Account Info ");
 				println!(
 					"---------------------------------------------------------------------------"
@@ -160,14 +169,17 @@ fn main() {
 					"User ( Polkadot ): {:?}",
 					user.to_ss58check_with_version(polkadot_version)
 				);
-				println!("USER NOT FOUND IN LIST");
+				println!("USER NOT FOUND IN HASHMAP");
 				println!(
 					"---------------------------------------------------------------------------"
 				);
-				return;
 			}
 		}
-		println!("Excel and Source code account lists match, All good!")
+		if !found_error {
+			println!("Excel and Source code account lists match, All good!");
+		} else {
+			std::process::exit(1);
+		}
 	} else {
 		// AccountID => (total rewards, initial rewards, reward per blk)
 		let mut map: BTreeMap<AccountId, (u128, u128, u128)> = BTreeMap::new();
