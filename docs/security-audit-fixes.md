@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 28 fixed (as of last update) · 37 open  
+**Totals:** 65 findings in this repo · 29 fixed (as of last update) · 36 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -765,6 +765,34 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 ---
 
+### H3 — do_claim removes entire vesting lock on first claim — 96-week vest bypassed
+**Severity:** High  
+**Location:** `pallets/rewards/src/lib.rs` — `do_claim`  
+**Fixed in spec:** N/A (no migration needed; fix active on next node deploy)  
+**Date:** 2026-09-09  
+**Migration required:** No — pure logic fix; no storage layout change.
+
+**Vulnerability:**  
+`do_initialize_claim_rewards` transfers the user's full `total_reward_amount` to their account and places a `LockableCurrency` lock on the entire amount (`WithdrawReasons::TRANSFER`). The intent is a 96-week linear vest: each `do_claim` call should progressively reduce the lock by the vested portion (`factor × blocks_elapsed`), making only the vested portion transferable.
+
+`do_claim` had two stacked bugs:
+1. `_reward_info` — the `InitializeRewards` entry containing `end_block` was fetched and immediately discarded (underscore prefix, never used).
+2. Instead of computing `factor × unclaimed_blocks`, it computed `total_reward_amount - claim_amount` — the entire remaining allocation — and called `remove_lock` (not `set_lock`) to remove the entire lock in one shot.
+
+**Impact:**  
+On the very first call to `do_claim` after initialization, the user's full vesting lock was removed unconditionally. All `total_reward_amount` tokens became immediately transferable regardless of where in the 96-week schedule the user was. A user who initialized at block 1 and claimed at block 2 received the same outcome as a user who waited 4,838,400 blocks — zero vesting was enforced. The crowdloan reward schedule for all 3,631 contributors was effectively a no-op; everyone could claim 100% of their allocation immediately after initialization.
+
+**Changes made:**
+
+`pallets/rewards/src/lib.rs` — `do_claim`:
+- Renamed `_reward_info` to `reward_info` so `end_block` is accessible
+- Replaced the `total - claimed` calculation with the correct pro-rated formula: `factor × min(current_block, end_block) - last_claimed_block`
+- Added a cap at `total - claim_amount` to handle rounding on the final claim
+- Replaced unconditional `remove_lock` with: `set_lock(lock_id, user, total - new_claim_amount)` when unvested tokens remain; `remove_lock` only once `claim_amount >= total_reward_amount`
+- `is_initial_rewards_claimed` is now set to `true` in the same branch where `initial_rewards_claimable` is added, rather than unconditionally on every call
+
+---
+
 ### H5 — initiate_withdrawal panics when num_requests exceeds queue length
 **Severity:** High  
 **Location:** `pallets/liquidity-mining/src/lib.rs` — `initiate_withdrawal`  
@@ -825,7 +853,6 @@ The pallet was declared with `#[frame_support::pallet(dev_mode)]`. In FRAME, `de
 | H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
 | R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
-| H3 | 🟠 High | pallets/rewards | Vesting: entire lock removed on first claim |
 | R4-B | 🟠 High | pallets/rewards | Crowdloan re-pay on second cycle (~2M PDEX) |
 | R4-C | 🟠 High | scripts/ | Crowdloan verifier always prints success |
 | H2 | 🟠 High | pallets/pdex-migration | Third approver's beneficiary used for mint |

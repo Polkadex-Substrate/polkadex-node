@@ -406,9 +406,11 @@ impl<T: Config> Pallet<T> {
 
 	fn do_claim(user: T::AccountId, reward_id: u32) -> DispatchResult {
 		<Distributor<T>>::mutate(reward_id, user.clone(), |user_reward_info| {
-			if let Some(_reward_info) = <InitializeRewards<T>>::get(reward_id) {
+			// SECURITY (H3): use reward_info (not ignored) to obtain end_block for
+			// pro-rated vesting. Previously this was bound to `_reward_info` and
+			// discarded, causing the function to release the entire lock in one call.
+			if let Some(reward_info) = <InitializeRewards<T>>::get(reward_id) {
 				if let Some(user_reward_info) = user_reward_info {
-					//check if user has initialize rewards or not
 					ensure!(
 						user_reward_info.is_initialized,
 						Error::<T>::UserHasNotInitializeClaimRewards
@@ -416,26 +418,57 @@ impl<T: Config> Pallet<T> {
 
 					let mut rewards_claimable: BalanceOf<T> = 0_u128.saturated_into();
 
-					//if initial rewards are not claimed add it to claimable rewards
+					// Unlock the upfront initial portion on first claim.
 					if !user_reward_info.is_initial_rewards_claimed {
 						rewards_claimable = user_reward_info.initial_rewards_claimable;
+						user_reward_info.is_initial_rewards_claimed = true;
 					}
 
-					// We compute the diff because end block is already complete
-					rewards_claimable = rewards_claimable.saturating_add(
-						user_reward_info
-							.total_reward_amount
-							.saturating_sub(user_reward_info.claim_amount),
-					);
+					// SECURITY (H3): compute only the vested amount since the last claim.
+					// factor = PDEX unlocked per block; capped at end_block so the final
+					// call never over-issues. Previously the code added (total - claimed)
+					// which released every locked token regardless of elapsed vesting time.
+					let current_block: u128 =
+						<frame_system::Pallet<T>>::block_number().saturated_into();
+					let end_block: u128 = reward_info.end_block.saturated_into();
+					let last_claimed: u128 =
+						user_reward_info.last_block_rewards_claim.saturated_into();
+					let unclaimed_blocks =
+						min(current_block, end_block).saturating_sub(last_claimed);
+					let newly_vested: BalanceOf<T> = user_reward_info
+						.factor
+						.saturated_into::<u128>()
+						.saturating_mul(unclaimed_blocks)
+						.saturated_into();
+					rewards_claimable = rewards_claimable.saturating_add(newly_vested);
 
-					//remove lock
-					T::NativeCurrency::remove_lock(user_reward_info.lock_id, &user);
+					// Cap at remaining unclaimed to handle rounding and the final claim.
+					let remaining = user_reward_info
+						.total_reward_amount
+						.saturating_sub(user_reward_info.claim_amount);
+					rewards_claimable = rewards_claimable.min(remaining);
 
-					//update storage
+					// Update claim bookkeeping.
+					user_reward_info.claim_amount =
+						user_reward_info.claim_amount.saturating_add(rewards_claimable);
 					user_reward_info.last_block_rewards_claim =
 						<frame_system::Pallet<T>>::block_number();
-					user_reward_info.is_initial_rewards_claimed = true;
-					user_reward_info.claim_amount = user_reward_info.total_reward_amount;
+
+					// Reduce the lock to cover only the still-unvested portion.
+					// remove_lock only when the entire allocation has been claimed.
+					if user_reward_info.claim_amount >= user_reward_info.total_reward_amount {
+						T::NativeCurrency::remove_lock(user_reward_info.lock_id, &user);
+					} else {
+						let remaining_locked = user_reward_info
+							.total_reward_amount
+							.saturating_sub(user_reward_info.claim_amount);
+						T::NativeCurrency::set_lock(
+							user_reward_info.lock_id,
+							&user,
+							remaining_locked,
+							WithdrawReasons::TRANSFER,
+						);
+					}
 
 					Self::deposit_event(Event::UserClaimedReward {
 						user,
@@ -445,11 +478,9 @@ impl<T: Config> Pallet<T> {
 
 					Ok(())
 				} else {
-					//user not present in reward list
 					Err(Error::<T>::UserNotEligible)
 				}
 			} else {
-				// given reward id not valid
 				Err(Error::<T>::RewardIdNotRegister)
 			}
 		})?;
