@@ -31,7 +31,11 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
-#[frame_support::pallet(dev_mode)]
+// SECURITY (H6): dev_mode was removed. All call indices (0-8) and weights are
+// explicitly declared so dev_mode provided no benefit and masked production
+// safety checks. Flat weight(10000) is a placeholder — proper WeightInfo
+// benchmarks should be added before the pallet is re-enabled at spec 393+.
+#[frame_support::pallet]
 pub mod pallet {
 	use super::*;
 	use crate::types::MarketMakerConfig;
@@ -102,7 +106,17 @@ pub mod pallet {
 			+ Create<<Self as frame_system::Config>::AccountId>;
 	}
 
+	// SECURITY (H6): without_storage_info is an explicit, narrow opt-out — it only
+	// suppresses the MaxEncodedLen requirement on storage values. Unlike dev_mode it
+	// does NOT relax call-index, weight, or other production checks.
+	//
+	// TODO (before spec 393+ re-enable): convert the following unbounded types to
+	// their bounded equivalents and remove this attribute:
+	//   - AddLiquidityRecords: Vec<(BlockNumber, Balance)>  → BoundedVec<_, MaxAddLiquidityRecords>
+	//   - WithdrawalRequests:  Vec<(AccountId, Balance, Balance)> → BoundedVec<_, MaxWithdrawalRequests>
+	//   - MMInfo / LiquidityProviders: BTreeMap<AccountId, (MMScore, MMClaimFlag)> → BoundedBTreeMap
 	#[pallet::pallet]
+	#[pallet::without_storage_info]
 	pub struct Pallet<T>(_);
 
 	/// LP Shares
@@ -681,6 +695,11 @@ pub mod pallet {
 			let pool_config =
 				<Pools<T>>::get(market, &market_maker).ok_or(Error::<T>::UnknownPool)?;
 			let mut requests = <WithdrawalRequests<T>>::get(epoch, &pool_config.pool_id);
+			// SECURITY (H5): clamp num_requests to the actual queue length before slicing.
+			// requests[num_requests..] panics if num_requests > requests.len(). The
+			// .take() above is safe but the slice is not — a caller passing any u16 > len
+			// would panic the entire block (no_std panic = node crash in WASM).
+			let num_requests = num_requests.min(requests.len());
 			for request in requests.iter().take(num_requests) {
 				T::OCEX::remove_liquidity(
 					market,

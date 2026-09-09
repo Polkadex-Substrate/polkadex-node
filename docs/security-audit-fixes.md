@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 26 fixed (as of last update) · 39 open  
+**Totals:** 65 findings in this repo · 28 fixed (as of last update) · 37 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -765,6 +765,58 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 ---
 
+### H5 — initiate_withdrawal panics when num_requests exceeds queue length
+**Severity:** High  
+**Location:** `pallets/liquidity-mining/src/lib.rs` — `initiate_withdrawal`  
+**Fixed in spec:** N/A (pallet disconnected; fix ships when LMP re-enabled in spec 393+)  
+**Date:** 2026-09-09  
+**Migration required:** No — pure logic fix; no storage layout change.
+
+**Vulnerability:**  
+`initiate_withdrawal` takes a caller-supplied `num_requests: u16` and uses it to slice the withdrawal queue:
+```rust
+requests = requests[num_requests..].to_vec();
+```
+Rust slice indexing panics with an out-of-bounds error if `num_requests > requests.len()`. The `.iter().take(num_requests)` above it is safe (take clamps to available items), but the slice is not.
+
+**Impact:**  
+Any signed account that is a registered market maker can call `initiate_withdrawal` with a `num_requests` larger than the current queue — for example, `u16::MAX` (65535). This triggers an unrecoverable panic in the WASM runtime for that block. In Substrate's no_std WASM environment, an uncaught panic aborts block execution, which can stall block production on the affected node and, if triggered on multiple validators simultaneously, halt the chain for the duration it takes operators to notice and redeploy.
+
+**Changes made:**
+
+`pallets/liquidity-mining/src/lib.rs`:
+- Added `let num_requests = num_requests.min(requests.len());` before the slice and the iteration loop — clamps the effective request count to the actual queue length so both the `take()` and the slice remain in bounds
+
+---
+
+### H6 — dev_mode attribute live on production pallet; unbounded storage
+**Severity:** High  
+**Location:** `pallets/liquidity-mining/src/lib.rs`  
+**Fixed in spec:** N/A (pallet disconnected; fix ships when LMP re-enabled in spec 393+)  
+**Date:** 2026-09-09  
+**Migration required:** No — compile-time fix only.
+
+**Vulnerability:**  
+The pallet was declared with `#[frame_support::pallet(dev_mode)]`. In FRAME, `dev_mode` relaxes multiple production safety checks simultaneously: it allows omitting explicit call indices, allows shorthand weight expressions, and — most critically — implies `without_storage_info`, which suppresses the `MaxEncodedLen` requirement on all storage value types. Three storage maps held unbounded types:
+
+- `AddLiquidityRecords`: `Vec<(BlockNumber, Balance)>` — no size cap  
+- `WithdrawalRequests`: `Vec<(AccountId, Balance, Balance)>` — no size cap  
+- `LiquidityProviders` / `MMInfo`: `BTreeMap<AccountId, (MMScore, MMClaimFlag)>` — no size cap  
+
+`dev_mode` was silently hiding all three as compile-time non-errors.
+
+**Impact:**  
+`dev_mode` masks the unbounded storage issues so they never surface as compiler errors. Without size caps, any of these maps can grow without bound — a malicious or buggy caller can bloat storage until decoding them in a single extrinsic exceeds the block weight limit, causing that extrinsic to always fail (effectively bricking operations that touch large entries). Additionally having `dev_mode` on a production pallet is a latent risk: future FRAME versions may change what it relaxes, and new code paths might inadvertently rely on the relaxed behaviour.
+
+**Changes made:**
+
+`pallets/liquidity-mining/src/lib.rs`:
+- Replaced `#[frame_support::pallet(dev_mode)]` with `#[frame_support::pallet]` — `dev_mode` is gone
+- Added `#[pallet::without_storage_info]` on the `Pallet<T>` struct as an explicit, narrow opt-out of the `MaxEncodedLen` requirement only. Unlike `dev_mode`, this does not relax call-index, weight, or any other production check
+- Added a detailed TODO comment listing the three storage types that must be converted to `BoundedVec` / `BoundedBTreeMap` before the pallet is re-enabled at spec 393+
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -773,8 +825,6 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
 | R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
-| H5 | 🟠 High | pallets/liquidity-mining | requests[num_requests..] panics on caller u16 |
-| H6 | 🟠 High | pallets/liquidity-mining | dev_mode + flat weight live at mainnet index 50 |
 | H3 | 🟠 High | pallets/rewards | Vesting: entire lock removed on first claim |
 | R4-B | 🟠 High | pallets/rewards | Crowdloan re-pay on second cycle (~2M PDEX) |
 | R4-C | 🟠 High | scripts/ | Crowdloan verifier always prints success |
