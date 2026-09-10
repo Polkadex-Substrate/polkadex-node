@@ -458,6 +458,22 @@ pub mod pallet {
 			// Create approved deposit
 			let MultiAsset { id, fun } = what;
 			let asset_id = Self::generate_asset_id_for_parachain(*id);
+
+			// SECURITY (H9): gate all incoming XCM deposits to whitelisted tokens only.
+			// Without this check, any foreign chain can push arbitrary assets into Polkadex
+			// by crafting an XCM deposit message — including spam tokens, fake representations
+			// of native assets, or assets whose on-chain price can be manipulated.
+			// `check_whitelisted_token` reads `WhitelistedTokens` storage which is populated
+			// by governance via the `whitelist_token` extrinsic.
+			if !Self::check_whitelisted_token(asset_id) {
+				log::error!(
+					target: "xcm-helper",
+					"SECURITY (H9): deposit_asset rejected — asset {:?} is not whitelisted",
+					asset_id,
+				);
+				return Err(XcmError::AssetNotFound);
+			}
+
 			if let Some(account) = T::SiblingAddressConverter::convert_location(who) {
 				let pallet_account: T::AccountId =
 					T::AssetHandlerPalletId::get().into_account_truncating();

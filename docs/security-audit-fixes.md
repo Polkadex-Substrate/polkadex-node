@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 32 fixed (as of last update) · 33 open  
+**Totals:** 65 findings in this repo · 33 fixed (as of last update) · 32 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -916,6 +916,23 @@ A single malicious relayer acting as the third approver can redirect newly minte
 - When all three approvals are collected, reads `beneficiary` and `amount` from the struct (not the current caller's parameters) to perform the mint and lock — so even a misbehaving third relayer that somehow passed the check cannot influence the final target
 - Added `ApprovalParamsMismatch` error variant
 
+### H9 — XCM deposit_asset accepts any token — whitelist check never enforced
+**Severity:** High  
+**Location:** `pallets/xcm-helper/src/lib.rs` — `deposit_asset`  
+**Fixed in spec:** N/A (xcm-helper pallet)  
+**Date:** 2026-09-10
+
+**Vulnerability:**  
+The pallet has a `WhitelistedTokens` storage and a `check_whitelisted_token` function intended to gate which foreign assets may enter Polkadex via XCM. However, `deposit_asset` — the XCM executor entry point that handles every incoming cross-chain deposit — never called `check_whitelisted_token`. Any parachain could push arbitrary tokens into the system by crafting an XCM deposit message.
+
+**Impact:**  
+Without the whitelist gate, any foreign chain or relay-chain parachain can inject unrecognised tokens into Polkadex accounts via XCM. This includes spam tokens that pollute balances, crafted asset IDs that could shadow legitimate assets registered in the `ParachainAssets` map, and any future asset whose price can be manipulated before governance has time to assess it. The `WhitelistedTokens` extrinsic and storage existed entirely dead — the check was defined but never wired into the deposit path.
+
+**Changes made:**
+
+`pallets/xcm-helper/src/lib.rs`:
+- In `deposit_asset`, added a `check_whitelisted_token(asset_id)` guard immediately after `asset_id = Self::generate_asset_id_for_parachain(*id)` — before either the sibling-parachain or standard deposit branch. Returns `XcmError::AssetNotFound` and logs the rejected asset ID if the token is not whitelisted
+
 ---
 
 ## Open — Pending
@@ -926,7 +943,6 @@ A single malicious relayer acting as the third approver can redirect newly minte
 | H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
 | R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
-| H9 | 🟠 High | pallets/xcm-helper | XCM fee whitelist commented out; zero fee hardcoded |
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M1–M16 | 🟡 Medium | various | See full findings table |
