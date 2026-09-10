@@ -263,7 +263,12 @@ pub struct Deposit<AccountId> {
 }
 
 impl<AccountId> Deposit<AccountId> {
-	pub fn amount_in_native_decimals(&self, metadata: AssetMetadata) -> u128 {
+	/// Returns the deposit amount converted to the 12-decimal native precision.
+	///
+	/// Returns `None` when the foreign amount is non-zero but converts to zero due to
+	/// precision loss (see SECURITY M6). Callers must reject the deposit in that case
+	/// rather than crediting zero tokens while the source-chain funds are already burned.
+	pub fn amount_in_native_decimals(&self, metadata: AssetMetadata) -> Option<u128> {
 		metadata.convert_to_native_decimals(self.amount)
 	}
 
@@ -310,16 +315,31 @@ impl AssetMetadata {
 		Some(AssetMetadata { decimal })
 	}
 
-	/// Convert the foreign asset amount to native decimal configuration
-	pub fn convert_to_native_decimals(&self, amount: u128) -> u128 {
+	/// Convert the foreign asset amount to native decimal configuration.
+	///
+	/// Returns `None` when the converted amount would be zero due to precision truncation
+	/// but the input was non-zero (SECURITY M6). A foreign chain with more decimal places
+	/// than the native 12dp may send an amount too small to represent — e.g., 1 wei on
+	/// Ethereum (18dp) converts to 0 planck (12dp). In those cases the deposit must be
+	/// rejected; returning `None` lets callers surface a meaningful error rather than
+	/// crediting zero while the sender's funds have already been burned on the source chain.
+	pub fn convert_to_native_decimals(&self, amount: u128) -> Option<u128> {
 		let diff = 12 - self.decimal as i8;
 		match diff.cmp(&0) {
 			Ordering::Less => {
-				// casting should not fail as diff*-1 is positive
-				amount.saturating_div(10u128.pow((-diff) as u32))
+				// Foreign asset has more decimal places than native (e.g. 18dp ETH → 12dp PDEX).
+				// casting should not fail as diff*-1 is positive.
+				let divisor = 10u128.pow((-diff) as u32);
+				let result = amount.saturating_div(divisor);
+				// SECURITY (M6): reject amounts that floor to zero.
+				if result == 0 && amount > 0 {
+					None
+				} else {
+					Some(result)
+				}
 			},
-			Ordering::Equal => amount,
-			Ordering::Greater => amount.saturating_mul(10u128.pow(diff as u32)),
+			Ordering::Equal => Some(amount),
+			Ordering::Greater => Some(amount.saturating_mul(10u128.pow(diff as u32))),
 		}
 	}
 
@@ -359,11 +379,11 @@ mod tests {
 
 	#[test]
 	pub fn test_decimal_conversion() {
-		// Decimal is greater
+		// Decimal is greater (18dp foreign → 12dp native, divisor = 1e6)
 		let greater = AssetMetadata::new(18).unwrap();
 		assert_eq!(
 			greater.convert_to_native_decimals(1_000_000_000_000_000_000_u128),
-			UNIT_BALANCE
+			Some(UNIT_BALANCE)
 		);
 		assert_eq!(
 			greater.convert_from_native_decimals(UNIT_BALANCE),
@@ -371,23 +391,25 @@ mod tests {
 		);
 		assert_eq!(
 			greater.convert_to_native_decimals(1_234_567_891_234_567_890_u128),
-			1_234_567_891_234_u128
+			Some(1_234_567_891_234_u128)
 		);
 		assert_eq!(
 			greater.convert_from_native_decimals(1_234_567_891_234_u128),
 			1_234_567_891_234_000_000_u128
 		);
+		// SECURITY (M6): amount too small to represent in native precision → None
+		assert_eq!(greater.convert_to_native_decimals(999_999_u128), None); // < 1e6 → 0 planck
 
 		// Decimal is same
 		let same = AssetMetadata::new(12).unwrap();
-		assert_eq!(same.convert_to_native_decimals(UNIT_BALANCE), UNIT_BALANCE);
+		assert_eq!(same.convert_to_native_decimals(UNIT_BALANCE), Some(UNIT_BALANCE));
 		assert_eq!(same.convert_from_native_decimals(UNIT_BALANCE), UNIT_BALANCE);
 
-		// Decimal is lesser
+		// Decimal is lesser (8dp foreign → 12dp native, multiplier = 1e4)
 		let smaller = AssetMetadata::new(8).unwrap();
-		assert_eq!(smaller.convert_to_native_decimals(100_000_000), UNIT_BALANCE);
+		assert_eq!(smaller.convert_to_native_decimals(100_000_000), Some(UNIT_BALANCE));
 		assert_eq!(smaller.convert_from_native_decimals(UNIT_BALANCE), 100_000_000);
-		assert_eq!(smaller.convert_to_native_decimals(12_345_678u128), 123_456_780_000u128);
+		assert_eq!(smaller.convert_to_native_decimals(12_345_678u128), Some(123_456_780_000u128));
 		assert_eq!(smaller.convert_from_native_decimals(123_456_789_123u128), 12_345_678u128);
 	}
 }
