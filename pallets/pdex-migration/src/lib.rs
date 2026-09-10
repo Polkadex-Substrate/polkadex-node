@@ -55,15 +55,30 @@ pub mod pallet {
 
 	#[derive(Encode, Decode, TypeInfo, MaxEncodedLen)]
 	#[scale_info(skip_type_params(MaxRelayers))]
-	#[codec(mel_bound(AccountId: MaxEncodedLen))]
-	pub struct BurnTxDetails<AccountId, MaxRelayers: Get<u32>> {
+	#[codec(mel_bound(AccountId: MaxEncodedLen, Balance: MaxEncodedLen))]
+	// SECURITY (H2): store agreed-upon beneficiary and amount from the first approver so that
+	// subsequent approvers must supply matching parameters. Previously the struct only tracked
+	// approver identities; the 3rd relayer's mint() arguments were used unconditionally,
+	// allowing a malicious relayer to redirect funds to an arbitrary account or inflate the amount.
+	pub struct BurnTxDetails<AccountId, Balance, MaxRelayers: Get<u32>> {
 		pub(crate) approvals: u16,
 		pub(crate) approvers: BoundedVec<AccountId, MaxRelayers>,
+		/// Beneficiary agreed upon by the first approver. All subsequent approvers must match.
+		pub(crate) beneficiary: Option<AccountId>,
+		/// Amount agreed upon by the first approver. All subsequent approvers must match.
+		pub(crate) amount: Option<Balance>,
 	}
 
-	impl<AccountId, MaxRelayers: Get<u32>> Default for BurnTxDetails<AccountId, MaxRelayers> {
+	impl<AccountId, Balance, MaxRelayers: Get<u32>> Default
+		for BurnTxDetails<AccountId, Balance, MaxRelayers>
+	{
 		fn default() -> Self {
-			Self { approvals: 0, approvers: BoundedVec::default() }
+			Self {
+				approvals: 0,
+				approvers: BoundedVec::default(),
+				beneficiary: None,
+				amount: None,
+			}
 		}
 	}
 
@@ -111,7 +126,7 @@ pub mod pallet {
 		_,
 		Blake2_128Concat,
 		T::Hash,
-		BurnTxDetails<T::AccountId, T::MaxRelayers>,
+		BurnTxDetails<T::AccountId, T::Balance, T::MaxRelayers>,
 		ValueQuery,
 	>;
 
@@ -170,6 +185,9 @@ pub mod pallet {
 		AlreadyProcessedEthBurnTx,
 		/// BoundedVec limit reached
 		RelayerLimitReached,
+		/// A relayer submitted a beneficiary or amount that does not match the first approver's
+		/// parameters — all three relayers must agree on the same mint target and value.
+		ApprovalParamsMismatch,
 	}
 
 	#[pallet::hooks]
@@ -312,46 +330,85 @@ pub mod pallet {
 			beneficiary: T::AccountId,
 			amount: T::Balance,
 			eth_hash: T::Hash,
-			burn_details: &mut BurnTxDetails<T::AccountId, T::MaxRelayers>,
+			burn_details: &mut BurnTxDetails<T::AccountId, T::Balance, T::MaxRelayers>,
 		) -> Result<(), Error<T>> {
 			let relayer_status = Relayers::<T>::get(&relayer);
 
 			if relayer_status {
 				let mut mintable_tokens = Self::mintable_tokens();
 				if amount <= mintable_tokens {
+					// SECURITY (H2): verify that every relayer agrees on the same beneficiary and
+					// amount. The first approver's values are anchored in BurnTxDetails; any later
+					// approver that submits different parameters is rejected. Without this check the
+					// 3rd approver could redirect tokens to an arbitrary account or inflate the amount.
+					match (&burn_details.beneficiary, &burn_details.amount) {
+						(None, None) => {
+							// First approver — record the agreed-upon parameters.
+							burn_details.beneficiary = Some(beneficiary.clone());
+							burn_details.amount = Some(amount);
+						},
+						(Some(stored_beneficiary), Some(stored_amount)) => {
+							// Subsequent approver — must agree with what the first approver submitted.
+							ensure!(
+								&beneficiary == stored_beneficiary,
+								Error::<T>::ApprovalParamsMismatch
+							);
+							ensure!(
+								&amount == stored_amount,
+								Error::<T>::ApprovalParamsMismatch
+							);
+						},
+						// Should be unreachable — both fields are always set together.
+						_ => return Err(Error::<T>::ApprovalParamsMismatch),
+					}
+
 					burn_details.approvals += 1;
 					ensure!(
 						burn_details.approvers.try_push(relayer.clone()).is_ok(),
 						Error::RelayerLimitReached
 					);
 					if burn_details.approvals == 3 {
-						// We need all three relayers to agree on this burn transaction
+						// We need all three relayers to agree on this burn transaction.
+						// Use the stored (consensus) beneficiary and amount — NOT the current
+						// relayer's parameters, which have already been verified to match.
+						let agreed_beneficiary = burn_details
+							.beneficiary
+							.clone()
+							.ok_or(Error::<T>::ApprovalParamsMismatch)?;
+						let agreed_amount =
+							burn_details.amount.ok_or(Error::<T>::ApprovalParamsMismatch)?;
+
 						// Mint tokens
-						let _positive_imbalance =
-							pallet_balances::Pallet::<T>::deposit_creating(&beneficiary, amount);
+						let _positive_imbalance = pallet_balances::Pallet::<T>::deposit_creating(
+							&agreed_beneficiary,
+							agreed_amount,
+						);
 						let reasons = WithdrawReasons::TRANSFER;
 						// Loads the previous locked balance for migration if any, else return zero
 						let previous_balance: T::Balance =
-							Self::previous_locked_balance(&beneficiary);
+							Self::previous_locked_balance(&agreed_beneficiary);
 						// Lock tokens for 28 days
 						pallet_balances::Pallet::<T>::set_lock(
 							MIGRATION_LOCK,
-							&beneficiary,
-							amount.saturating_add(previous_balance),
+							&agreed_beneficiary,
+							agreed_amount.saturating_add(previous_balance),
 							reasons,
 						);
 						let current_blocknumber: BlockNumberFor<T> =
 							frame_system::Pallet::<T>::current_block_number();
-						LockedTokenHolders::<T>::insert(beneficiary.clone(), current_blocknumber);
+						LockedTokenHolders::<T>::insert(
+							agreed_beneficiary.clone(),
+							current_blocknumber,
+						);
 						// Reduce possible mintable tokens
-						mintable_tokens -= amount;
+						mintable_tokens -= agreed_amount;
 						// Set reduced mintable tokens
 						MintableTokens::<T>::put(mintable_tokens);
 						EthTxns::<T>::insert(eth_hash, burn_details);
 						Self::deposit_event(Event::NativePDEXMintedAndLocked(
 							relayer,
-							beneficiary,
-							amount,
+							agreed_beneficiary,
+							agreed_amount,
 						));
 					} else {
 						EthTxns::<T>::insert(eth_hash, burn_details);

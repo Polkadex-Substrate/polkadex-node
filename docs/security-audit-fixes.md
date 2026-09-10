@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 31 fixed (as of last update) · 34 open  
+**Totals:** 65 findings in this repo · 32 fixed (as of last update) · 33 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -894,6 +894,28 @@ The pallet was declared with `#[frame_support::pallet(dev_mode)]`. In FRAME, `de
 - Added `#[pallet::without_storage_info]` on the `Pallet<T>` struct as an explicit, narrow opt-out of the `MaxEncodedLen` requirement only. Unlike `dev_mode`, this does not relax call-index, weight, or any other production check
 - Added a detailed TODO comment listing the three storage types that must be converted to `BoundedVec` / `BoundedBTreeMap` before the pallet is re-enabled at spec 393+
 
+### H2 — Third approver's beneficiary/amount used regardless of earlier approvals
+**Severity:** High  
+**Location:** `pallets/pdex-migration/src/lib.rs` — `BurnTxDetails`, `process_migration`  
+**Fixed in spec:** N/A (pdex-migration pallet)  
+**Date:** 2026-09-10
+
+**Vulnerability:**  
+`BurnTxDetails` only stored `approvals` (count) and `approvers` (list of relayer accounts). It did not record the `beneficiary` or `amount` submitted by the first two approvers. When the third (final) approver called `mint(beneficiary, amount, eth_tx)`, the code used that relayer's own parameters unconditionally to mint and lock tokens — never comparing them against what the first two relayers agreed on.
+
+An attacker who controls one relayer key could wait for two honest relayers to submit approvals for a legitimate burn, then be the third approver and supply a different `beneficiary` (redirecting the tokens to an attacker-controlled account) or a different `amount` (minting more tokens than were burned on Ethereum).
+
+**Impact:**  
+A single malicious relayer acting as the third approver can redirect newly minted PDEX to an arbitrary account or inflate the minted amount, bypassing the intended 2-of-3 consensus entirely. This is a complete break of the multi-relayer trust model and could drain all `MintableTokens`.
+
+**Changes made:**
+
+`pallets/pdex-migration/src/lib.rs`:
+- Added `beneficiary: Option<AccountId>` and `amount: Option<Balance>` fields to `BurnTxDetails`, plus a new type parameter `Balance`; updated all generic bounds, `Default` impl, `EthTxns` storage type, and `process_migration` signature accordingly
+- `process_migration`: On first approval (`None, None`), stores the caller's `beneficiary` and `amount` in the struct. On subsequent approvals, enforces `beneficiary == stored_beneficiary && amount == stored_amount` before accepting the approval — returns new `ApprovalParamsMismatch` error if they differ
+- When all three approvals are collected, reads `beneficiary` and `amount` from the struct (not the current caller's parameters) to perform the mint and lock — so even a misbehaving third relayer that somehow passed the check cannot influence the final target
+- Added `ApprovalParamsMismatch` error variant
+
 ---
 
 ## Open — Pending
@@ -904,7 +926,6 @@ The pallet was declared with `#[frame_support::pallet(dev_mode)]`. In FRAME, `de
 | H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
 | R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
-| H2 | 🟠 High | pallets/pdex-migration | Third approver's beneficiary used for mint |
 | H9 | 🟠 High | pallets/xcm-helper | XCM fee whitelist commented out; zero fee hardcoded |
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
