@@ -81,7 +81,12 @@ pub fn add_balance(
 	balances
 		.entry(asset)
 		.and_modify(|total| *total = Order::rounding_off(total.saturating_add(balance)))
-		.or_insert(balance);
+		// SECURITY (M10): apply the same rounding on first credit as on subsequent adds.
+		// Previously .or_insert(balance) stored the raw value without rounding, leaving
+		// sub-9dp dust in the trie on the first deposit for a given asset. That dust would
+		// never be touched by future operations (which round to 9dp) and could accumulate
+		// to create inconsistencies between on-chain and off-chain balances.
+		.or_insert_with(|| Order::rounding_off(balance));
 
 	state.insert(account.to_raw_vec(), balances.encode());
 	Ok(())

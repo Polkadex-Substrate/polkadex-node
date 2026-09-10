@@ -48,6 +48,15 @@ impl<'a> OffchainState<'a> {
 	}
 
 	pub fn get(&mut self, key: &Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
+		// SECURITY (M9): a key in keys_to_remove has been logically deleted but the
+		// deletion has not yet been committed to the trie. Without this check, a
+		// get() after remove() would fall through to self.trie.get() and return the
+		// stale pre-deletion value — making a deleted account appear to still exist.
+		// This would cause callers (e.g. withdrawal checks) to see a balance for an
+		// account that should have zero, or to treat a closed position as still open.
+		if self.keys_to_remove.contains(key) {
+			return Ok(None);
+		}
 		match self.cache.get(key) {
 			Some(value) => Ok(Some(value.clone())),
 			None => match self.trie.get(key) {

@@ -379,7 +379,13 @@ impl TryFrom<String> for AssetId {
 		}
 
 		match value.parse::<u128>() {
-			Ok(id) => Ok(AssetId::Asset(id)),
+			// SECURITY (M5): route through From<u128> so that string "0" resolves to the same
+			// variant as numeric 0 — both become AssetId::Polkadex. Previously this called
+			// AssetId::Asset(id) directly, so From<u128>(0) → Polkadex but
+			// TryFrom<String>("0") → Asset(0), creating two distinct representations of
+			// what callers intended as the same value. Code that compared or stored an asset
+			// obtained via one path against the other would silently diverge.
+			Ok(id) => Ok(AssetId::from(id)),
 			Err(_) => {
 				Err(anyhow::Error::msg::<String>(format!("Could not parse 'AssetId' from {value}")))
 			},
