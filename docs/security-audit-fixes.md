@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 33 fixed (as of last update) · 32 open  
+**Totals:** 65 findings in this repo · 42 fixed (as of last update) · 23 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -933,6 +933,132 @@ Without the whitelist gate, any foreign chain or relay-chain parachain can injec
 `pallets/xcm-helper/src/lib.rs`:
 - In `deposit_asset`, added a `check_whitelisted_token(asset_id)` guard immediately after `asset_id = Self::generate_asset_id_for_parachain(*id)` — before either the sibling-parachain or standard deposit branch. Returns `XcmError::AssetNotFound` and logs the rejected asset ID if the token is not whitelisted
 
+### M4 — payload.action domain separator never checked — cross-call signature replay
+**Severity:** Medium  
+**Location:** `pallets/rewards/src/lib.rs` — `validate_unsigned_claim`, `validate_unsigned_initialize_claim_rewards`  
+**Date:** 2026-09-10
+
+**Vulnerability:** `ExchangePayload` has an `action: ExchangePayloadAction` field (`Initialize` or `Claim`) included in the signed message. Both validator functions verified the cryptographic signature but never checked that `payload.action` matched the call's intended action. A signature over an `Initialize` payload could be replayed as a `Claim` call and vice versa.
+
+**Impact:** An attacker holding a valid `Initialize` signature (obtained from a user or observed on-chain) could replay it as `unsigned_claim`, calling `do_claim` on the user's account. Similarly, a `Claim` signature could trigger `do_initialize_claim_rewards` a second time, potentially overwriting the user's reward state.
+
+**Changes made:**
+`pallets/rewards/src/lib.rs`:
+- `validate_unsigned_claim`: added `ExchangePayloadAction::Claim` check as the first gate, returning `InvalidTransaction::Custom(0)` on mismatch
+- `validate_unsigned_initialize_claim_rewards`: added `ExchangePayloadAction::Initialize` check, same error code
+
+---
+
+### M5 — AssetId(0) aliasing: From<u128>(0) maps to Polkadex; TryFrom<String>("0") maps to Asset(0)
+**Severity:** Medium  
+**Location:** `primitives/polkadex/src/assets.rs` — `TryFrom<String> for AssetId`  
+**Date:** 2026-09-10
+
+**Vulnerability:** `From<u128>(0)` returned `AssetId::Polkadex` (correct) but `TryFrom<String>("0")` called `AssetId::Asset(0)` directly (incorrect). Code that stored or compared an `AssetId` obtained via one path against the other would silently diverge on the native token.
+
+**Changes made:**
+`primitives/polkadex/src/assets.rs`:
+- `TryFrom<String>`: replaced `Ok(AssetId::Asset(id))` with `Ok(AssetId::from(id))` so the string and u128 paths are always consistent
+
+---
+
+### M6 — Cross-chain decimal truncation floors to zero; small deposits credited as zero
+**Severity:** Medium  
+**Location:** `primitives/thea/src/types.rs` — `AssetMetadata::convert_to_native_decimals`  
+**Date:** 2026-09-10
+
+**Vulnerability:** When converting from a higher-precision foreign chain (e.g., 18dp Ethereum → 12dp Polkadex), the function divided by an integer power of 10. Any amount smaller than the divisor (e.g., less than 10^6 wei for 18dp→12dp) would floor to exactly 0. The old return type `u128` gave callers no way to distinguish "zero input" from "amount too small to represent" — so a deposit of a non-zero foreign amount could result in zero PDEX credited while the source-chain funds were already burned.
+
+**Changes made:**
+`primitives/thea/src/types.rs`:
+- `convert_to_native_decimals` return type changed from `u128` to `Option<u128>` — returns `None` when result is zero but input was non-zero (precision underflow)
+- `Deposit::amount_in_native_decimals` updated to propagate `Option<u128>`
+- Tests updated to use `Some(value)` and a new assertion confirms `999_999 wei (18dp) → None`
+
+---
+
+### M7 — Order Ord not a total order — equal (price, timestamp) compares Less in both directions
+**Severity:** Medium  
+**Location:** `primitives/orderbook/src/types.rs` — `impl Ord for Order`  
+**Date:** 2026-09-10
+
+**Vulnerability:** When `price` was equal and `timestamp` was also equal, the `else` branch always returned `Ordering::Less`. This meant `cmp(a, b) == Less` AND `cmp(b, a) == Less` — violating the antisymmetry requirement of `Ord`. Any `BTreeMap` or `BinaryHeap` keyed by `Order` could exhibit undefined behaviour under equal-priority entries.
+
+**Changes made:**
+`primitives/orderbook/src/types.rs`:
+- Replaced the `if self.timestamp < other.timestamp { Greater } else { Less }` pattern on both Bid and Sell sides with a full three-way match: `Less → Greater`, `Equal → Equal`, `Greater → Less`
+
+---
+
+### M8 — sub_balance fails open on withdrawal — over-withdrawal silently capped, masking insolvency
+**Severity:** Medium  
+**Location:** `pallets/ocex/src/settlement.rs` — `sub_balance`  
+**Date:** 2026-09-10
+
+**Vulnerability:** For withdrawal operations (`is_withdrawal = true`), if the requested amount exceeded the available balance by any magnitude, the function silently capped the withdrawal to the available amount and logged a warning. There was no limit on the acceptable deviation, so a real insolvency (trie holding less than users are owed) would be absorbed and hidden.
+
+**Changes made:**
+`pallets/ocex/src/settlement.rs`:
+- Added a `rounding_tolerance = Decimal::new(1, 9)` (1e-9 units) cap on acceptable deviation
+- Deviations within tolerance: existing behaviour (cap + warn log)
+- Deviations above tolerance: return `Err("NotEnoughBalance: withdrawal exceeds available balance beyond rounding tolerance")` with a SECURITY-tagged error log
+
+---
+
+### M9 — Trie read-after-remove stale — get() ignores keys_to_remove; deleted keys appear to exist
+**Severity:** Medium  
+**Location:** `pallets/ocex/src/storage.rs` — `OffchainState::get`  
+**Date:** 2026-09-10
+
+**Vulnerability:** `OffchainState::remove(key)` added the key to `keys_to_remove` and cleared it from the write cache. But `get(key)` only checked the cache, not `keys_to_remove` — a miss in the cache caused a fall-through to `self.trie.get(key)`, which returned the stale pre-deletion trie value until the next `commit()`. Logically-deleted accounts appeared to still exist with their old balances.
+
+**Changes made:**
+`pallets/ocex/src/storage.rs`:
+- Added `if self.keys_to_remove.contains(key) { return Ok(None); }` at the top of `OffchainState::get`
+
+---
+
+### M10 — add_balance skips rounding on first credit — leaves sub-9dp dust in trie
+**Severity:** Medium  
+**Location:** `pallets/ocex/src/settlement.rs` — `add_balance`  
+**Date:** 2026-09-10
+
+**Vulnerability:** `.and_modify(|total| *total = Order::rounding_off(...))` correctly rounded on subsequent credits, but `.or_insert(balance)` stored the raw unrounded value on the first credit for a given asset. Trade calculations produce 9dp-rounded results in subsequent operations, but the first entry stored raw precision, creating a lasting inconsistency in the trie.
+
+**Changes made:**
+`pallets/ocex/src/settlement.rs`:
+- Replaced `.or_insert(balance)` with `.or_insert_with(|| Order::rounding_off(balance))`
+
+---
+
+### M13 — Unlock gated on Operational flag — bridge pause freezes all completed migrations
+**Severity:** Medium  
+**Location:** `pallets/pdex-migration/src/lib.rs` — `unlock`  
+**Date:** 2026-09-10
+
+**Vulnerability:** `unlock` was gated on `Self::operational()`. Governance pausing the bridge would prevent users who had already completed migration from unlocking their tokens after the 28-day lock period expired, even though their migration was done and the tokens already belonged to them.
+
+**Changes made:**
+`pallets/pdex-migration/src/lib.rs`:
+- Removed the `if Self::operational() { ... } else { NotOperational }` check from `unlock`
+- `process_unlock` still enforces the 28-day lock period via `LockedTokenHolders`
+
+---
+
+### M16 — Fee fractions unbounded — >1 makes fee exceed trade value; <0 drains the pot
+**Severity:** Medium  
+**Location:** `primitives/polkadex/src/fees.rs` — `FeeConfig`, `pallets/ocex/src/settlement.rs` — `process_trade`  
+**Date:** 2026-09-10
+
+**Vulnerability:** `FeeConfig.maker_fraction` and `FeeConfig.taker_fraction` are `Decimal` values with no validation. A fraction > 1 causes `taker_credit.saturating_mul(fraction)` to exceed the trade value — the surplus is silently lost. A negative fraction would credit the user extra, draining the fee pot.
+
+**Changes made:**
+`primitives/polkadex/src/fees.rs`:
+- Added `FeeConfig::validate() -> Result<(), &'static str>` checking both fractions are in `[0, 1]`
+
+`pallets/ocex/src/settlement.rs`:
+- Added `maker_fees.validate()?` and `taker_fees.validate()?` at the start of `process_trade` before any balance operations
+
 ---
 
 ## Open — Pending
@@ -945,5 +1071,11 @@ Without the whitelist gate, any foreign chain or relay-chain parachain can injec
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
-| M1–M16 | 🟡 Medium | various | See full findings table |
+| M1 | 🟡 Medium | pallets/ocex, thea | Threshold truncation (C3 may cover ocex; thea TBD) |
+| M2 | 🟡 Medium | pallets/ocex | PriceOracle: no outlier rejection, unverified prices |
+| M3 | 🟡 Medium | pallets/ocex, primitives | No signature domain separation (type tag / chain ID) |
+| M11 | 🟡 Medium | runtimes/mainnet | Council votes survive membership changes |
+| M12 | 🟡 Medium | runtimes/mainnet | Council cannot be bootstrapped — delete_transaction unreachable |
+| M14 | 🟡 Medium | runtimes/mainnet | Two construct_runtime! blocks (verify if stale) |
+| M15 | 🟡 Medium | pallets/pdex-migration | All calls use weight zero — no WeightInfo declared |
 | L1–L14 | ⚪ Low | various | See full findings table |
