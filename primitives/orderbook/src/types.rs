@@ -784,12 +784,18 @@ impl Ord for Order {
 			match self.price.cmp(&other.price) {
 				// A.price < B.price => [B, A] (in buy side, the first prices should be the highest)
 				Ordering::Less => Ordering::Less,
-				// A.price == B.price => Order based on timestamp
+				// A.price == B.price => Order based on timestamp (FIFO: earlier = higher priority)
 				Ordering::Equal => {
-					if self.timestamp < other.timestamp {
-						Ordering::Greater
-					} else {
-						Ordering::Less
+					// SECURITY (M7): the previous code returned Ordering::Less for the
+					// else-branch, which meant cmp(a, b) == Less AND cmp(b, a) == Less
+					// when price AND timestamp are both equal — breaking the Ord contract
+					// (antisymmetry). Any BTreeMap or BinaryHeap keyed by Order would
+					// exhibit undefined behaviour under equal-timestamp, equal-price entries.
+					// Fix: propagate Ordering::Equal when timestamps are also equal.
+					match self.timestamp.cmp(&other.timestamp) {
+						Ordering::Less => Ordering::Greater,
+						Ordering::Equal => Ordering::Equal,
+						Ordering::Greater => Ordering::Less,
 					}
 				},
 				// A.price > B.price => [A, B]
@@ -800,13 +806,13 @@ impl Ord for Order {
 			match self.price.cmp(&other.price) {
 				// A.price < B.price => [A, B] (in sell side, the first prices should be the lowest)
 				Ordering::Less => Ordering::Greater,
-				// A.price == B.price => Order based on timestamp
+				// A.price == B.price => Order based on timestamp (FIFO: earlier = higher priority)
 				Ordering::Equal => {
-					// If price is equal, we follow the FIFO priority
-					if self.timestamp < other.timestamp {
-						Ordering::Greater
-					} else {
-						Ordering::Less
+					// SECURITY (M7): same antisymmetry fix as the Bid side above.
+					match self.timestamp.cmp(&other.timestamp) {
+						Ordering::Less => Ordering::Greater,
+						Ordering::Equal => Ordering::Equal,
+						Ordering::Greater => Ordering::Less,
 					}
 				},
 				// A.price > B.price => [B, A]

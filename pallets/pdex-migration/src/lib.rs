@@ -264,16 +264,17 @@ pub mod pallet {
 		}
 
 		/// Removes lock from the balance.
+		// SECURITY (M13): `unlock` must NOT be gated on the Operational flag.
+		// Users who completed migration (tokens already minted and locked for 28 days) must
+		// always be able to call unlock once their lock period expires — even if the bridge
+		// has been paused by governance. Pausing was intended to halt new minting, not to
+		// freeze tokens that already belong to completed migrants.
 		#[pallet::weight(Weight::default())]
 		#[pallet::call_index(3)]
 		pub fn unlock(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let beneficiary = ensure_signed(origin)?;
-			if Self::operational() {
-				Self::process_unlock(beneficiary)?;
-				Ok(Pays::No.into())
-			} else {
-				Err(Error::<T>::NotOperational)?
-			}
+			Self::process_unlock(beneficiary)?;
+			Ok(Pays::No.into())
 		}
 
 		/// Removes minted tokens locked in the migration process.

@@ -116,9 +116,32 @@ pub fn sub_balance(
 
 	if *account_balance < balance {
 		if is_withdrawal {
-			// If the deviation is smaller that system limit, then we can allow what's stored in the offchain balance
 			let deviation = balance.sub(&*account_balance);
-			log::warn!(target:"ocex","[withdrawal] balance deviation of {:?} for asset: {:?}, of account: {:?}: Withdrawing available balance",deviation,asset.to_string(), account.to_ss58check_with_version(Ss58AddressFormat::from(POLKADEX_MAINNET_SS58)));
+			// SECURITY (M8): cap tolerance for rounding drift at 1e-9 units.
+			// Deviations within this window are genuine floating-point dust; deviations
+			// larger than this indicate an insolvency or accounting bug and MUST surface
+			// as an error rather than being silently absorbed. Previously the code capped
+			// any over-withdrawal to the available balance regardless of magnitude, which
+			// would mask a situation where the trie held less than users were owed.
+			let rounding_tolerance = Decimal::new(1, 9); // 0.000000001
+			if deviation > rounding_tolerance {
+				log::error!(
+					target: "ocex",
+					"SECURITY (M8): withdrawal deviation {:?} for asset {:?} of account {:?} \
+					 exceeds rounding tolerance — possible insolvency",
+					deviation,
+					asset.to_string(),
+					account.to_ss58check_with_version(Ss58AddressFormat::from(POLKADEX_MAINNET_SS58)),
+				);
+				return Err("NotEnoughBalance: withdrawal exceeds available balance beyond rounding tolerance");
+			}
+			log::warn!(
+				target: "ocex",
+				"[withdrawal] rounding deviation {:?} for asset {:?} of account {:?}: capping to available balance",
+				deviation,
+				asset.to_string(),
+				account.to_ss58check_with_version(Ss58AddressFormat::from(POLKADEX_MAINNET_SS58)),
+			);
 			balance = *account_balance;
 		} else {
 			log::error!(target:"ocex","Asset found but balance low for asset: {:?}, of account: {:?}",asset, account);
@@ -157,6 +180,11 @@ impl<T: Config> Pallet<T> {
 			error!(target: "orderbook", "📒 Trade verification failed");
 			return Err("InvalidTrade");
 		}
+
+		// SECURITY (M16): reject trades whose fee fractions are outside [0, 1]. A fraction > 1
+		// would silently lose value through saturating_sub; a negative fraction would drain the pot.
+		maker_fees.validate().map_err(|_| "InvalidMakerFeeConfig")?;
+		taker_fees.validate().map_err(|_| "InvalidTakerFeeConfig")?;
 
 		let pot_account: AccountId = FEE_POT_PALLET_ID.into_account_truncating();
 		// Handle Fees here, and update the total fees paid, maker volume for LMP calculations

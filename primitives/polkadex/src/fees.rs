@@ -43,3 +43,23 @@ impl Default for FeeConfig {
 		}
 	}
 }
+
+impl FeeConfig {
+	/// SECURITY (M16): validate that fee fractions are within [0, 1].
+	///
+	/// A fraction > 1 would make the computed fee exceed the trade credit — the surplus is
+	/// silently lost through `saturating_sub`. A negative fraction would credit the user
+	/// instead of charging them, draining the fee pot. Governance or operator paths that
+	/// set a FeeConfig must call this before accepting the config.
+	pub fn validate(&self) -> Result<(), &'static str> {
+		let zero = Decimal::ZERO;
+		let one = Decimal::ONE;
+		if self.maker_fraction < zero || self.maker_fraction > one {
+			return Err("FeeConfig: maker_fraction must be in [0, 1]");
+		}
+		if self.taker_fraction < zero || self.taker_fraction > one {
+			return Err("FeeConfig: taker_fraction must be in [0, 1]");
+		}
+		Ok(())
+	}
+}

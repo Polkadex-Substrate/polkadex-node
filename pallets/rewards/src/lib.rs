@@ -366,6 +366,14 @@ impl<T: Config> Pallet<T> {
 		payload: &ExchangePayload<T::AccountId>,
 		signature: &T::Signature,
 	) -> TransactionValidity {
+		// SECURITY (M4): reject payloads whose action field does not match this call.
+		// Without this check a signature over an Initialize payload can be replayed
+		// against unsigned_claim (and vice versa) because the validator only verifies
+		// the cryptographic signature, not that the embedded action matches the intent.
+		if payload.action != polkadex_primitives::rewards::ExchangePayloadAction::Claim {
+			return InvalidTransaction::Custom(0).into();
+		}
+
 		let reward_info: RewardInfoForAccount<T> =
 			<Distributor<T>>::get(payload.reward_id, payload.user.clone())
 				.ok_or(InvalidTransaction::Custom(1))?;
@@ -390,6 +398,12 @@ impl<T: Config> Pallet<T> {
 		payload: &ExchangePayload<T::AccountId>,
 		signature: &T::Signature,
 	) -> TransactionValidity {
+		// SECURITY (M4): reject payloads whose action field does not match this call.
+		// A signature over a Claim payload must not be accepted here, and vice versa.
+		if payload.action != polkadex_primitives::rewards::ExchangePayloadAction::Initialize {
+			return InvalidTransaction::Custom(0).into();
+		}
+
 		let encoded = serde_json::to_vec(payload).map_err(|_| InvalidTransaction::Custom(1))?;
 		if !signature.verify(encoded.as_slice(), &payload.user) {
 			return InvalidTransaction::Custom(2).into();
