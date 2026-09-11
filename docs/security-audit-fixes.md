@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 42 fixed (as of last update) · 23 open  
+**Totals:** 65 findings in this repo · 43 fixed (as of last update) · 22 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -1061,6 +1061,29 @@ Without the whitelist gate, any foreign chain or relay-chain parachain can injec
 
 ---
 
+### M15 — All calls use weight zero — WeightInfo trait never declared in lib.rs
+**Severity:** Medium  
+**Location:** `pallets/pdex-migration/src/lib.rs`, `pallets/pdex-migration/src/weights.rs`  
+**Date:** 2026-09-11
+
+**Vulnerability:** `weights.rs` contains full benchmarked weight data (benchmarked 2024-03-05), but the `WeightInfo` trait was never declared in `lib.rs`. The five dispatchable calls (`set_migration_operational_status`, `set_relayer_status`, `mint`, `unlock`, `remove_minted_tokens`) all used `#[pallet::weight(Weight::default())]` — zero weight. This meant all migration transactions were free and exempt from block-weight limits, making them usable for block-stuffing attacks during active migration.
+
+**Impact:** During an active ERC-20 → native PDEX migration window, an attacker could spam `mint` or `unlock` calls with zero cost, consuming block space without paying fees or contributing to block weight limits.
+
+**Changes made:**  
+`pallets/pdex-migration/src/lib.rs`:
+- Declared `pub trait WeightInfo` at crate root with 5 method signatures using `frame_support::weights::Weight`
+- Implemented `WeightInfo for ()` (zero-weight fallback used in tests)
+- Added `pub mod weights;` to expose the benchmarked `SubstrateWeight<T>` implementation
+- Added `type WeightInfo: crate::WeightInfo` to `Config` trait
+- Wired all 5 calls: `#[pallet::weight(<T as Config>::WeightInfo::...)]`
+- Added `use crate::WeightInfo as _;` inside `pub mod pallet` so trait methods are in scope
+
+`pallets/pdex-migration/src/mock.rs`:
+- Added `type WeightInfo = ();` to `impl pdex_migration::Config for Test`
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1077,5 +1100,4 @@ Without the whitelist gate, any foreign chain or relay-chain parachain can injec
 | M11 | 🟡 Medium | runtimes/mainnet | Council votes survive membership changes |
 | M12 | 🟡 Medium | runtimes/mainnet | Council cannot be bootstrapped — delete_transaction unreachable |
 | M14 | 🟡 Medium | runtimes/mainnet | Two construct_runtime! blocks (verify if stale) |
-| M15 | 🟡 Medium | pallets/pdex-migration | All calls use weight zero — no WeightInfo declared |
 | L1–L14 | ⚪ Low | various | See full findings table |

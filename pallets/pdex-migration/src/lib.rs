@@ -33,8 +33,41 @@ mod tests;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 
+pub mod weights;
+
+// SECURITY (M15): all calls previously used Weight::default() (zero weight) because
+// the WeightInfo trait was never declared in lib.rs, making weights.rs dead code.
+// Wiring up WeightInfo restores correct transaction-fee and block-weight accounting.
+pub trait WeightInfo {
+	fn set_migration_operational_status() -> frame_support::weights::Weight;
+	fn set_relayer_status() -> frame_support::weights::Weight;
+	fn mint(b: u32) -> frame_support::weights::Weight;
+	fn unlock(b: u32) -> frame_support::weights::Weight;
+	fn remove_minted_tokens(b: u32) -> frame_support::weights::Weight;
+}
+
+/// Fallback zero-weight implementation used in tests (via `type WeightInfo = ()`).
+impl WeightInfo for () {
+	fn set_migration_operational_status() -> frame_support::weights::Weight {
+		frame_support::weights::Weight::zero()
+	}
+	fn set_relayer_status() -> frame_support::weights::Weight {
+		frame_support::weights::Weight::zero()
+	}
+	fn mint(_b: u32) -> frame_support::weights::Weight {
+		frame_support::weights::Weight::zero()
+	}
+	fn unlock(_b: u32) -> frame_support::weights::Weight {
+		frame_support::weights::Weight::zero()
+	}
+	fn remove_minted_tokens(_b: u32) -> frame_support::weights::Weight {
+		frame_support::weights::Weight::zero()
+	}
+}
+
 #[frame_support::pallet]
 pub mod pallet {
+	use crate::WeightInfo as _;
 	use frame_support::{
 		pallet_prelude::*,
 		traits::{
@@ -86,6 +119,8 @@ pub mod pallet {
 	#[pallet::config]
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	pub trait Config: frame_system::Config + pallet_balances::Config + pallet_sudo::Config {
+		/// Weight information for extrinsics in this pallet.
+		type WeightInfo: crate::WeightInfo;
 		/// Max Number of relayers
 		#[pallet::constant]
 		type MaxRelayers: Get<u32>;
@@ -203,7 +238,7 @@ pub mod pallet {
 		/// # Parameters
 		///
 		/// * `status`: `bool` to define if bridge enabled or disabled.
-		#[pallet::weight(Weight::default())]
+		#[pallet::weight(<T as Config>::WeightInfo::set_migration_operational_status())]
 		#[pallet::call_index(0)]
 		pub fn set_migration_operational_status(
 			origin: OriginFor<T>,
@@ -220,7 +255,7 @@ pub mod pallet {
 		///
 		/// * `relayer`: Relayer account identifier.
 		/// * `status`: Operational or not.
-		#[pallet::weight(Weight::default())]
+		#[pallet::weight(<T as Config>::WeightInfo::set_relayer_status())]
 		#[pallet::call_index(1)]
 		pub fn set_relayer_status(
 			origin: OriginFor<T>,
@@ -240,7 +275,7 @@ pub mod pallet {
 		/// * `beneficiary`: Account on which balance should be increased.
 		/// * `amount`: Amount on which balance should be increased.
 		/// * `eth_tx`: Ethereum Tx Hash.
-		#[pallet::weight(Weight::default())]
+		#[pallet::weight(<T as Config>::WeightInfo::mint(T::MaxRelayers::get()))]
 		#[pallet::call_index(2)]
 		pub fn mint(
 			origin: OriginFor<T>,
@@ -269,7 +304,7 @@ pub mod pallet {
 		// always be able to call unlock once their lock period expires — even if the bridge
 		// has been paused by governance. Pausing was intended to halt new minting, not to
 		// freeze tokens that already belong to completed migrants.
-		#[pallet::weight(Weight::default())]
+		#[pallet::weight(<T as Config>::WeightInfo::unlock(T::MaxRelayers::get()))]
 		#[pallet::call_index(3)]
 		pub fn unlock(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let beneficiary = ensure_signed(origin)?;
@@ -282,7 +317,7 @@ pub mod pallet {
 		/// # Parameters
 		///
 		/// * `beneficiary`: Tokens holder.
-		#[pallet::weight(Weight::default())]
+		#[pallet::weight(<T as Config>::WeightInfo::remove_minted_tokens(T::MaxRelayers::get()))]
 		#[pallet::call_index(4)]
 		pub fn remove_minted_tokens(
 			origin: OriginFor<T>,
