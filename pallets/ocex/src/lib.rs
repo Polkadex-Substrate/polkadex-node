@@ -2401,12 +2401,17 @@ impl<T: Config + frame_system::offchain::CreateTransactionBase<Call<T>>> Pallet<
 			return InvalidTransaction::Custom(15).into();
 		}
 
-		// (3) Threshold over the REAL set. With a non-empty set this is at least 1.
-		const THRESHOLD: u8 = 51;
-		let threshold = Percent::from_percent(THRESHOLD) * authorities.len();
-		// max(1) guarantees that even a degenerate single-authority set cannot be
-		// satisfied by zero signatures.
-		let required = core::cmp::max(threshold, 1);
+		// (3) Threshold over the REAL set — using ceiling arithmetic (SECURITY M1).
+		// Percent::mul_floor rounds down: 51% * 3 = floor(1.53) = 1, which means a
+		// single signer out of three satisfies a supposed "51% threshold". The correct
+		// ceiling formula is ceil(51 * n / 100) = (51 * n + 99) / 100, ensuring the
+		// effective threshold is always at least 51% for any non-zero set size.
+		// Examples: n=3 → 2 (67%), n=5 → 3 (60%), n=100 → 51 (51%).
+		const THRESHOLD: usize = 51;
+		let required = (THRESHOLD * authorities.len() + 99) / 100;
+		// max(1) keeps a degenerate 0-member set (should never reach here after the
+		// is_empty check above) from requiring zero signatures.
+		let required = core::cmp::max(required, 1);
 
 		if signatures.len() < required {
 			return InvalidTransaction::Custom(11).into();

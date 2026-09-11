@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 43 fixed (as of last update) · 22 open  
+**Totals:** 65 findings in this repo · 45 fixed (as of last update) · 20 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -1084,6 +1084,36 @@ Without the whitelist gate, any foreign chain or relay-chain parachain can injec
 
 ---
 
+### M1 — Threshold truncation: Percent::mul_floor makes 51% * 3 = 1 (33%)
+**Severity:** Medium  
+**Location:** `pallets/ocex/src/lib.rs` — `validate_snapshot`  
+**Date:** 2026-09-11  
+**Thea:** covered by C8 fix (already uses `(2*n)/3 + 1` ceiling)
+
+**Vulnerability:** `validate_snapshot` computed the signature threshold as `Percent::from_percent(51) * authorities.len()`. `Percent` uses floor multiplication (`mul_floor`): for a 3-validator set, `51% * 3 = floor(1.53) = 1`, so only one signature out of three was required — a 33% threshold masquerading as 51%. For a 5-validator set, two signatures sufficed (40%).
+
+**Impact:** A single compromised validator key could forge a settlement approval in any set of 3 or fewer authorities. With the `max(threshold, 1)` guard from C3, the issue was visible only for non-zero sets — but small validator sets (3–6 members) are common in early mainnet phases.
+
+**Changes made:**  
+`pallets/ocex/src/lib.rs`:
+- Replaced `Percent::from_percent(51) * authorities.len()` with integer ceiling arithmetic: `(51 * authorities.len() + 99) / 100`
+- This gives `ceil(51n/100)`: n=3 → 2 (67%), n=5 → 3 (60%), n=100 → 51 (51%)
+- Retained `core::cmp::max(required, 1)` as defence-in-depth guard
+
+---
+
+### M14 — Two construct_runtime! blocks — verified stale, no code change needed
+**Severity:** Medium  
+**Location:** `runtimes/mainnet/src/lib.rs`  
+**Date:** 2026-09-11  
+**Resolution:** Verified stale — no fix required
+
+**Finding:** The audit noted two `construct_runtime!` macro invocations in the mainnet runtime.
+
+**Verification:** All `construct_runtime!` blocks in `runtimes/mainnet/src/lib.rs` are commented out (lines 2681, 2749, 2805). The active runtime is defined with `#[frame_support::runtime]` at line 2461. No duplicate runtime definitions exist in the active code — this finding no longer applies.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1094,10 +1124,8 @@ Without the whitelist gate, any foreign chain or relay-chain parachain can injec
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
-| M1 | 🟡 Medium | pallets/ocex, thea | Threshold truncation (C3 may cover ocex; thea TBD) |
 | M2 | 🟡 Medium | pallets/ocex | PriceOracle: no outlier rejection, unverified prices |
 | M3 | 🟡 Medium | pallets/ocex, primitives | No signature domain separation (type tag / chain ID) |
 | M11 | 🟡 Medium | runtimes/mainnet | Council votes survive membership changes |
 | M12 | 🟡 Medium | runtimes/mainnet | Council cannot be bootstrapped — delete_transaction unreachable |
-| M14 | 🟡 Medium | runtimes/mainnet | Two construct_runtime! blocks (verify if stale) |
 | L1–L14 | ⚪ Low | various | See full findings table |
