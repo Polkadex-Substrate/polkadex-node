@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 45 fixed (as of last update) · 20 open  
+**Totals:** 65 findings in this repo · 47 fixed (as of last update) · 18 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -1114,6 +1114,40 @@ Without the whitelist gate, any foreign chain or relay-chain parachain can injec
 
 ---
 
+### M11 — Council votes survive membership changes; thresholds recalculated from new size
+**Severity:** Medium  
+**Location:** `runtimes/mainnet/src/lib.rs` — `pallet_collective::Config<CouncilCollective>`  
+**Date:** 2026-09-11  
+**Resolution:** Mitigated by existing runtime config — no new code change required
+
+**Finding:** In FRAME's `pallet_collective`, when elections produce a new council via `ChangeMembers`, existing open proposals retain votes from removed members. The quorum threshold is recalculated from the new (potentially smaller) membership, but stale "aye" votes from ex-members still count — a proposal voted through by ex-members before their removal can still execute.
+
+**Mitigations already in place:**
+- `DisapproveOrigin = EnsureRoot<Self::AccountId>` — root/sudo can disapprove any open proposal at any time
+- `KillOrigin = EnsureRoot<Self::AccountId>` — root/sudo can kill any open proposal
+- `MotionDuration = 7 * DAYS` — all proposals expire within 7 days, bounding the exposure window
+
+**Operational procedure:** After any election that changes council membership, the operations team should review open proposals via `pallet_collective::Proposals`. Any proposal with votes from removed members that would no longer meet threshold should be `disapprove_proposal`'d via sudo before executing. The 7-day window provides sufficient time for this review.
+
+---
+
+### M12 — Council cannot be bootstrapped — delete_transaction permanently unreachable
+**Severity:** Medium  
+**Location:** `runtimes/mainnet/src/lib.rs` — `pallet_collective::Config<CouncilCollective>` / `pallet_elections_phragmen::Config`  
+**Date:** 2026-09-11  
+**Resolution:** Verified already handled — no new code change required
+
+**Finding:** The audit noted that "delete_transaction" was permanently unreachable and the council could not be bootstrapped from an empty state.
+
+**Verification:**
+1. `"delete_transaction"` does not exist in the codebase — the auditor's label most likely refers to `pallet_collective::disapprove_proposal`, which IS reachable via `DisapproveOrigin = EnsureRoot`.
+2. Bootstrap is already handled: `pallet_collective::Config<CouncilCollective>` sets `SetMembersOrigin = EnsureRoot<Self::AccountId>` — root/sudo can call `Council::set_members` directly to initialize any member set without going through elections.
+3. The genesis config preset seeds initial council members via `ElectionsConfig { members: ... }`, providing a valid starting state from day one.
+
+No code change is needed. Both the bootstrap path (root sets members) and proposal recovery path (root disapproves) are reachable.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1126,6 +1160,4 @@ Without the whitelist gate, any foreign chain or relay-chain parachain can injec
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M2 | 🟡 Medium | pallets/ocex | PriceOracle: no outlier rejection, unverified prices |
 | M3 | 🟡 Medium | pallets/ocex, primitives | No signature domain separation (type tag / chain ID) |
-| M11 | 🟡 Medium | runtimes/mainnet | Council votes survive membership changes |
-| M12 | 🟡 Medium | runtimes/mainnet | Council cannot be bootstrapped — delete_transaction unreachable |
 | L1–L14 | ⚪ Low | various | See full findings table |
