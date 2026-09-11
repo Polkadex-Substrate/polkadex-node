@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 47 fixed (as of last update) · 18 open  
+**Totals:** 65 findings in this repo · 49 fixed (as of last update) · 16 open  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -1148,6 +1148,45 @@ No code change is needed. Both the bootstrap path (root sets members) and propos
 
 ---
 
+### M2 — PriceOracle: no outlier rejection, one tick moves average ≈50%
+**Severity:** Medium  
+**Location:** `pallets/ocex/src/lib.rs` — `EgressMessages::PriceOracle` handler  
+**Date:** 2026-09-11
+
+**Vulnerability:** The on-chain price oracle used by the LMP (Liquidity Mining Program) stored cumulative average prices computed from each operator snapshot. No bounds check was applied to incoming prices: a single malicious or erroneous snapshot could report an arbitrary price, which would dominate the average when the tick count was low (e.g., for a new market with only 1 prior tick, the new price carries 50% weight).
+
+**Impact:** A validator submitting a manipulated price during a low-tick-count period for an active LMP market could skew average prices used for reward calculations, potentially over-rewarding or under-rewarding specific trading pairs/pools.
+
+**Changes made:**  
+`pallets/ocex/src/lib.rs`:
+- Added `PRICE_ORACLE_MAX_DEVIATION_PCT = 50` constant
+- Added outlier rejection in the PriceOracle update loop: if the incoming price deviates more than ±50% from the current cumulative TWAP, the update is skipped with a `warn!` log. First-tick entries (no prior history) are accepted unconditionally so new markets can establish a baseline.
+
+---
+
+### M3 — No signature domain separation in SnapshotSummary — replay on forks
+**Severity:** Medium  
+**Location:** `pallets/ocex/src/lib.rs` — `validate_snapshot`, `pallets/ocex/src/validator.rs` — OCW signing  
+**Date:** 2026-09-11  
+**Scope:** Snapshot path fixed; `ExchangePayload` path requires exchange backend coordination
+
+**Vulnerability:** `SnapshotSummary` was signed as `key.sign(&summary.encode())` and verified as `auth.verify(&summary.encode(), sig)` — the raw SCALE bytes of the struct with no protocol prefix, chain ID, or type tag. A valid snapshot signature could be replayed on a chain fork, a testnet, or any other Polkadex deployment that uses the same validator key set.
+
+**Impact:** An attacker with access to a mainnet snapshot and signatures (e.g., obtained from an aggregator) could replay them on a testnet or fork with identical validator keys to settle withdrawals or advance state. With the custody pool drained in the attack environment, the signatures could later be presented in governance claims.
+
+**Changes made:**  
+`pallets/ocex/src/lib.rs`:
+- Added `SNAPSHOT_SIGNING_PREFIX: &[u8] = b"polkadex::ocex::snapshot::v1:"` constant
+- Added `Pallet::<T>::snapshot_signing_payload(summary)` helper that prepends the domain prefix to `summary.encode()`
+- Updated `validate_snapshot`: signature is now verified against `snapshot_signing_payload(summary)` instead of bare `summary.encode()`
+
+`pallets/ocex/src/validator.rs`:
+- Updated OCW signing: `key.sign(&signing_payload)` where `signing_payload = snapshot_signing_payload(&summary)` — both sides now use the same domain-prefixed payload
+
+**Remaining (requires exchange backend change):** `ExchangePayload` in `pallets/rewards` is signed by the off-chain exchange backend using `serde_json::to_vec(payload)` with no chain ID or type tag. Adding domain separation there requires coordinating a breaking change with the matching engine.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1158,6 +1197,5 @@ No code change is needed. Both the bootstrap path (root sets members) and propos
 | R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
-| M2 | 🟡 Medium | pallets/ocex | PriceOracle: no outlier rejection, unverified prices |
-| M3 | 🟡 Medium | pallets/ocex, primitives | No signature domain separation (type tag / chain ID) |
+| M3 (partial) | 🟡 Medium | pallets/rewards | ExchangePayload domain sep — requires exchange backend coordination |
 | L1–L14 | ⚪ Low | various | See full findings table |

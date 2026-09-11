@@ -314,7 +314,11 @@ impl<T: Config> Pallet<T> {
                         trader_metrics,
                     };
                     log::debug!(target:"ocex","Summary created by auth index: {:?}",auth_index);
-                    let signature = key.sign(&summary.encode()).ok_or("Private key not found")?;
+                    // SECURITY (M3): sign the domain-prefixed payload so the signature is bound
+                    // to polkadex::ocex::snapshot::v1 and cannot be replayed on other chains/forks.
+                    let signing_payload = crate::Pallet::<T>::snapshot_signing_payload(&summary);
+                    let signature =
+                        key.sign(&signing_payload).ok_or("Private key not found")?;
 
                     let body = serde_json::to_string(&ApprovedSnapshot {
                         summary: summary.encode(),

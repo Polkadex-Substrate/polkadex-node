@@ -115,6 +115,18 @@ type BalanceOf<T> =
 const DEPOSIT_MAX: u128 = 1_000_000_000_000_000_000_000_000_000;
 const WITHDRAWAL_MAX: u128 = 1_000_000_000_000_000_000_000_000_000;
 const TRADE_OPERATION_MIN_VALUE: u128 = 10000;
+/// SECURITY (M2): Maximum allowed price deviation per oracle update, in percent.
+/// A new price is rejected if it would move the cumulative TWAP by more than this
+/// fraction relative to the existing average. Set to 50 (%) — a price can at most
+/// move from X to 1.5X or 0.5X per snapshot, regardless of what the operator reports.
+/// First-tick prices (no prior history) are accepted unconditionally so new markets
+/// can establish their baseline price freely.
+const PRICE_ORACLE_MAX_DEVIATION_PCT: u32 = 50;
+/// SECURITY (M3): Domain separator prepended to every SnapshotSummary before it is
+/// signed by the OCW or verified on-chain. Binds the signature to this specific
+/// protocol and version, preventing replay of a valid snapshot signature on a fork
+/// or another chain instance that uses the same validator keys.
+const SNAPSHOT_SIGNING_PREFIX: &[u8] = b"polkadex::ocex::snapshot::v1:";
 
 /// Weight abstraction required for "ocex" pallet.
 pub trait OcexWeightInfo {
@@ -1798,11 +1810,38 @@ pub mod pallet {
 					},
 					EgressMessages::PriceOracle(price_map) => {
 						let mut old_price_map = <PriceOracle<T>>::get();
+						let deviation_cap =
+							Decimal::from(PRICE_ORACLE_MAX_DEVIATION_PCT) / Decimal::from(100u32);
 						for (pair, price) in price_map {
+							// SECURITY (M2): reject outlier prices that deviate more than
+							// PRICE_ORACLE_MAX_DEVIATION_PCT from the current cumulative TWAP.
+							// Without this, a single operator submitting an arbitrary price in one
+							// tick can dominate the average (especially early in a market's life
+							// where the tick count is low). First-tick entries (no prior history)
+							// are accepted unconditionally so new markets can establish a baseline.
+							if let Some((current_avg, _ticks)) = old_price_map.get(pair) {
+								if current_avg.is_sign_positive() && !current_avg.is_zero() {
+									let upper = current_avg.saturating_add(
+										current_avg.saturating_mul(deviation_cap),
+									);
+									let lower = current_avg.saturating_sub(
+										current_avg.saturating_mul(deviation_cap),
+									);
+									if *price > upper || *price < lower {
+										log::warn!(
+											target: "ocex",
+											"SECURITY (M2): price oracle update rejected for {:?} — \
+											 incoming price {:?} deviates from TWAP {:?} by more than {}%",
+											pair, price, current_avg, PRICE_ORACLE_MAX_DEVIATION_PCT
+										);
+										continue;
+									}
+								}
+							}
 							old_price_map
 								.entry(*pair)
 								.and_modify(|(old_price, ticks)| {
-									// Update the price
+									// Update the cumulative moving average
 									let sum =
 										old_price.saturating_mul(*ticks).saturating_add(*price);
 									*ticks = ticks.saturating_add(Decimal::from(1));
@@ -2358,6 +2397,18 @@ pub mod pallet {
 // functions that do not write to storage and operation functions that do.
 // - Private functions. These are your usual private utilities unavailable to other pallets.
 impl<T: Config + frame_system::offchain::CreateTransactionBase<Call<T>>> Pallet<T> {
+	/// Returns the byte payload that validators must sign for a SnapshotSummary.
+	///
+	/// SECURITY (M3): prepends `SNAPSHOT_SIGNING_PREFIX` to the SCALE-encoded summary
+	/// so the signature is bound to this protocol and version. This prevents a valid
+	/// snapshot signature from being replayed on a chain fork or another Polkadex
+	/// deployment that shares the same validator key set.
+	pub fn snapshot_signing_payload(summary: &SnapshotSummary<T::AccountId>) -> Vec<u8> {
+		let mut payload = SNAPSHOT_SIGNING_PREFIX.to_vec();
+		payload.extend_from_slice(&summary.encode());
+		payload
+	}
+
 	pub fn validate_snapshot(
 		snapshot_summary: &SnapshotSummary<T::AccountId>,
 		signatures: &Vec<(u16, <T::AuthorityId as RuntimeAppPublic>::Signature)>,
@@ -2430,7 +2481,10 @@ impl<T: Config + frame_system::offchain::CreateTransactionBase<Call<T>>> Pallet<
 			match authorities.get(*index as usize) {
 				None => return InvalidTransaction::Custom(12).into(),
 				Some(auth) => {
-					if !auth.verify(&snapshot_summary.encode(), signature) {
+					// SECURITY (M3): verify against the domain-prefixed payload so the
+					// signature is bound to this protocol (SNAPSHOT_SIGNING_PREFIX).
+					let signed_payload = Self::snapshot_signing_payload(snapshot_summary);
+					if !auth.verify(&signed_payload, signature) {
 						return InvalidTransaction::Custom(12).into();
 					}
 				},
