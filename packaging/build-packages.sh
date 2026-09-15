@@ -68,30 +68,28 @@ if [ ! -f "$BINARY" ]; then
   die "Release binary not found at $BINARY. Run with --release or build manually first."
 fi
 
-VERSION=$(file "$BINARY" | head -1 || true)
-info "Binary : $BINARY"
+info "Binary  : $BINARY ($(du -sh "$BINARY" | cut -f1))"
 
 # ── 2. Debian package ──────────────────────────────────────────────────────
 if $BUILD_DEB; then
   ensure_cargo_plugin "deb"
 
   info "Building .deb …"
-  # cargo-deb must run from the workspace root so it can find the binary
-  DEB_PATH=$(
-    cd "$REPO_ROOT" && \
-    cargo deb \
+  # Run from the workspace root so cargo-deb can locate workspace members.
+  # --manifest-path points at the node crate; --no-build skips compilation.
+  # --output sets the destination directory for the produced .deb file.
+  (cd "$REPO_ROOT" && cargo deb \
       --manifest-path "$NODE_MANIFEST" \
       --no-build \
-      --output "$DIST_DIR" \
-      2>&1 | tee /dev/stderr | grep -oE '[^ ]+\.deb$' | tail -1
-  )
+      --output "$DIST_DIR/")
 
+  DEB_PATH=$(find "$DIST_DIR" -name "*.deb" -newer "$BINARY" 2>/dev/null | sort | tail -1)
   if [ -n "$DEB_PATH" ] && [ -f "$DEB_PATH" ]; then
-    info ".deb : $DEB_PATH"
-    # Show package info
-    dpkg-deb --info "$DEB_PATH" 2>/dev/null | grep -E "Package|Version|Architecture|Installed-Size" || true
+    info ".deb    : $DEB_PATH ($(du -sh "$DEB_PATH" | cut -f1))"
+    dpkg-deb --info "$DEB_PATH" 2>/dev/null \
+      | grep -E "Package|Version|Architecture|Installed-Size" || true
   else
-    warn ".deb output path not detected — check $DIST_DIR manually."
+    warn "Could not locate the produced .deb in $DIST_DIR — check output above."
   fi
 fi
 
@@ -100,18 +98,17 @@ if $BUILD_RPM; then
   ensure_cargo_plugin "generate-rpm"
 
   info "Building .rpm …"
-  cd "$REPO_ROOT"
-  cargo generate-rpm \
-    --manifest-path "$NODE_MANIFEST" \
-    --output "$DIST_DIR" \
-    2>&1 | tee /dev/stderr || true
+  (cd "$REPO_ROOT" && cargo generate-rpm \
+      --manifest-path "$NODE_MANIFEST" \
+      --output "$DIST_DIR/")
 
-  RPM_PATH=$(find "$DIST_DIR" -name "*.rpm" -newer "$BINARY" 2>/dev/null | head -1)
+  RPM_PATH=$(find "$DIST_DIR" -name "*.rpm" -newer "$BINARY" 2>/dev/null | sort | tail -1)
   if [ -n "$RPM_PATH" ] && [ -f "$RPM_PATH" ]; then
-    info ".rpm : $RPM_PATH"
-    rpm -qip "$RPM_PATH" 2>/dev/null | grep -E "^Name|^Version|^Architecture|^Size" || true
+    info ".rpm    : $RPM_PATH ($(du -sh "$RPM_PATH" | cut -f1))"
+    rpm -qip "$RPM_PATH" 2>/dev/null \
+      | grep -E "^Name|^Version|^Architecture|^Size" || true
   else
-    warn ".rpm output path not detected — check $DIST_DIR manually."
+    warn "Could not locate the produced .rpm in $DIST_DIR — check output above."
   fi
 fi
 

@@ -26,18 +26,19 @@ Polkadex is a peer-to-peer orderbook-based cryptocurrency exchange
 built on the Substrate/Polkadot ecosystem. This package ships the
 polkadex-node binary for running a validator or full-node on mainnet."""
 assets = [
-  # binary
-  ["../../target/release/polkadex-node",   "usr/local/bin/polkadex-node",     "755"],
+  # binary — path relative to this Cargo.toml (nodes/mainnet/), resolves to workspace target/
+  ["../../target/release/polkadex-node",   "usr/local/bin/polkadex-node",                   "755"],
   # chain spec
-  ["../../extras/customSpecRaw.json",       "etc/polkadex/customSpecRaw.json", "644"],
-  # systemd unit
-  ["../../packaging/polkadex-node.service", "lib/systemd/system/polkadex-node.service", "644"],
+  ["../../extras/customSpecRaw.json",       "etc/polkadex/customSpecRaw.json",               "644"],
   # README
   ["../../README.md",                       "usr/share/doc/polkadex-node/README.md",          "644"],
   # Example env file (postinst copies this to /etc/polkadex/node.env if missing)
-  ["../../packaging/node.env.example",      "usr/share/doc/polkadex-node/node.env.example",   "644"],
+  ["../../packaging/node.env.example",      "usr/share/doc/polkadex-node/node.env.example",  "644"],
+  # NOTE: the .service file is NOT listed here — cargo-deb's systemd-units integration
+  # picks it up from maintainer-scripts dir and installs it to lib/systemd/system/ automatically.
 ]
 maintainer-scripts = "../../packaging/deb"
+# cargo-deb finds packaging/deb/polkadex-node.service and installs it + injects #DEBHELPER#
 systemd-units = { unit-name = "polkadex-node", enable = false }
 conf-files = ["/etc/polkadex/customSpecRaw.json"]
 
