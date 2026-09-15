@@ -29,6 +29,7 @@ ExecStart=/usr/local/bin/polkadex-node \
     --name="${NODE_NAME:-polkadex-node}" \
     --port=30333 \
     --rpc-port=9944 \
+    --enable-offchain-indexing=true \
     --telemetry-url="wss://telemetry.polkadot.io/submit/ 0" \
     $EXTRA_FLAGS
 
