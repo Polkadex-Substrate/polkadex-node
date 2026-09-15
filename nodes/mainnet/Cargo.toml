@@ -52,7 +52,7 @@ Polkadex is a peer-to-peer orderbook-based cryptocurrency exchange
 built on the Substrate/Polkadot ecosystem. This package ships the
 polkadex-node binary for running a validator or full-node on mainnet."""
 group       = "Applications/Internet"
-requires    = ["openssl >= 1.1", "ca-certificates"]
+requires    = "openssl >= 1.1, ca-certificates"
 
 [[package.metadata.generate-rpm.assets]]
 source = "../../target/release/polkadex-node"
