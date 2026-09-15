@@ -88,7 +88,7 @@ if $BUILD_DEB; then
   (cd "$REPO_ROOT" && cargo deb \
       --manifest-path "$NODE_MANIFEST" \
       --no-build \
-      --output "$DIST_DIR/")
+      --output "$DIST_DIR/" 2>&1 | grep -v "Only source paths starting with")
 
   DEB_PATH=$(find "$DIST_DIR" -name "*.deb" -newer "$BINARY" 2>/dev/null | sort | tail -1)
   if [ -n "$DEB_PATH" ] && [ -f "$DEB_PATH" ]; then
