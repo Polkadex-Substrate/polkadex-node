@@ -26,10 +26,18 @@ EnvironmentFile=-/etc/polkadex/node.env
 ExecStart=/usr/local/bin/polkadex-node \
     --chain=/etc/polkadex/customSpecRaw.json \
     --base-path=/var/lib/polkadex \
+    --database=rocksdb \
     --name="${NODE_NAME:-polkadex-node}" \
     --port=30333 \
     --rpc-port=9944 \
+    --no-mdns \
+    --sync=warp \
     --enable-offchain-indexing=true \
+    --bootnodes=/dns/polkadex.boot.faradaynodes.com/tcp/30716/p2p/12D3KooWENh4QpXzfaD8nonhTaSHreuRpKRTRtDTztGeJ7XxXgyw \
+    --bootnodes=/dns/boot.polkadex.ee/tcp/30333/p2p/12D3KooWPBimEphuSb48WuwEm44WoACtgnRnDPiGf8ekhurWyc95 \
+    --db-cache=2048 \
+    --prometheus-external \
+    --prometheus-port=9615 \
     --telemetry-url="wss://telemetry.polkadot.io/submit/ 0" \
     $EXTRA_FLAGS
 
