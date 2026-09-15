@@ -70,6 +70,13 @@ fi
 
 info "Binary  : $BINARY ($(du -sh "$BINARY" | cut -f1))"
 
+# Strip debug symbols before packaging to reduce package size
+if command -v strip > /dev/null 2>&1; then
+  info "Stripping debug symbols …"
+  strip --strip-debug "$BINARY"
+  info "Stripped: $BINARY ($(du -sh "$BINARY" | cut -f1))"
+fi
+
 # ── 2. Debian package ──────────────────────────────────────────────────────
 if $BUILD_DEB; then
   ensure_cargo_plugin "deb"
