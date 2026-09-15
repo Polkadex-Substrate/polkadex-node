@@ -1,0 +1,35 @@
+#!/bin/sh
+# postinst — runs after the package files are unpacked
+set -e
+
+# Create dedicated service user if it doesn't exist
+if ! id -u polkadex > /dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin \
+            --home-dir /var/lib/polkadex \
+            --comment "Polkadex Node" \
+            polkadex
+fi
+
+# Create data and config directories
+install -d -m 0750 -o polkadex -g polkadex /var/lib/polkadex
+install -d -m 0755                          /etc/polkadex
+
+# Install default env file if not already present
+if [ ! -f /etc/polkadex/node.env ]; then
+    install -m 0640 -o root -g polkadex \
+        /usr/share/doc/polkadex-node/node.env.example \
+        /etc/polkadex/node.env 2>/dev/null || true
+fi
+
+# Reload systemd so the new unit is visible
+if command -v systemctl > /dev/null 2>&1 && systemctl is-system-running > /dev/null 2>&1; then
+    systemctl daemon-reload || true
+fi
+
+echo ""
+echo "Polkadex node installed."
+echo "  Config  : /etc/polkadex/node.env  (edit NODE_NAME and EXTRA_FLAGS)"
+echo "  Data    : /var/lib/polkadex"
+echo "  Enable  : sudo systemctl enable --now polkadex-node"
+echo "  Logs    : journalctl -u polkadex-node -f"
+echo ""
