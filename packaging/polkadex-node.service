@@ -30,6 +30,7 @@ ExecStart=/usr/local/bin/polkadex-node \
     --name="${NODE_NAME:-polkadex-node}" \
     --port=30333 \
     --rpc-port=9944 \
+    --rpc-methods=unsafe \
     --no-mdns \
     --sync=warp \
     --enable-offchain-indexing=true \
