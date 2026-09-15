@@ -98,8 +98,9 @@ if $BUILD_RPM; then
   ensure_cargo_plugin "generate-rpm"
 
   info "Building .rpm …"
+  # cargo-generate-rpm does not support --manifest-path; use -p <package> from workspace root
   (cd "$REPO_ROOT" && cargo generate-rpm \
-      --manifest-path "$NODE_MANIFEST" \
+      -p polkadex-node \
       --output "$DIST_DIR/")
 
   RPM_PATH=$(find "$DIST_DIR" -name "*.rpm" -newer "$BINARY" 2>/dev/null | sort | tail -1)
