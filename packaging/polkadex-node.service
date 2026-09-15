@@ -36,6 +36,8 @@ ExecStart=/usr/local/bin/polkadex-node \
     --enable-offchain-indexing=true \
     --bootnodes=/dns/boot.polkadex.ee/tcp/30333/p2p/12D3KooWPBimEphuSb48WuwEm44WoACtgnRnDPiGf8ekhurWyc95 \
     --db-cache=2048 \
+    --prometheus-external \
+    --prometheus-port=9615 \
     --telemetry-url="wss://telemetry.polkadot.io/submit/ 0" \
     $EXTRA_FLAGS
 
