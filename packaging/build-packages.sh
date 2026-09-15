@@ -98,9 +98,9 @@ if $BUILD_RPM; then
   ensure_cargo_plugin "generate-rpm"
 
   info "Building .rpm …"
-  # cargo-generate-rpm does not support --manifest-path; use -p <package> from workspace root
-  (cd "$REPO_ROOT" && cargo generate-rpm \
-      -p polkadex-node \
+  # cargo-generate-rpm must run from the crate directory (it doesn't support --manifest-path
+  # or workspace -p resolution). Asset paths in Cargo.toml are relative to nodes/mainnet/.
+  (cd "$REPO_ROOT/nodes/mainnet" && cargo generate-rpm \
       --output "$DIST_DIR/")
 
   RPM_PATH=$(find "$DIST_DIR" -name "*.rpm" -newer "$BINARY" 2>/dev/null | sort | tail -1)
