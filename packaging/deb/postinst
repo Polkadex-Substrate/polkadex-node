@@ -21,10 +21,7 @@ if [ ! -f /etc/polkadex/node.env ]; then
         /etc/polkadex/node.env 2>/dev/null || true
 fi
 
-# Reload systemd so the new unit is visible
-if command -v systemctl > /dev/null 2>&1 && systemctl is-system-running > /dev/null 2>&1; then
-    systemctl daemon-reload || true
-fi
+#DEBHELPER#
 
 echo ""
 echo "Polkadex node installed."
