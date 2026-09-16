@@ -2001,6 +2001,11 @@ pub mod pallet {
 				withdrawal.asset,
 			)?;
 
+			// Decrement TotalAssets to keep it in sync with actual pallet custody
+			<TotalAssets<T>>::mutate(withdrawal.asset, |total| {
+				*total = total.saturating_sub(withdrawal.amount);
+			});
+
 			// on_idle_withdrawal_processor is called in a transacitonal manner so it is okay.
 			if let Some(destination) = withdrawal.destination {
 				match destination {
