@@ -1252,6 +1252,20 @@ No code change is needed. Both the bootstrap path (root sets members) and propos
 
 ---
 
+### L5 — new_random_id is block-number derived — same-block deposits produce colliding IDs
+**Severity:** Low
+**Location:** `pallets/ocex/src/lib.rs` — `new_random_id()`
+**Date:** 2026-09-16
+
+**Finding:** `new_random_id` generated an H160 ID by hashing only the block number via `blake2_128(block_number.encode())`. Every deposit extrinsic in the same block produced the same ID, causing collisions in the ingress message queue.
+
+**Changes made:**
+`pallets/ocex/src/lib.rs`:
+- Added `extrinsic_index()` to the hash input: `blake2_128(&(current_blk, extrinsic_index).encode())`
+- `extrinsic_index()` is unique per extrinsic within a block — no new storage required
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
