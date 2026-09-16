@@ -862,7 +862,8 @@ impl<T: Config> Pallet<T> {
                 next_index,
                 *score,
                 &market,
-                &Decode::decode(&mut &main.encode()[..]).unwrap(), // unwrap is fine.
+                &Decode::decode(&mut &main.encode()[..])
+                    .map_err(|_| "Failed to decode main AccountId")?
             )?;
         }
         config.index = next_index;
@@ -889,7 +890,8 @@ impl<T: Config> Pallet<T> {
                 let mut total_fees_paid = Decimal::zero();
                 // Loop over all main accounts and compute their final scores
                 for (main_type, _) in <Accounts<T>>::iter() {
-                    let main: AccountId = Decode::decode(&mut &main_type.encode()[..]).unwrap();
+                    let main: AccountId = Decode::decode(&mut &main_type.encode()[..])
+                        .map_err(|_| "Failed to decode main AccountId")?;
                     let fees_paid =
                         get_fees_paid_by_main_account_in_quote(state, epoch, &pair, &main)?;
                     let final_score = Self::compute_score(state, &main, pair, epoch)?;
@@ -930,8 +932,7 @@ impl<T: Config> Pallet<T> {
         //  Check if the maker volume of this main is greater than 0.25% of the
         // total maker volume in the previous epoch, otherwise ignore this account
         if maker_volume
-            <= Decimal::from_f64(0.0025)
-                .unwrap()
+            <= Decimal::new(25, 4)
                 .saturating_mul(total_maker_volume_in_last_epoch)
         {
             return Ok(Decimal::zero());

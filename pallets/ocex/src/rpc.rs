@@ -109,7 +109,8 @@ impl<T: Config> Pallet<T> {
 		for (main, _) in <Accounts<T>>::iter() {
 			//      3. Compute sum of all balances of all assets
 			let balances: BTreeMap<AssetId, Decimal> =
-				Self::get_balances(&mut state, &Decode::decode(&mut &main.encode()[..]).unwrap())?;
+				Self::get_balances(&mut state, &Decode::decode(&mut &main.encode()[..])
+				.map_err(|_| crate::Error::<T>::FailedToDecodeAccount)?)?;
 			for (asset, balance) in balances {
 				offchain_inventory
 					.entry(asset)

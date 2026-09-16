@@ -326,6 +326,8 @@ pub mod pallet {
 	pub enum Error<T> {
 		/// Unable to convert given balance to internal Decimal data type
 		FailedToConvertDecimaltoBalance,
+		/// Failed to SCALE-decode an AccountId from on-chain storage
+		FailedToDecodeAccount,
 		RegisterationShouldBeSignedByMainAccount,
 		/// Caller is not authorized to claim the withdrawal.
 		/// Normally, when Sender != main_account.
