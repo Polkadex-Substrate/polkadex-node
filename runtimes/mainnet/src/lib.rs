@@ -1651,12 +1651,6 @@ impl pallet_democracy::Config for Runtime {
 	type Slash = Treasury;
 }
 
-impl pallet_sudo::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type RuntimeCall = RuntimeCall;
-	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
-}
-
 impl<LocalCall> frame_system::offchain::CreateTransaction<LocalCall> for Runtime
 where
 	RuntimeCall: From<LocalCall>,
@@ -2590,8 +2584,9 @@ mod runtime {
 
     // #44 was TheaExecutor - REMOVED
 
-    #[runtime::pallet_index(45)]
-    pub type Sudo = pallet_sudo::Pallet<Runtime>;
+    // #45 was Sudo - REMOVED (F-002: Sudo::Key storage slot on mainnet still
+    // holds the 2021 genesis root key; re-adding pallet_sudo at 392 would hand
+    // that key Root over mainnet at enactment)
 
     #[runtime::pallet_index(46)]
     pub type AssetConversion = pallet_asset_conversion::Pallet<Runtime>;
