@@ -139,6 +139,9 @@ impl Signature {
 	/// * `public_keys`: Public key to aggregate public key from.
 	/// * `message`: Message to verify.
 	pub fn verify(self, public_keys: &[Public], message: &[u8]) -> bool {
+		if public_keys.is_empty() {
+			return false;
+		}
 		// Aggregate the public keys
 		let mut g2_points = Vec::new();
 		for public_key in public_keys {
@@ -282,7 +285,7 @@ impl TryFrom<&[u8]> for Signature {
 	type Error = ();
 
 	fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-		if value.len() != 196 {
+		if value.len() != 48 {
 			return Err(());
 		}
 		Ok(Signature(value.try_into().unwrap()))
@@ -304,7 +307,7 @@ impl CryptoType for Signature {
 }
 
 impl ByteArray for Signature {
-	const LEN: usize = 96;
+	const LEN: usize = 48;
 }
 
 impl AsMut<[u8]> for Signature {
