@@ -941,11 +941,15 @@ impl<T: Config> Pallet<T> {
         // Get Q_score and uptime information from offchain state
         let (q_score, uptime) = get_q_score_and_uptime(state, epoch, &pair, main)?;
         let uptime = Decimal::from(uptime);
-        // Compute the final score
+        // Clamp to zero before pow — negative base with fractional exponent
+        // produces NaN in f64 and panics the OCW
+        let q_score = q_score.max(Decimal::zero());
+        let maker_volume = maker_volume.max(Decimal::zero());
+        // Compute the final score: q_final = (q_score)^0.15 * (uptime)^5 * (maker_volume)^0.85
         let final_score = q_score
             .pow(0.15f64)
             .saturating_mul(uptime.pow(5.0f64))
-            .saturating_mul(maker_volume.pow(0.85f64)); // q_final = (q_score)^0.15*(uptime)^5*(maker_volume)^0.85
+            .saturating_mul(maker_volume.pow(0.85f64));
         Ok(final_score)
     }
 
