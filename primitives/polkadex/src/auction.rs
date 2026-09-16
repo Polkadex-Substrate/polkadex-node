@@ -19,6 +19,7 @@
 use codec::{Decode, Encode, MaxEncodedLen, DecodeWithMemTracking};
 use frame_support::pallet_prelude::TypeInfo;
 use frame_support::{Deserialize, Serialize};
+use sp_runtime::traits::Zero;
 use sp_std::collections::btree_map::BTreeMap;
 
 #[derive(
@@ -28,6 +29,18 @@ pub struct FeeDistribution<AccountId, BlockNo> {
 	pub recipient_address: AccountId,
 	pub auction_duration: BlockNo,
 	pub burn_ration: u8,
+}
+
+impl<AccountId, BlockNo: Zero + PartialOrd> FeeDistribution<AccountId, BlockNo> {
+	pub fn validate(&self) -> Result<(), &'static str> {
+		if self.burn_ration > 100 {
+			return Err("FeeDistribution: burn_ration must be in [0, 100]");
+		}
+		if self.auction_duration <= BlockNo::zero() {
+			return Err("FeeDistribution: auction_duration must be > 0");
+		}
+		Ok(())
+	}
 }
 
 #[derive(Clone, Encode, Decode, TypeInfo, Debug, PartialEq)]

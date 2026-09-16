@@ -47,7 +47,7 @@ use sp_application_crypto::RuntimeAppPublic;
 use sp_core::crypto::KeyTypeId;
 use sp_runtime::{
 	traits::{AccountIdConversion, UniqueSaturatedInto},
-	Percent, SaturatedConversion, Saturating,
+	DispatchError, Percent, SaturatedConversion, Saturating,
 };
 use sp_std::{ops::Div, prelude::*};
 // Re-export pallet items so that they can be accessed from the crate namespace.
@@ -1095,6 +1095,7 @@ pub mod pallet {
 			fee_distribution: FeeDistribution<T::AccountId, BlockNumberFor<T>>,
 		) -> DispatchResult {
 			T::GovernanceOrigin::ensure_origin(origin)?;
+			fee_distribution.validate().map_err(DispatchError::Other)?;
 			<FeeDistributionConfig<T>>::put(fee_distribution);
 			Ok(())
 		}
@@ -2432,6 +2433,15 @@ impl<T: Config + frame_system::offchain::CreateTransactionBase<Call<T>>> Pallet<
 
 		if T::OBWithdrawalLimit::get() < snapshot_summary.withdrawals.len() as u32 {
 			return InvalidTransaction::Custom(13).into();
+		}
+
+		// (L6) Reject snapshots that contain zero-fee withdrawals; a zero fee is
+		// the off-chain engine's signal for "no fee charged", which would let
+		// users withdraw for free and spam the withdrawal queue.
+		for w in &snapshot_summary.withdrawals {
+			if w.fees <= Decimal::ZERO {
+				return InvalidTransaction::Custom(17).into();
+			}
 		}
 
 		// AUTHENTICATION HARDENING (2026-08-12).

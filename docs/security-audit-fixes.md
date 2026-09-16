@@ -1266,6 +1266,27 @@ No code change is needed. Both the bootstrap path (root sets members) and propos
 
 ---
 
+### L6 — set_fee_distribution / validate_snapshot accept zero-fee withdrawals
+**Severity:** Low
+**Location:** `primitives/polkadex/src/auction.rs`, `pallets/ocex/src/lib.rs`
+**Date:** 2026-09-16
+
+**Finding:** Two gaps:
+1. `set_fee_distribution` (call_index 21) stored `FeeDistribution` with no bounds validation — `burn_ration` could exceed 100 and `auction_duration` could be 0, permanently stalling the auction timing.
+2. `validate_snapshot` accepted snapshots where withdrawal `fees <= 0`, letting the off-chain engine submit zero-fee withdrawals. With no floor enforced on-chain, any withdrawal queue entry could have `fees = 0`, enabling free spam withdrawals.
+
+The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDeposit::get(), DepositAmountTooLow)` in `do_deposit`.
+
+**Changes made:**
+`primitives/polkadex/src/auction.rs`:
+- Added `FeeDistribution::validate()`: rejects `burn_ration > 100` and `auction_duration <= 0`
+
+`pallets/ocex/src/lib.rs`:
+- Called `fee_distribution.validate().map_err(DispatchError::Other)?` in `set_fee_distribution` before storing
+- Added loop in `validate_snapshot` (before auth checks) that returns `InvalidTransaction::Custom(17)` for any withdrawal with `fees <= Decimal::ZERO`
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1277,4 +1298,4 @@ No code change is needed. Both the bootstrap path (root sets members) and propos
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M3 (partial) | 🟡 Medium | pallets/rewards | ExchangePayload domain sep — requires exchange backend coordination |
-| L5–L14 | ⚪ Low | various | See full findings table |
+| L7–L14 | ⚪ Low | various | See full findings table |
