@@ -1423,7 +1423,10 @@ pub mod pallet {
 				entropy[0..4].copy_from_slice(&prefix);
 			}
 			let current_blk = frame_system::Pallet::<T>::current_block_number();
-			entropy[4..].copy_from_slice(&sp_io::hashing::blake2_128(&((current_blk).encode())));
+			let extrinsic_index = frame_system::Pallet::<T>::extrinsic_index().unwrap_or(0);
+			entropy[4..].copy_from_slice(&sp_io::hashing::blake2_128(
+				&(current_blk, extrinsic_index).encode(),
+			));
 			H160::from(entropy)
 		}
 
