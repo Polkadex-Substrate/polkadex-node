@@ -1187,6 +1187,71 @@ No code change is needed. Both the bootstrap path (root sets members) and propos
 
 ---
 
+### L1 — unwrap()/expect() in off-chain and RPC paths
+**Severity:** Low
+**Location:** `pallets/ocex/src/validator.rs`, `pallets/ocex/src/rpc.rs`
+**Date:** 2026-09-16
+
+**Finding:** Three `unwrap()` calls in non-test production code paths that would crash the offchain worker or RPC handler:
+- `validator.rs` `store_q_scores()` and `compute_trader_metrics()`: `Decode::decode(&mut &main.encode()[..]).unwrap()`
+- `validator.rs` `compute_score()`: `Decimal::from_f64(0.0025).unwrap()`
+- `rpc.rs` `calculate_inventory_deviation()`: `Decode::decode(...).unwrap()`
+
+**Changes made:**
+- Replaced `Decode::decode(...).unwrap()` with `.map_err(|_| "Failed to decode main AccountId")?` in both OCW paths
+- Replaced `Decimal::from_f64(0.0025).unwrap()` with infallible `Decimal::new(25, 4)`
+- Replaced `Decode::decode(...).unwrap()` in RPC path with `.map_err(|_| Error::<T>::FailedToDecodeAccount)?`
+- Added `FailedToDecodeAccount` error variant to `Error<T>` enum
+
+---
+
+### L2 — Decimal::pow on attacker-influenced volumes can panic the offchain worker
+**Severity:** Low
+**Location:** `pallets/ocex/src/validator.rs` — `compute_score()`
+**Date:** 2026-09-16
+
+**Finding:** `Decimal::pow(f64)` converts internally to `f64`. A negative base with a fractional exponent (e.g. `(-1.0_f64).powf(0.15)`) produces `NaN`, which cannot convert back to `Decimal` and panics the OCW. `maker_volume` comes from attacker-influenced offchain state; `q_score` from computed metrics — either could theoretically be negative.
+
+**Changes made:**
+`pallets/ocex/src/validator.rs`:
+- Added `let q_score = q_score.max(Decimal::zero())` and `let maker_volume = maker_volume.max(Decimal::zero())` before the power formula
+- Negative volume/score semantically contributes nothing to the reward score, so clamping to zero is correct
+
+---
+
+### L3 — TotalAssets never decremented and never read by any guard
+**Severity:** Low
+**Location:** `pallets/ocex/src/lib.rs` — `on_idle_withdrawal_processor()`
+**Date:** 2026-09-16
+
+**Finding:** `TotalAssets` was incremented on every deposit in `do_deposit()` but never decremented on withdrawal, causing the stored value to drift upward indefinitely. The storage item was also never read by any guard or invariant check, making it misleading.
+
+**Changes made:**
+`pallets/ocex/src/lib.rs`:
+- Added `<TotalAssets<T>>::mutate(withdrawal.asset, |total| { *total = total.saturating_sub(withdrawal.amount); })` after a successful transfer in `on_idle_withdrawal_processor()`
+
+---
+
+### L4 — Wrong length constants and empty key set accepted in bls-primitives
+**Severity:** Low
+**Location:** `primitives/bls/src/lib.rs`
+**Date:** 2026-09-16
+
+**Finding:** Three bugs in the deprecated `bls-primitives` module:
+1. `TryFrom<&[u8]> for Signature` checked `len != 196` but `Signature` is `[u8; 48]`. Any 196-byte input passed the guard then panicked on `try_into::<[u8; 48]>()`
+2. `ByteArray::LEN` was `96` instead of `48` (G1 compressed, min_sig scheme)
+3. `verify()` accepted an empty `public_keys` slice — aggregated key collapses to `G2::identity()`, allowing an all-zeros signature to verify
+
+**Changes made:**
+`primitives/bls/src/lib.rs`:
+- Fixed `TryFrom` length check from `196` to `48`
+- Fixed `ByteArray::LEN` from `96` to `48`
+- Added early `return false` for empty `public_keys` in `verify()`
+
+**Not fixed:** Rogue-key / proof-of-possession redesign — module is explicitly marked deprecated (host function only, not for production use). Redesign is out of scope for a deprecated module.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1198,4 +1263,4 @@ No code change is needed. Both the bootstrap path (root sets members) and propos
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M3 (partial) | 🟡 Medium | pallets/rewards | ExchangePayload domain sep — requires exchange backend coordination |
-| L1–L14 | ⚪ Low | various | See full findings table |
+| L5–L14 | ⚪ Low | various | See full findings table |
