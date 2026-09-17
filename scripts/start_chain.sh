@@ -28,7 +28,7 @@ start_boot_node() {
   # Production bootnodes must use --node-key-file pointing to a key outside the repo.
   install -d ../ind_validators/validator1
   cd ../ind_validators/validator1
-  ../../target/$TARGET/polkadex-node --validator --base-path ./bootnode -lthea=trace -lorderbook=trace --rpc-port=9943 --thea-dummy-mode --chain=../../scripts/customSpecRaw.json --node-key=1f64f01767da8258fcb986bd68d6dff93dfcd49d0fc753cea27cf37ce91c3684 >out_boot_node 2>&1 &
+  ../../target/$TARGET/polkadex-node --validator --base-path ./bootnode -lthea=trace -lorderbook=trace --rpc-port=9943 --chain=../../scripts/customSpecRaw.json --node-key=1f64f01767da8258fcb986bd68d6dff93dfcd49d0fc753cea27cf37ce91c3684 >out_boot_node 2>&1 &
   BOOT_NODE_PID=$(echo $!)
   cd ../../scripts
 }
@@ -37,7 +37,7 @@ start_validator_1() {
   echo "Starting validator 1..."
   install -d ../ind_validators/validator2
   cd ../ind_validators/validator2
-  ../../target/$TARGET/polkadex-node --validator --port 30334 --base-path ./validator01  --thea-dummy-mode \
+  ../../target/$TARGET/polkadex-node --validator --port 30334 --base-path ./validator01 \
     -lthea=trace -lorderbook=trace --rpc-port=9944 --chain=../../scripts/customSpecRaw.json \
     --bootnodes /ip4/127.0.0.1/tcp/30333/p2p/12D3KooWRozCnsH7zCYiNVpCRqgaoxukPdYxqaPQNs9rdDMDeN4t \
     --bootnodes /ip4/127.0.0.1/tcp/30335/p2p/12D3KooWCMKvu1tJKQBjDZ4hN1saTP6D58e4WkwLZwks5cPpxqY7 \
@@ -50,7 +50,7 @@ start_validator_2() {
   echo "Starting validator 2..."
   install -d ../ind_validators/validator3
   cd ../ind_validators/validator3
-  ../../target/$TARGET/polkadex-node --validator --port 30335 --base-path ./validator02 -lthea=trace --thea-dummy-mode \
+  ../../target/$TARGET/polkadex-node --validator --port 30335 --base-path ./validator02 -lthea=trace \
     --rpc-port=9945 --chain=../../scripts/customSpecRaw.json \
     --bootnodes /ip4/127.0.0.1/tcp/30333/p2p/12D3KooWRozCnsH7zCYiNVpCRqgaoxukPdYxqaPQNs9rdDMDeN4t \
     --bootnodes /ip4/127.0.0.1/tcp/30334/p2p/12D3KooWEVBdwVmV1BeAdtqzhjANK31ibYmLQXxEoeai4fx7KhNh \

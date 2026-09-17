@@ -20,5 +20,4 @@
 # stores its own key under base-path. Never pass --node-key in production; instead
 # let the node auto-generate or use --node-key-file pointing to a file outside the repo.
 ../target/release/polkadex-node --validator --base-path ./bootnode -lthea=trace -lorderbook=trace \
---rpc-port=9944 --chain=../scripts/customSpecRaw.json \
---thea-dummy-modek
+--rpc-port=9944 --chain=../scripts/customSpecRaw.json
