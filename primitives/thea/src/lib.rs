@@ -121,6 +121,8 @@ impl TheaIncomingExecutor for () {
 	}
 }
 
+// SECURITY (L10): gate benchmark helper so it cannot be called in production builds
+#[cfg(feature = "runtime-benchmarks")]
 pub trait TheaBenchmarkHelper {
 	fn set_metadata(asset_id: AssetId);
 }

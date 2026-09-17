@@ -1331,6 +1331,21 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 
 ---
 
+### L10 — Benchmark helper trait not cfg-gated
+**Severity:** Low  
+**Location:** `primitives/thea/src/lib.rs`  
+**Fixed in spec:** 392  
+**Date:** 2026-09-17
+
+**Vulnerability:** `TheaBenchmarkHelper` was declared as a public, unconditionally-compiled trait. Any production runtime that implemented it could call `set_metadata` outside of benchmark context, bypassing normal governance. The trait itself had no `#[cfg(feature = "runtime-benchmarks")]` guard while every consumer of it (the Config type in `pallets/thea/src/lib.rs`, the mock assignment, the benchmarking module) was already gated.
+
+**Changes made:**
+- `primitives/thea/src/lib.rs`: Added `#[cfg(feature = "runtime-benchmarks")]` on the `TheaBenchmarkHelper` trait definition
+
+**Notes:** OCEX benchmarking module (`pallets/ocex/src/benchmarking.rs`) is gated with `#![cfg(feature = "runtime-benchmarks")]`. No ungated governance-bypassing helpers found in liquidity-mining (benchmarks not yet written). No further changes needed.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1342,4 +1357,4 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M3 (partial) | 🟡 Medium | pallets/rewards | ExchangePayload domain sep — requires exchange backend coordination |
-| L10–L14 | ⚪ Low | various | See full findings table |
+| L11–L14 | ⚪ Low | various | See full findings table |
