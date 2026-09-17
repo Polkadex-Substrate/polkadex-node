@@ -1315,6 +1315,22 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 
 ---
 
+### L9 — Market orders have no slippage bound
+**Severity:** Low
+**Location:** `primitives/orderbook/src/types.rs` — `Order::verify_config`
+**Date:** 2026-09-17
+
+**Finding:** The market order ASK branch in `verify_config` only checked `qty_step_size`, skipping the `min_volume`/`max_volume` bounds that the BID branch enforces. No `worst_price` field exists on `Order`, so a market order can sweep the book to any fill price with no user-set bound.
+
+**Changes made:**
+`primitives/orderbook/src/types.rs`:
+- Added `qty > Decimal::ZERO`, `qty >= config.min_volume`, and `qty <= config.max_volume` to the ASK market order branch — now symmetric with the BID branch
+- Added `SECURITY (L9)` comment noting that a `worst_price` slippage field should be added to `Order` when OCEX is re-enabled
+
+**Deferred:** Adding a `worst_price` field to `Order` and enforcing it in the off-chain engine requires coordination with the exchange backend. Deferred to OCEX re-enable.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1326,4 +1342,4 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M3 (partial) | 🟡 Medium | pallets/rewards | ExchangePayload domain sep — requires exchange backend coordination |
-| L9–L14 | ⚪ Low | various | See full findings table |
+| L10–L14 | ⚪ Low | various | See full findings table |

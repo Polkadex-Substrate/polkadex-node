@@ -674,8 +674,17 @@ impl Order {
 			},
 			OrderType::MARKET => {
 				if self.side == OrderSide::Ask {
-					// for ask order we are checking base order qty
-					is_market_same && self.qty.rem(config.qty_step_size).is_zero()
+					// SECURITY (L9): ask side previously only checked qty_step_size,
+					// skipping the min/max volume bounds that the bid side enforces.
+					// qty is the base quantity; volume = qty * fill_price is unknown at
+					// submission time, so we enforce qty bounds directly. A worst_price
+					// field should be added to Order when OCEX is re-enabled so users
+					// can bound their slippage.
+					is_market_same
+						&& self.qty > Decimal::ZERO
+						&& self.qty >= config.min_volume
+						&& self.qty <= config.max_volume
+						&& self.qty.rem(config.qty_step_size).is_zero()
 				} else {
 					// for bid order we are checking quote order qty
 					is_market_same
