@@ -17,7 +17,10 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 sudo apt install -y git clang curl libssl-dev llvm libudev-dev
-curl https://getsubstrate.io -sSf | bash -s -- --fast
+# SECURITY (L12): getsubstrate.io is a retired domain; replaced with the canonical rustup installer
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+# shellcheck source=/dev/null
+source "$HOME/.cargo/env"
 rustup default stable
 rustup update
 rustup update nightly

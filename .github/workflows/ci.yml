@@ -65,7 +65,8 @@ jobs:
           components: rustfmt, clippy
       - name: Install .toml files linter
         run: |
-          curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-linux-x86_64.gz \
+          # SECURITY (L12): pin taplo version to avoid pulling an unreviewed latest
+          curl -fsSL https://github.com/tamasfe/taplo/releases/download/0.9.3/taplo-linux-x86_64.gz \
           | gzip -d - | install -m 755 /dev/stdin /usr/local/bin/taplo
       - name: Checkout to the current branch
         uses: actions/checkout@v3
@@ -114,6 +115,11 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Check Clippy
         run: cargo clippy -- -D warnings
+      # SECURITY (L12): audit dependencies for known CVEs
+      - name: Security audit
+        run: |
+          cargo install cargo-audit --locked --quiet
+          cargo audit
       - name: Test Project
         run: RUSTFLAGS="-D warnings" cargo test --workspace
       - name: Run Cargo Tarpaulin

@@ -1364,6 +1364,25 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 
 ---
 
+### L12 — build.sh pipes retired domain into bash; unpinned tool downloads; no cargo-audit
+**Severity:** Low  
+**Location:** `build.sh`, `.github/workflows/ci.yml`  
+**Fixed in spec:** 392  
+**Date:** 2026-09-17
+
+**Vulnerability:** Three supply-chain weaknesses:
+1. `build.sh` piped from `https://getsubstrate.io` — a domain that Parity retired. A domain takeover would execute arbitrary code on every developer machine running the script.
+2. CI workflow downloaded taplo (TOML linter) via `releases/latest/download` — no version pin, so a malicious release would immediately run in CI.
+3. No `cargo audit` step — known CVEs in Cargo.lock dependencies would go undetected.
+
+**Changes made:**
+- `build.sh`: Replaced `getsubstrate.io` pipe with the canonical `sh.rustup.rs` rustup installer; added `source "$HOME/.cargo/env"` so subsequent rustup calls find the toolchain.
+- `.github/workflows/ci.yml`: Pinned taplo to version `0.9.3` (the last known-good release at audit time); added a `cargo install cargo-audit --locked && cargo audit` step before the test run.
+
+**Notes:** The main `dockerfile` builder stage already uses `rust:1.91-slim-bookworm` (version-pinned). The `.docker/ci/release/Dockerfile` uses `ubuntu:22.04` (not `latest`). No Dockerfile changes needed.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1375,5 +1394,5 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M3 (partial) | 🟡 Medium | pallets/rewards | ExchangePayload domain sep — requires exchange backend coordination |
-| L12–L14 | ⚪ Low | various | See full findings table |
+| L13–L14 | ⚪ Low | various | See full findings table |
 
