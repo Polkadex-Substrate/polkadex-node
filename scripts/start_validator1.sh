@@ -16,6 +16,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+# SECURITY (L11): DEV-ONLY script. Node key is omitted — the node generates and
+# stores its own key under base-path. Never pass --node-key in production; instead
+# let the node auto-generate or use --node-key-file pointing to a file outside the repo.
 ../target/release/polkadex-node --validator --base-path ./bootnode -lthea=trace -lorderbook=trace \
 --rpc-port=9944 --chain=../scripts/customSpecRaw.json \
---node-key=1f64f01767da8258fcb986bd68d6dff93dfcd49d0fc753cea27cf37ce91c3684 --thea-dummy-modek
+--thea-dummy-modek

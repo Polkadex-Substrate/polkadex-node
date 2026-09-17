@@ -22,6 +22,10 @@ set -e
 
 start_boot_node() {
   echo "Starting boot node..."
+  # SECURITY (L11): DEV-ONLY. Node keys below are for local test networks only.
+  # They are required here so that validators can reference this bootnode by its
+  # deterministic peer ID in --bootnodes. NEVER reuse these keys on mainnet/testnet.
+  # Production bootnodes must use --node-key-file pointing to a key outside the repo.
   install -d ../ind_validators/validator1
   cd ../ind_validators/validator1
   ../../target/$TARGET/polkadex-node --validator --base-path ./bootnode -lthea=trace -lorderbook=trace --rpc-port=9943 --thea-dummy-mode --chain=../../scripts/customSpecRaw.json --node-key=1f64f01767da8258fcb986bd68d6dff93dfcd49d0fc753cea27cf37ce91c3684 >out_boot_node 2>&1 &

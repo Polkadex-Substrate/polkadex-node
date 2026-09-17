@@ -1346,6 +1346,24 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 
 ---
 
+### L11 — Hardcoded libp2p node keys — predictable peer identities
+**Severity:** Low  
+**Location:** `scripts/start_validator1.sh`, `scripts/start_validator2.sh`, `scripts/start_validator3.sh`, `scripts/start_chain.sh`  
+**Fixed in spec:** 392  
+**Date:** 2026-09-17
+
+**Vulnerability:** Three hardcoded 32-byte Ed25519 libp2p node keys were committed in dev scripts. Any node that knows the key can derive the peer ID and target those nodes specifically (eclipse attack, targeted denial of service). Although these keys are only used in local dev chains (referencing `customSpecRaw.json`, not mainnet), committing them creates a false template for operators who might cargo-cult `--node-key` into production.
+
+**Changes made:**
+- `scripts/start_validator1.sh`: Removed `--node-key`; added `SECURITY (L11)` comment. Node now generates its own key on first run stored in base-path.
+- `scripts/start_validator2.sh`: Same.
+- `scripts/start_validator3.sh`: Same.
+- `scripts/start_chain.sh`: Kept the bootnode's hardcoded key (required so validators can reference its peer ID in `--bootnodes`), but added a prominent `DEV-ONLY` warning comment. Validator node keys in this script were also removed.
+
+**Notes:** Production mainnet bootnode uses a DNS multiaddr (`/dns/mainnet-eu-1.polkadex.trade/...`) — not these keys. The actual mainnet node key is not committed anywhere in this repo.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1357,4 +1375,5 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M3 (partial) | 🟡 Medium | pallets/rewards | ExchangePayload domain sep — requires exchange backend coordination |
-| L11–L14 | ⚪ Low | various | See full findings table |
+| L12–L14 | ⚪ Low | various | See full findings table |
+
