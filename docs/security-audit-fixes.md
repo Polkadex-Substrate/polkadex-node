@@ -1300,6 +1300,21 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 
 ---
 
+### L8 — ProxyType::Any wraps OCEX and THEA calls
+**Severity:** Low
+**Location:** `runtimes/mainnet/src/lib.rs` — `InstanceFilter<RuntimeCall> for ProxyType`
+**Date:** 2026-09-17
+
+**Finding:** `ProxyType::Any => true` and `ProxyType::NonTransfer` both allow OCEX and THEA calls through. A proxy key with `Any` permission can sign `submit_snapshot` and `submit_signed_outgoing_messages` on behalf of a validator, turning a compromised proxy into a full custody/bridge signing capability.
+
+**Changes made:**
+`runtimes/mainnet/src/lib.rs`:
+- Added `SECURITY (L8)` comment on `ProxyType::Any` documenting that `OcexPallet` and `Thea` calls must be explicitly excluded when those pallets are re-enabled. Runtime call variants do not exist while the pallets are dormant, so the active filter change is deferred to the re-enable PR.
+
+**Deferred:** Full filter fix (`| RuntimeCall::OcexPallet(..) | RuntimeCall::Thea(..)`) must be added to `NonTransfer` and excluded from `Any` in the same PR that re-enables OCEX/THEA.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1311,4 +1326,4 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M3 (partial) | 🟡 Medium | pallets/rewards | ExchangePayload domain sep — requires exchange backend coordination |
-| L8–L14 | ⚪ Low | various | See full findings table |
+| L9–L14 | ⚪ Low | various | See full findings table |

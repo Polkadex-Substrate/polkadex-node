@@ -870,6 +870,14 @@ impl Default for ProxyType {
 impl InstanceFilter<RuntimeCall> for ProxyType {
 	fn filter(&self, c: &RuntimeCall) -> bool {
 		match self {
+			// SECURITY (L8): ProxyType::Any must explicitly exclude OCEX and THEA
+			// calls when those pallets are re-enabled. A proxy holding Any permission
+			// can sign submit_snapshot (OCEX) and submit_signed_outgoing_messages
+			// (THEA) on behalf of a validator key, turning a compromised proxy into a
+			// full custody / bridge signing capability. Add:
+			//   | RuntimeCall::OcexPallet(..)
+			//   | RuntimeCall::Thea(..)
+			// to the NonTransfer block list and remove them from Any when re-enabling.
 			ProxyType::Any => true,
 			ProxyType::NonTransfer => !matches!(
 				c,
