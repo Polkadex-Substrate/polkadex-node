@@ -309,7 +309,9 @@ pub struct AssetMetadata {
 
 impl AssetMetadata {
 	pub fn new(decimal: u8) -> Option<AssetMetadata> {
-		if decimal < 1 {
+		// decimal=0 is meaningless; decimal>=51 overflows u128 in convert_to_native_decimals
+		// (10u128.pow(51-12) = 10^39 > u128::MAX ≈ 3.4×10^38)
+		if decimal < 1 || decimal > 50 {
 			return None;
 		}
 		Some(AssetMetadata { decimal })

@@ -1287,6 +1287,19 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 
 ---
 
+### L7 — AssetMetadata decimal no upper bound — decimal ≥ 51 overflows pow
+**Severity:** Low
+**Location:** `primitives/thea/src/types.rs` — `AssetMetadata::new()`
+**Date:** 2026-09-17
+
+**Finding:** `AssetMetadata::new()` rejected `decimal < 1` but allowed any value up to 255. `convert_to_native_decimals` calls `10u128.pow(decimal - 12)` for foreign assets with more decimals than native. `10u128.pow(39)` (decimal = 51) exceeds `u128::MAX ≈ 3.4×10^38`, causing overflow — panic in debug builds, silent wrap in release.
+
+**Changes made:**
+`primitives/thea/src/types.rs`:
+- Added `|| decimal > 50` to the `new()` guard — returns `None` for out-of-range decimals
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1298,4 +1311,4 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M3 (partial) | 🟡 Medium | pallets/rewards | ExchangePayload domain sep — requires exchange backend coordination |
-| L7–L14 | ⚪ Low | various | See full findings table |
+| L8–L14 | ⚪ Low | various | See full findings table |
