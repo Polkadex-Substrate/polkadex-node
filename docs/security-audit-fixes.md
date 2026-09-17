@@ -1383,6 +1383,40 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 
 ---
 
+### L13 — Docs contradict code: removed flags, wrong --rpc-methods guidance
+**Severity:** Low  
+**Location:** `docs/run-a-validator.md`  
+**Fixed in spec:** 392  
+**Date:** 2026-09-17
+
+**Issues:**
+1. `run-a-validator.md` line 59 used `--ws-port 9977` for the relay chain embedded node — `--ws-port` was removed in Polkadot SDK; the unified flag is `--rpc-port`.
+2. The validator systemd service example gave no guidance on `--rpc-methods`; an operator reading the doc and adding `--rpc-methods=Unsafe` (for debugging) and forgetting to revert it would expose the admin RPC surface publicly.
+
+**Changes made:**
+- `docs/run-a-validator.md`: Replaced `--ws-port 9977` with `--rpc-port 9977`.
+- `docs/run-a-validator.md`: Added inline `SECURITY` comment in the service file template warning that `--rpc-methods` defaults to `Safe` and must not be overridden to `Unsafe` on a public validator.
+
+---
+
+### L14 — Dead flags and port mismatch in dev scripts
+**Severity:** Low  
+**Location:** `scripts/start_chain.sh`, `scripts/start_validator*.sh`, `scripts/set-keys.sh`  
+**Fixed in spec:** 392  
+**Date:** 2026-09-17
+
+**Issues:**
+1. `--thea-dummy-mode` exists only in `cli_old.rs` (dead code); the active `cli.rs` does not declare it. Passing it to the built binary silently fails.
+2. `--foreign-chain-url` same situation.
+3. `set-keys.sh` sends session keys to ports 9944/9946/9948, but `start_chain.sh` runs the bootnode on 9943, validator 1 on 9944, and validator 2 on 9945. The script is called by `start_chain.sh`; ports 9946 and 9948 are never open.
+
+**Changes made:**
+- `scripts/start_chain.sh`: Removed `--thea-dummy-mode` from all three node starts.
+- `scripts/start_validator2.sh`, `start_validator3.sh`: Already removed in L11 commit (the `--node-key` removal that touched these files); `--thea-dummy-mode` removed here.
+- `scripts/set-keys.sh`: Fixed port numbers to match `start_chain.sh` (9943 → bootnode, 9944 → validator1, 9945 → validator2).
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -1394,5 +1428,4 @@ The deposit side of L6 was already fixed by C9: `ensure!(amount >= T::MinimumDep
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
 | R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M3 (partial) | 🟡 Medium | pallets/rewards | ExchangePayload domain sep — requires exchange backend coordination |
-| L13–L14 | ⚪ Low | various | See full findings table |
 

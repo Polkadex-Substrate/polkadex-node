@@ -56,7 +56,7 @@ Wants=network-online.target
 [Service]
 User=ubuntu
 Group=ubuntu
-ExecStart=$HOME/parachain-polkadex-node --chain=$HOME/polkadot-parachain-raw.json --port 40333 --rpc-port 8844 --bootnodes /ip4/3.108.191.170/tcp/40333/p2p/12D3KooWKi39o5WvzPTFz8W2KMqjP5c9HWoY2naYGPVF1YANCFnC -- --execution wasm --chain $HOME/polkadot.json --port 30343 --ws-port 9977 --state-pruning 256
+ExecStart=$HOME/parachain-polkadex-node --chain=$HOME/polkadot-parachain-raw.json --port 40333 --rpc-port 8844 --bootnodes /ip4/3.108.191.170/tcp/40333/p2p/12D3KooWKi39o5WvzPTFz8W2KMqjP5c9HWoY2naYGPVF1YANCFnC -- --execution wasm --chain $HOME/polkadot.json --port 30343 --rpc-port 9977 --state-pruning 256
 Restart=on-failure
 
 [Install]
@@ -215,6 +215,7 @@ User=ubuntu
 Group=ubuntu
 ExecStart=$HOME/polkadex-node --chain=$HOME/customSpecRaw.json --name 'Validator-Tutorial' --validator --rpc-port 9944
 Restart=on-failure
+# SECURITY: --rpc-methods defaults to Safe. Never set --rpc-methods=Unsafe on a public validator node.
 
 [Install]
 WantedBy=multi-user.target
