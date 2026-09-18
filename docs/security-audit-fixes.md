@@ -573,6 +573,97 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 ---
 
+### F-002 — Sudo::Key storage slot survives pallet_sudo re-addition (WORSE than August audit found)
+**Severity:** Critical — priority 1, before spec 392 can ship
+**Location:** `runtimes/mainnet/src/lib.rs`, `runtimes/mainnet/src/migrations.rs`, `runtimes/mainnet/src/configs/mod.rs` (dead code, not compiled), `runtimes/mainnet/src/benchmarks.rs`, `runtimes/mainnet/Cargo.toml`, `runtimes/mainnet/src/genesis_config_presets.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** Live mainnet (spec 373, confirmed via RPC) has no active `pallet_sudo`, but the `Sudo::Key` storage slot was never wiped when sudo was originally removed years ago. It still holds the 2021 genesis root key (`0x70a5f4e7...`, corresponding to `esoK6TMuNq1utawjV81FWkTDZ6CTXSgmjhXXz4P1FD74ppL8Q` — confirmed live and unchanged since block 0). Spec 392 re-added `pallet_sudo` under the same pallet name at `pallet_index(45)` with no migration touching that slot. At enactment, the leftover value would have become live Root over mainnet with no `set_key` call needed — to an account not held by the current team.
+
+**Changes made:**
+- `runtimes/mainnet/src/lib.rs`: removed `impl pallet_sudo::Config for Runtime`; replaced `#[runtime::pallet_index(45)] pub type Sudo = ...` with a removal comment
+- `runtimes/mainnet/src/benchmarks.rs`: removed `[pallet_sudo, Sudo]`
+- `runtimes/mainnet/Cargo.toml`: removed the `pallet-sudo` dependency and its `std`/`try-runtime` feature entries (root workspace `Cargo.toml` dependency left in place — `pallets/pdex-migration` still needs it)
+- `runtimes/mainnet/src/genesis_config_presets.rs`: removed `SudoConfig` import and `sudo: SudoConfig { .. }` genesis field; `root_key` param renamed to `_root_key` (no longer consumed)
+- `runtimes/mainnet/src/migrations.rs`: added `ClearLegacySudoKey` — a guarded, one-shot migration that clears the `Sudo::Key` storage prefix via `frame_support::storage::migration::clear_storage_prefix`, with `try-runtime` pre/post checks confirming the slot is empty after upgrade. Guarded against re-execution on any future upgrade.
+- Wired `migrations::ClearLegacySudoKey` into the `Migrations` tuple in `lib.rs`
+
+**Note:** `runtimes/mainnet/src/configs/mod.rs` also has a `pallet_sudo::Config` impl, but that file is dead code — `configs` is never declared as a module anywhere in `lib.rs`, so it's not compiled. Left untouched; not a live risk.
+
+---
+
+### F-029 — OrderbookCommittee orphaned governance pallet
+**Severity:** Medium — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`, `runtimes/mainnet/src/migrations.rs`, `runtimes/mainnet/src/genesis_config_presets.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `OrderbookCommittee` (`pallet_collective::Instance4`, `pallet_index(36)`) governed `OCEX`, which was removed from `construct_runtime!`. The committee remained fully active — a live governance body with proposal/voting/membership storage and no pallet left to govern. An orphaned permission surface.
+
+**Changes made:**
+- `runtimes/mainnet/src/lib.rs`: removed the `OrderbookCollective` type alias and its `pallet_collective::Config<OrderbookCollective>` impl; removed the now-unused `OrderbookMotionDuration`/`OrderbookMaxProposals`/`OrderbookMaxMembers` parameter_types; replaced `#[runtime::pallet_index(36)] pub type OrderbookCommittee = ...` with a removal comment; removed `RuntimeCall::OrderbookCommittee(..)` from the `ProxyType::Governance` filter (no longer a valid call variant)
+- `runtimes/mainnet/src/genesis_config_presets.rs`: commented out the `orderbook_committee: Default::default()` genesis field
+- `runtimes/mainnet/src/migrations.rs`: added `ClearOrderbookCommittee` using the framework's own `frame_support::migrations::RemovePallet<P, DbWeight>` — wipes all storage under the `"OrderbookCommittee"` prefix (members, proposals, votes)
+- Wired `migrations::ClearOrderbookCommittee` into the `Migrations` tuple
+
+---
+
+### F-030 — Unguarded one-shot migrations re-execute on every future upgrade
+**Severity:** High — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/migrations.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `FixBalancesFrozen`, `FixCouncilPrime`, and `ClearOffenceReports` were wired directly into the `Migrations` tuple used by `Executive` with no "already applied" guard, unlike `UpgradeSessionKeys` which correctly checks `System::last_runtime_upgrade_spec_version()`. Since this tuple runs on every future runtime upgrade forever, `ClearOffenceReports` in particular would wipe legitimate future offence reports on the *next* upgrade after 392, not just the historical undecodable entries it was written for. `FixBalancesFrozen` would also re-scan every account with a lock on every future upgrade indefinitely.
+
+**Changes made:**
+- Added spec-version guards (`last_runtime_upgrade_spec_version() > 391`, mirroring the existing `UpgradeSessionKeys` pattern) to `FixBalancesFrozen`, `FixCouncilPrime`, and `ClearOffenceReports`. Each now skips with a log message if already applied.
+- `ClearOrmlVestingLocks` was checked and left unguarded deliberately — it's a raw-prefix clear on a pallet that's fully removed, naturally idempotent (no-op once the prefix is empty), and not a candidate for future destructive re-runs.
+
+---
+
+### F-065 — NonTransfer proxy filter only blocked native-currency paths
+**Severity:** High — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `ProxyType::NonTransfer` only excluded `RuntimeCall::Balances(..)` and `RuntimeCall::Indices(pallet_indices::Call::transfer)`. `Assets`, `PoolAssets`, and `AssetConversion` are all live pallets that can move value between accounts (transfer, swaps, liquidity operations) — a proxy delegated as "NonTransfer" could still move funds through any of the three.
+
+**Changes made:**
+- Added `RuntimeCall::Assets(..)`, `RuntimeCall::PoolAssets(..)`, `RuntimeCall::AssetConversion(..)` to the `NonTransfer` filter's exclusion match
+
+---
+
+### F-066 — Asset id 0 not reserved
+**Severity:** Medium — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `pallet_assets::Config<Instance1>::CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>` let any signed account create an asset with any id, including 0.
+
+**Changes made:**
+- Added `AssetsCreateOrigin`, a custom `EnsureOriginWithArg<RuntimeOrigin, u128>` impl that rejects asset id 0 for any signed origin, delegating to `EnsureSigned` otherwise. Root/`ForceOrigin` can still create id 0 via `force_create`. Wired in as `Instance1`'s `CreateOrigin`. `PoolAssets` (Instance2) left unchanged — the finding didn't target it and LP-token ids don't carry the same special meaning.
+
+---
+
+### F-072 — PoolAssets ForceOrigin was Root-or-HalfCouncil, not Root-only
+**Severity:** Medium — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `pallet_assets::Config<Instance2>::ForceOrigin` (PoolAssets) was `EnsureRootOrHalfCouncil`, wider than the audit's "Root-only" finding. Pool asset lifecycle force-operations shouldn't be council-gated the same way general user-created assets are.
+
+**Changes made:**
+- Changed `PoolAssets`' `ForceOrigin` to `EnsureRoot<AccountId>`. `Assets` (Instance1) `ForceOrigin` left as `EnsureRootOrHalfCouncil` — not targeted by this finding.
+
+**Note for reviewer:** worth confirming with the auditor whether Council-gating on `Assets` (Instance1) is intentionally out of scope, or whether F-072's "Root-only" language was meant to cover both instances.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -597,6 +688,9 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | H2 | 🟠 High | pallets/pdex-migration | Third approver's beneficiary used for mint |
 | H9 | 🟠 High | pallets/xcm-helper | XCM fee whitelist commented out; zero fee hardcoded |
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
-| R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M1–M16 | 🟡 Medium | various | See full findings table |
 | L1–L14 | ⚪ Low | various | See full findings table |
+
+**Verified already resolved, no action taken (2026-09-18):**
+- **R3-H5** (WASM builder on mutable fork branch) — `substrate-wasm-builder = { version = "31.1.0" }` in root `Cargo.toml` is a plain crates.io pin on all of `mainnet`, `testnet`, `security/audit-fixes`, `feature/node-packaging`. No `[patch]` override. Not a git dependency anywhere.
+- **F-064** (Root-only SafeMode enter) — `ForceEnterOrigin`, `ForceExitOrigin`, `ForceDepositOrigin` are all already `EnsureRoot`-based in `runtimes/mainnet/src/lib.rs`.
