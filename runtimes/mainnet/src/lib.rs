@@ -51,6 +51,7 @@ use frame_support::{
 	parameter_types,
 	traits::{
 		fungible::{HoldConsideration, Inspect}, AsEnsureOriginWithArg, EitherOfDiverse, EnsureOrigin,
+		EnsureOriginWithArg,
 		EqualPrivilegeOnly, Get, InstanceFilter, KeyOwnerProofSystem, LockIdentifier,
 		tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId}, ConstU64, ConstU32, ConstU16, ConstBool,
 		VariantCountOf, tokens::imbalance::{ResolveAssetTo, ResolveTo, OnUnbalanced}, Imbalance, Nothing, InsideBoth,
@@ -359,9 +360,6 @@ parameter_types! {
     pub const TechnicalMotionDuration: BlockNumber = 7 * DAYS;
     pub const TechnicalMaxProposals: u32 = 100;
     pub const TechnicalMaxMembers: u32 = 100;
-    pub const OrderbookMotionDuration: BlockNumber = DAYS;
-    pub const OrderbookMaxProposals: u32 = 100;
-    pub const OrderbookMaxMembers: u32 = 3;
     pub const ProposalBond: Permill = Permill::from_percent(5);
     pub const ProposalBondMinimum: Balance = 100 * PDEX;
     pub const SpendPeriod: BlockNumber = 24 * DAYS;
@@ -871,10 +869,18 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 	fn filter(&self, c: &RuntimeCall) -> bool {
 		match self {
 			ProxyType::Any => true,
+			// F-065: NonTransfer previously only blocked native-currency transfer paths
+			// (Balances, Indices::transfer). Assets, PoolAssets, and AssetConversion are
+			// all live pallets that can move value between accounts (transfer, swaps,
+			// liquidity operations) — a "NonTransfer" proxy could move funds through any
+			// of them. Block all four.
 			ProxyType::NonTransfer => !matches!(
 				c,
 				RuntimeCall::Balances(..)
 					| RuntimeCall::Indices(pallet_indices::Call::transfer { .. })
+					| RuntimeCall::Assets(..)
+					| RuntimeCall::PoolAssets(..)
+					| RuntimeCall::AssetConversion(..)
 			),
 			ProxyType::Governance => matches!(
 				c,
@@ -882,7 +888,7 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 					| RuntimeCall::TechnicalCommittee(..)
 					| RuntimeCall::Elections(..)
 					| RuntimeCall::Treasury(..)
-					| RuntimeCall::OrderbookCommittee(..)
+				// F-029: OrderbookCommittee removed — no longer a valid RuntimeCall variant
 			),
 			ProxyType::Staking => matches!(c, RuntimeCall::Staking(..)),
 		}
@@ -1484,25 +1490,8 @@ impl pallet_collective::Config<TechnicalCollective> for Runtime {
 	type Consideration = ();
 }
 
-type OrderbookCollective = pallet_collective::Instance4;
-impl pallet_collective::Config<OrderbookCollective> for Runtime {
-	type RuntimeOrigin = RuntimeOrigin;
-	type Proposal = RuntimeCall;
-	type RuntimeEvent = RuntimeEvent;
-	type MotionDuration = OrderbookMotionDuration;
-	type MaxProposals = OrderbookMaxProposals;
-	type MaxMembers = OrderbookMaxMembers;
-	type DefaultVote = pallet_collective::PrimeDefaultVote;
-	type WeightInfo = pallet_collective::weights::SubstrateWeight<Runtime>;
-	type SetMembersOrigin = EitherOfDiverse<
-		EnsureRoot<AccountId>,
-		pallet_collective::EnsureProportionMoreThan<AccountId, TechnicalCollective, 1, 2>,
-	>;
-	type MaxProposalWeight = MaxCollectivesProposalWeight;
-	type DisapproveOrigin = EnsureRoot<AccountId>;
-	type KillOrigin = EnsureRoot<AccountId>;
-	type Consideration = ();
-}
+// F-029: OrderbookCollective / OrderbookCommittee removed — it governed OCEX,
+// which no longer exists in construct_runtime. See migrations::ClearOrderbookCommittee.
 
 type EnsureRootOrHalfCouncil = EitherOfDiverse<
 	EnsureRoot<AccountId>,
@@ -1649,12 +1638,6 @@ impl pallet_democracy::Config for Runtime {
 	type VetoOrigin = pallet_collective::EnsureMember<AccountId, TechnicalCollective>;
 	type PalletsOrigin = OriginCaller;
 	type Slash = Treasury;
-}
-
-impl pallet_sudo::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type RuntimeCall = RuntimeCall;
-	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
 
 impl<LocalCall> frame_system::offchain::CreateTransaction<LocalCall> for Runtime
@@ -2157,13 +2140,31 @@ impl pallet_beefy_mmr::Config for Runtime {
 
 // pallet_assets: Instance1 config implementation
 // https://github.com/paritytech/polkadot-sdk/blob/1530a8826416514c3326597338b3511a55040663/substrate/bin/node/runtime/src/lib.rs#L1784
+/// F-066: asset id 0 is reserved. `AsEnsureOriginWithArg<EnsureSigned<_>>` let any
+/// signed account claim any id, including 0. Any signed account may still create
+/// non-zero ids; only Root/ForceOrigin can create id 0, via `force_create`.
+pub struct AssetsCreateOrigin;
+impl EnsureOriginWithArg<RuntimeOrigin, u128> for AssetsCreateOrigin {
+	type Success = AccountId;
+	fn try_origin(o: RuntimeOrigin, asset_id: &u128) -> Result<Self::Success, RuntimeOrigin> {
+		if *asset_id == 0 {
+			return Err(o);
+		}
+		<EnsureSigned<AccountId> as EnsureOrigin<RuntimeOrigin>>::try_origin(o)
+	}
+	#[cfg(feature = "runtime-benchmarks")]
+	fn try_successful_origin(_asset_id: &u128) -> Result<RuntimeOrigin, ()> {
+		<EnsureSigned<AccountId> as EnsureOrigin<RuntimeOrigin>>::try_successful_origin()
+	}
+}
+
 impl pallet_assets::Config<Instance1> for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Balance = u128;
     type AssetId = u128;
     type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
-    type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
+    type CreateOrigin = AssetsCreateOrigin;
     type ForceOrigin = EnsureRootOrHalfCouncil;
     type AssetDeposit = AssetDeposit;
     type AssetAccountDeposit = AssetAccountDeposit;
@@ -2191,7 +2192,10 @@ impl pallet_assets::Config<Instance2> for Runtime {
     type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
     type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
-    type ForceOrigin = EnsureRootOrHalfCouncil;
+    // F-072: PoolAssets force-operations (force_create/force_asset_status/etc.) are
+    // Root-only, not Root-or-HalfCouncil — pool asset lifecycle shouldn't be
+    // council-gated the same way general user-created assets are.
+    type ForceOrigin = EnsureRoot<AccountId>;
     type AssetDeposit = AssetDeposit;
     type AssetAccountDeposit = AssetAccountDeposit;
     type MetadataDepositBase = MetadataDepositBase;
@@ -2580,8 +2584,9 @@ mod runtime {
     // #[runtime::pallet_index(35)]
     // pub type OCEX = pallet_ocex_lmp::Pallet<Runtime>;
 
-    #[runtime::pallet_index(36)]
-    pub type OrderbookCommittee = pallet_collective::Pallet<Runtime, Instance4>;
+    // #36 was OrderbookCommittee - REMOVED (F-029: governed OCEX, which no longer
+    // exists in construct_runtime — an orphaned permission surface with nothing left
+    // to govern. See migrations::ClearOrderbookCommittee.)
 
     // #39 was Thea - REMOVED
 
@@ -2590,8 +2595,10 @@ mod runtime {
 
     // #44 was TheaExecutor - REMOVED
 
-    #[runtime::pallet_index(45)]
-    pub type Sudo = pallet_sudo::Pallet<Runtime>;
+    // #45 was Sudo - REMOVED (F-002: Sudo::Key storage slot on mainnet still holds
+    // the 2021 genesis root key from before sudo was first removed years ago. Re-adding
+    // pallet_sudo under the same name with no migration touching that slot would hand
+    // Root over mainnet to whoever holds that key at enactment. See migrations::ClearLegacySudoKey.)
 
     #[runtime::pallet_index(46)]
     pub type AssetConversion = pallet_asset_conversion::Pallet<Runtime>;
@@ -2963,6 +2970,10 @@ pub type Executive = frame_executive::Executive<
 type Migrations = (
 	// migrations::InitOcexFeeConfig<Runtime>, // OCEX removed from runtime
 	migrations::UpgradeSessionKeys,
+    // F-002: wipe dangling Sudo::Key before pallet_sudo is re-introduced without it
+    migrations::ClearLegacySudoKey,
+    // F-029: wipe orphaned OrderbookCommittee storage — governed OCEX, now removed
+    migrations::ClearOrderbookCommittee,
     // Pallet storage version migrations
     migrations::StakingStorageVersionMigration<Runtime>,
     migrations::SessionStorageVersionMigration<Runtime>,
