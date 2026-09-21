@@ -591,6 +591,8 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 **Note:** `runtimes/mainnet/src/configs/mod.rs` also has a `pallet_sudo::Config` impl, but that file is dead code — `configs` is never declared as a module anywhere in `lib.rs`, so it's not compiled. Left untouched; not a live risk.
 
+**Verification (2026-09-21):** ran `try-runtime on-runtime-upgrade live` against `wss://so.polkadex.ee` with no `--pallet` scoping (the first scoped run never loaded `Sudo` storage into its sandbox, since the pallet doesn't exist in the new runtime's metadata — that run's `removed=0` result was a fetch-scope artifact, not a real finding). Unfiltered run against the full live state: `🔑 Cleared legacy Sudo storage prefix (removed=2)` — both the `Key` value and the `:__STORAGE_VERSION__:` marker, confirmed on the very first pass against genuinely populated data. Second pass confirms `Skipping ClearLegacySudoKey: already applied` and storage roots match before/after — idempotency holds. No panics, no errors, across the full run.
+
 ---
 
 ### F-029 — OrderbookCommittee orphaned governance pallet
@@ -619,7 +621,9 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 **Changes made:**
 - Added spec-version guards (`last_runtime_upgrade_spec_version() > 391`, mirroring the existing `UpgradeSessionKeys` pattern) to `FixBalancesFrozen`, `FixCouncilPrime`, and `ClearOffenceReports`. Each now skips with a log message if already applied.
-- `ClearOrmlVestingLocks` was checked and left unguarded deliberately — it's a raw-prefix clear on a pallet that's fully removed, naturally idempotent (no-op once the prefix is empty), and not a candidate for future destructive re-runs.
+- **Per PR review (visiondream3):** `ClearOrmlVestingLocks` was also unguarded and got the same treatment — added the identical spec-version guard to its `on_runtime_upgrade`. It's naturally idempotent once the prefix is empty, but there's no reason to leave it as the one ungated exception when every other one-shot migration in this set follows the same pattern.
+
+**Verification (2026-09-21):** unfiltered `try-runtime on-runtime-upgrade live` against `wss://so.polkadex.ee` confirmed all four migrations fire against genuinely populated real data on the first pass, then correctly skip on the second (idempotency) pass: `Fixed frozen field for 1 accounts with stale locks`, `🧹 Cleared 3629 Offences::Reports entries`, `ClearOrmlVestingLocks: unlocked 12 accounts, ran 13 clear_prefix iterations`. All real, nonzero counts — not scoping artifacts.
 
 ---
 
@@ -664,6 +668,20 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 ---
 
+### F-064 — Permissionless SafeMode entry priced too cheap (correction — not actually fixed on first pass)
+**Severity:** High — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-21
+
+**Vulnerability:** Originally checked only `ForceEnterOrigin`/`ForceExitOrigin`/`ForceDepositOrigin` (all correctly `EnsureRoot`-based) and wrongly logged this as already resolved. **Per PR review (visiondream3):** missed that `pallet_safe_mode` also exposes permissionless `enter()`/`extend()` calls, gated only by a deposit amount, not an origin check — `EnterDepositAmount` was `2,000,000 * DOLLARS` and `ExtendDepositAmount` was `1,000,000 * DOLLARS`. Any signed account with that much PDEX could unilaterally halt the chain (SafeMode restricts dispatch to `SafeModeWhitelistedCalls` — System/SafeMode/TxPause only) without needing Root at all. This is the actual "permissionless halt" the August audit flagged.
+
+**Changes made:**
+- Removed the `EnterDepositAmount`/`ExtendDepositAmount` constants entirely (kept `EnterDuration`/`ExtendDuration`)
+- Set `type EnterDepositAmount = ();` and `type ExtendDepositAmount = ();` in `pallet_safe_mode::Config` — `pallet_safe_mode`'s `enter()`/`extend()` calls `Config::EnterDepositAmount::get().ok_or(Error::NotConfigured)?`, so `()` (returning `None`) disables the permissionless path entirely. Only the Root-gated `Force*Origin` calls can now enter/extend/exit SafeMode.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -693,4 +711,3 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 **Verified already resolved, no action taken (2026-09-18):**
 - **R3-H5** (WASM builder on mutable fork branch) — `substrate-wasm-builder = { version = "31.1.0" }` in root `Cargo.toml` is a plain crates.io pin on all of `mainnet`, `testnet`, `security/audit-fixes`, `feature/node-packaging`. No `[patch]` override. Not a git dependency anywhere.
-- **F-064** (Root-only SafeMode enter) — `ForceEnterOrigin`, `ForceExitOrigin`, `ForceDepositOrigin` are all already `EnsureRoot`-based in `runtimes/mainnet/src/lib.rs`.

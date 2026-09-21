@@ -685,6 +685,11 @@ where
     T::AccountId: Decode,
 {
     fn on_runtime_upgrade() -> Weight {
+        // F-030: one-shot, gated like the other spec-392 migrations
+        if frame_system::Pallet::<T>::last_runtime_upgrade_spec_version() > 391 {
+            log::info!("Skipping ClearOrmlVestingLocks: already applied");
+            return T::DbWeight::get().reads(1);
+        }
         use frame_support::traits::LockableCurrency;
 
         // twox128("OrmlVesting") = d84892f1db5f9dfd80c521d0a5647650

@@ -489,9 +489,7 @@ parameter_types! {
     pub const DelegatedStakingPalletId: PalletId = PalletId(*b"py/dlstk");
 	  pub const SlashRewardFraction: Perbill = Perbill::from_percent(1);
     pub const EnterDuration: BlockNumber = 4 * HOURS;
-    pub const EnterDepositAmount: Balance = 2_000_000 * DOLLARS;
     pub const ExtendDuration: BlockNumber = 2 * HOURS;
-    pub const ExtendDepositAmount: Balance = 1_000_000 * DOLLARS;
     pub const ReleaseDelay: u32 = 2 * DAYS;
 	  pub MbmServiceWeight: Weight = Perbill::from_percent(80) * RuntimeBlockWeights::get().max_block;
     pub const BeefySetIdSessionEntries: u32 = BondingDuration::get() * SessionsPerEra::get();
@@ -736,9 +734,10 @@ impl pallet_safe_mode::Config for Runtime {
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type WhitelistedCalls = SafeModeWhitelistedCalls;
 	type EnterDuration = EnterDuration;
-	type EnterDepositAmount = EnterDepositAmount;
+	// F-064: no permissionless entry into SafeMode. Only ForceEnterOrigin (Root) can enter or extend.
+	type EnterDepositAmount = ();
 	type ExtendDuration = ExtendDuration;
-	type ExtendDepositAmount = ExtendDepositAmount;
+	type ExtendDepositAmount = ();
 	type ForceEnterOrigin = EnsureRootWithSuccess<AccountId, ConstU32<9>>;
 	type ForceExtendOrigin = EnsureRootWithSuccess<AccountId, ConstU32<11>>;
 	type ForceExitOrigin = EnsureRoot<AccountId>;
