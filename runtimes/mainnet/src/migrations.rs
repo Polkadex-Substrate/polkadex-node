@@ -444,10 +444,11 @@ impl OnRuntimeUpgrade for ClearLegacySudoKey {
             return <Runtime as frame_system::Config>::DbWeight::get().reads(1);
         }
 
-        let result = frame_support::storage::migration::clear_storage_prefix(
-            b"Sudo", b"Key", b"", None, None,
-        );
-        log::info!("🔑 Cleared legacy Sudo::Key storage slot (removed={})", result.backend);
+        // Clear everything under the Sudo pallet prefix (Key and the storage
+        // version marker), so nothing remains under a pallet name that no longer exists.
+        let prefix = sp_io::hashing::twox_128(b"Sudo");
+        let result = frame_support::storage::unhashed::clear_prefix(&prefix, None, None);
+        log::info!("🔑 Cleared legacy Sudo storage prefix (removed={})", result.backend);
         <Runtime as frame_system::Config>::DbWeight::get().writes(result.backend as u64 + 1)
     }
 

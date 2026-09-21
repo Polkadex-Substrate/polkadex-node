@@ -586,7 +586,7 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 - `runtimes/mainnet/src/benchmarks.rs`: removed `[pallet_sudo, Sudo]`
 - `runtimes/mainnet/Cargo.toml`: removed the `pallet-sudo` dependency and its `std`/`try-runtime` feature entries (root workspace `Cargo.toml` dependency left in place — `pallets/pdex-migration` still needs it)
 - `runtimes/mainnet/src/genesis_config_presets.rs`: removed `SudoConfig` import and `sudo: SudoConfig { .. }` genesis field; `root_key` param renamed to `_root_key` (no longer consumed)
-- `runtimes/mainnet/src/migrations.rs`: added `ClearLegacySudoKey` — a guarded, one-shot migration that clears the `Sudo::Key` storage prefix via `frame_support::storage::migration::clear_storage_prefix`, with `try-runtime` pre/post checks confirming the slot is empty after upgrade. Guarded against re-execution on any future upgrade.
+- `runtimes/mainnet/src/migrations.rs`: added `ClearLegacySudoKey` — a guarded, one-shot migration with `try-runtime` pre/post checks confirming the slot is empty after upgrade. Guarded against re-execution on any future upgrade. **Updated per PR review (visiondream3):** clears the entire `Sudo` pallet storage prefix via `sp_io::hashing::twox_128(b"Sudo")` + `frame_support::storage::unhashed::clear_prefix`, rather than only the `Key` item — mainnet also has a `:__STORAGE_VERSION__:` marker under the same prefix, and clearing the whole thing leaves nothing behind under a pallet name that no longer exists.
 - Wired `migrations::ClearLegacySudoKey` into the `Migrations` tuple in `lib.rs`
 
 **Note:** `runtimes/mainnet/src/configs/mod.rs` also has a `pallet_sudo::Config` impl, but that file is dead code — `configs` is never declared as a module anywhere in `lib.rs`, so it's not compiled. Left untouched; not a live risk.
@@ -629,10 +629,10 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 **Branch:** `fix/spec-392-blockers`
 **Date:** 2026-09-18
 
-**Vulnerability:** `ProxyType::NonTransfer` only excluded `RuntimeCall::Balances(..)` and `RuntimeCall::Indices(pallet_indices::Call::transfer)`. `Assets`, `PoolAssets`, and `AssetConversion` are all live pallets that can move value between accounts (transfer, swaps, liquidity operations) — a proxy delegated as "NonTransfer" could still move funds through any of the three.
+**Vulnerability:** `ProxyType::NonTransfer` only excluded `RuntimeCall::Balances(..)` and `RuntimeCall::Indices(pallet_indices::Call::transfer)`. `Assets`, `PoolAssets`, and `AssetConversion` are all live pallets that can move value between accounts (transfer, swaps, liquidity operations) — a proxy delegated as "NonTransfer" could still move funds through any of the three. **Per PR review (visiondream3):** `Contracts` and `Revive` calls can also carry value — a trivial contract forwarding a transfer would bypass the restriction entirely.
 
 **Changes made:**
-- Added `RuntimeCall::Assets(..)`, `RuntimeCall::PoolAssets(..)`, `RuntimeCall::AssetConversion(..)` to the `NonTransfer` filter's exclusion match
+- Added `RuntimeCall::Assets(..)`, `RuntimeCall::PoolAssets(..)`, `RuntimeCall::AssetConversion(..)`, `RuntimeCall::Contracts(..)`, `RuntimeCall::Revive(..)` to the `NonTransfer` filter's exclusion match
 
 ---
 

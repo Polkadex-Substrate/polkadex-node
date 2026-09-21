@@ -873,7 +873,9 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 			// (Balances, Indices::transfer). Assets, PoolAssets, and AssetConversion are
 			// all live pallets that can move value between accounts (transfer, swaps,
 			// liquidity operations) — a "NonTransfer" proxy could move funds through any
-			// of them. Block all four.
+			// of them. Contracts and Revive calls can also carry value (a trivial contract
+			// forwarding a transfer would bypass the restriction entirely), so both are
+			// blocked wholesale too, same as the asset pallets above.
 			ProxyType::NonTransfer => !matches!(
 				c,
 				RuntimeCall::Balances(..)
@@ -881,6 +883,8 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 					| RuntimeCall::Assets(..)
 					| RuntimeCall::PoolAssets(..)
 					| RuntimeCall::AssetConversion(..)
+					| RuntimeCall::Contracts(..)
+					| RuntimeCall::Revive(..)
 			),
 			ProxyType::Governance => matches!(
 				c,
