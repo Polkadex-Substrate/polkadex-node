@@ -680,6 +680,12 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 - Removed the `EnterDepositAmount`/`ExtendDepositAmount` constants entirely (kept `EnterDuration`/`ExtendDuration`)
 - Set `type EnterDepositAmount = ();` and `type ExtendDepositAmount = ();` in `pallet_safe_mode::Config` — `pallet_safe_mode`'s `enter()`/`extend()` calls `Config::EnterDepositAmount::get().ok_or(Error::NotConfigured)?`, so `()` (returning `None`) disables the permissionless path entirely. Only the Root-gated `Force*Origin` calls can now enter/extend/exit SafeMode.
 
+**Unit tests added for F-064/F-065/F-066/F-072 (2026-09-21):** `try-runtime on-runtime-upgrade` only exercises storage migrations (F-002/F-029/F-030) — it never dispatches an extrinsic, so it can't verify these four `Config`/filter-level access-control changes at all. Added dedicated tests in `runtimes/mainnet/src/lib.rs`'s `#[cfg(test)] mod tests`, all passing:
+- `f064_safe_mode_permissionless_enter_is_disabled` — calls `enter()`/`extend()` from a signed origin, asserts `Error::NotConfigured`. (`extend()` requires forcing SafeMode on first via `force_enter(Root)`, since `do_extend` checks "are we entered?" before the deposit.)
+- `f065_non_transfer_proxy_blocks_contracts_and_revive` — calls `ProxyType::NonTransfer.filter(...)` directly against `Contracts`/`Revive` calls, asserts `false`; confirms `ProxyType::Any` still allows them.
+- `f066_asset_id_zero_is_reserved` — calls `AssetsCreateOrigin::try_origin` directly with asset id `0` (rejected) and `1` (accepted).
+- `f072_pool_assets_force_origin_is_root_only` — constructs a synthetic "2 of 3 council members" origin (`pallet_collective::RawOrigin::Members(2, 3)`, what the old `EnsureRootOrHalfCouncil` would have accepted) and confirms `PoolAssets`' `ForceOrigin` now rejects it while genuine Root still passes.
+
 ---
 
 ## Open — Pending

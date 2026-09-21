@@ -3907,18 +3907,102 @@ impl_runtime_apis! {
 
 #[cfg(test)]
 mod tests {
-	use frame_system::offchain::CreateSignedTransaction;
+    use frame_system::offchain::CreateSignedTransaction;
 
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn validate_transaction_submitter_bounds() {
-		fn is_submit_signed_transaction<T>()
-		where
-			T: CreateSignedTransaction<RuntimeCall>,
-		{
-		}
+    #[test]
+    fn validate_transaction_submitter_bounds() {
+        fn is_submit_signed_transaction<T>()
+        where
+            T: CreateSignedTransaction<RuntimeCall>,
+        {
+        }
 
-		is_submit_signed_transaction::<Runtime>();
-	}
+        is_submit_signed_transaction::<Runtime>();
+    }
+
+    fn new_test_ext() -> sp_io::TestExternalities {
+        frame_system::GenesisConfig::<Runtime>::default()
+            .build_storage()
+            .unwrap()
+            .into()
+    }
+
+    // F-064: no permissionless entry into SafeMode. EnterDepositAmount/ExtendDepositAmount
+    // are () (i.e. Get<Option<_>>::get() == None), so enter()/extend() must fail with
+    // NotConfigured for any signed account, regardless of balance.
+    #[test]
+    fn f064_safe_mode_permissionless_enter_is_disabled() {
+        new_test_ext().execute_with(|| {
+            let caller = AccountId::from([1u8; 32]);
+            assert_eq!(
+                pallet_safe_mode::Pallet::<Runtime>::enter(RuntimeOrigin::signed(caller.clone())),
+                Err(pallet_safe_mode::Error::<Runtime>::NotConfigured.into()),
+            );
+
+            // extend() checks "are we currently entered?" before the deposit — force safe
+            // mode on via the Root-gated path first so the deposit check is actually reached.
+            assert!(
+                pallet_safe_mode::Pallet::<Runtime>::force_enter(RuntimeOrigin::root()).is_ok()
+            );
+            assert_eq!(
+                pallet_safe_mode::Pallet::<Runtime>::extend(RuntimeOrigin::signed(caller)),
+                Err(pallet_safe_mode::Error::<Runtime>::NotConfigured.into()),
+            );
+        });
+    }
+
+    // F-065: NonTransfer proxy must block Contracts and Revive calls, since a contract
+    // call can carry value and would otherwise bypass the Balances/Assets/PoolAssets/
+    // AssetConversion block entirely.
+    #[test]
+    fn f065_non_transfer_proxy_blocks_contracts_and_revive() {
+        new_test_ext().execute_with(|| {
+            let contracts_call = RuntimeCall::Contracts(pallet_contracts::Call::remove_code {
+                code_hash: Default::default(),
+            });
+            let revive_call = RuntimeCall::Revive(pallet_revive::Call::remove_code {
+                code_hash: Default::default(),
+            });
+
+            assert!(!ProxyType::NonTransfer.filter(&contracts_call));
+            assert!(!ProxyType::NonTransfer.filter(&revive_call));
+            // Any proxy still allows everything.
+            assert!(ProxyType::Any.filter(&contracts_call));
+            assert!(ProxyType::Any.filter(&revive_call));
+        });
+    }
+
+    // F-066: asset id 0 is reserved. A signed origin must be rejected for id 0 and
+    // accepted for any non-zero id.
+    #[test]
+    fn f066_asset_id_zero_is_reserved() {
+        new_test_ext().execute_with(|| {
+            let caller = AccountId::from([2u8; 32]);
+            assert!(AssetsCreateOrigin::try_origin(RuntimeOrigin::signed(caller.clone()), &0u128)
+                .is_err());
+            assert!(AssetsCreateOrigin::try_origin(RuntimeOrigin::signed(caller), &1u128).is_ok());
+        });
+    }
+
+    // F-072: PoolAssets ForceOrigin is Root-only, not Root-or-HalfCouncil. A synthetic
+    // "2 of 3 council members" origin — which the old EnsureRootOrHalfCouncil would have
+    // accepted — must now be rejected; only genuine Root may pass.
+    #[test]
+    fn f072_pool_assets_force_origin_is_root_only() {
+        new_test_ext().execute_with(|| {
+            type ForceOrigin = <Runtime as pallet_assets::Config<Instance2>>::ForceOrigin;
+
+            let council_majority: RuntimeOrigin =
+                pallet_collective::RawOrigin::<AccountId, CouncilCollective>::Members(2, 3).into();
+            assert!(
+                <ForceOrigin as EnsureOrigin<RuntimeOrigin>>::try_origin(council_majority).is_err()
+            );
+            assert!(
+                <ForceOrigin as EnsureOrigin<RuntimeOrigin>>::try_origin(RuntimeOrigin::root())
+                    .is_ok()
+            );
+        });
+    }
 }
