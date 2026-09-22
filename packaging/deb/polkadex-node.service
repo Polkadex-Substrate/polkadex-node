@@ -3,7 +3,8 @@
 #               /usr/lib/systemd/system/polkadex-node.service (rpm)
 #
 # Post-install configuration:
-#   1. Edit /etc/polkadex/node.env and set NODE_NAME, EXTRA_FLAGS etc.
+#   1. Edit /etc/polkadex/node.env and set NODE_NAME, VALIDATOR_FLAG, EXTRA_FLAGS etc.
+#      See that file for what each flag below is for.
 #   2. sudo systemctl daemon-reload
 #   3. sudo systemctl enable --now polkadex-node
 #
@@ -20,7 +21,7 @@ Type=simple
 User=polkadex
 Group=polkadex
 
-# Load operator-supplied env vars (NODE_NAME, EXTRA_FLAGS, …)
+# Load operator-supplied env vars (NODE_NAME, VALIDATOR_FLAG, EXTRA_FLAGS, …)
 EnvironmentFile=-/etc/polkadex/node.env
 
 ExecStart=/usr/local/bin/polkadex-node \
@@ -36,9 +37,9 @@ ExecStart=/usr/local/bin/polkadex-node \
     --enable-offchain-indexing=true \
     --bootnodes=/dns/boot.polkadex.ee/tcp/30333/p2p/12D3KooWPBimEphuSb48WuwEm44WoACtgnRnDPiGf8ekhurWyc95 \
     --db-cache=4096 \
-    --prometheus-external \
     --prometheus-port=9615 \
     --telemetry-url="wss://telemetry.polkadot.io/submit/ 0" \
+    $VALIDATOR_FLAG \
     $EXTRA_FLAGS
 
 Restart=on-failure

@@ -1,10 +1,11 @@
 #!/bin/sh
-# postinst — runs after the package files are unpacked
+# %post — runs after the package files are unpacked
+# $1 = 1 on first install, $1 >= 2 on upgrade (rpm convention)
 set -e
 
 # Create dedicated service user if it doesn't exist
 if ! id -u polkadex > /dev/null 2>&1; then
-    useradd --system --no-create-home --shell /usr/sbin/nologin \
+    useradd --system --no-create-home --shell /sbin/nologin \
             --home-dir /var/lib/polkadex \
             --comment "Polkadex Node" \
             polkadex
@@ -21,7 +22,7 @@ if [ ! -f /etc/polkadex/node.env ]; then
         /etc/polkadex/node.env 2>/dev/null || true
 fi
 
-#DEBHELPER#
+systemctl daemon-reload 2>/dev/null || true
 
 echo ""
 echo "Polkadex node installed."

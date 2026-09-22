@@ -1,0 +1,11 @@
+#!/bin/sh
+# %postun — runs after the package files are removed
+# $1 = 0 on real removal (last version going away), $1 >= 1 on upgrade
+set -e
+
+if [ "$1" = "0" ]; then
+    # Remove config directory on real removal (not upgrade) — preserves node
+    # data (/var/lib/polkadex) so accidental reinstall doesn't lose the DB.
+    rm -rf /etc/polkadex || true
+    systemctl daemon-reload 2>/dev/null || true
+fi

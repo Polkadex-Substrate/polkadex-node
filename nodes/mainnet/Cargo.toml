@@ -52,6 +52,12 @@ Polkadex is a peer-to-peer orderbook-based cryptocurrency exchange
 built on the Substrate/Polkadot ecosystem. This package ships the
 polkadex-node binary for running a validator or full-node on mainnet."""
 group       = "Applications/Internet"
+# Scriptlets — mirror packaging/deb/{postinst,prerm,postrm}. Without these the
+# rpm package installs the binary and unit file but never creates the
+# polkadex user/dirs or enables the service — it can't start.
+post_install_script   = "../../packaging/rpm/postinstall"
+pre_uninstall_script  = "../../packaging/rpm/preuninstall"
+post_uninstall_script = "../../packaging/rpm/postuninstall"
 
 [package.metadata.generate-rpm.requires]
 openssl = ">= 1.1"
@@ -69,7 +75,10 @@ mode   = "0644"
 config = true
 
 [[package.metadata.generate-rpm.assets]]
-source = "../../packaging/polkadex-node.service"
+# Single source of truth for the unit file — lives under packaging/deb/ because
+# cargo-deb's dh_installsystemd integration requires it there; the rpm package
+# just references the same file rather than keeping a second copy.
+source = "../../packaging/deb/polkadex-node.service"
 dest   = "/usr/lib/systemd/system/polkadex-node.service"
 mode   = "0644"
 

@@ -42,7 +42,8 @@ sudo dnf install dist/polkadex-node-*.rpm
 
 ## Post-install configuration
 
-1. Edit `/etc/polkadex/node.env` — set `NODE_NAME` and `EXTRA_FLAGS`.
+1. Edit `/etc/polkadex/node.env` — set `NODE_NAME`, and `VALIDATOR_FLAG="--validator"`
+   if this node should validate (empty by default — installs as a full node).
 2. `sudo systemctl enable --now polkadex-node`
 3. `journalctl -u polkadex-node -f` — follow logs.
 
@@ -54,11 +55,14 @@ Node data is stored under `/var/lib/polkadex` (owned by the `polkadex` system us
 | File | Purpose |
 |---|---|
 | `build-packages.sh` | Main build script |
-| `polkadex-node.service` | systemd unit installed into both packages |
+| `deb/polkadex-node.service` | systemd unit — single source of truth, installed into both packages. Lives under `deb/` because cargo-deb's systemd integration requires it there; the rpm package references this same file. |
 | `node.env.example` | Template for `/etc/polkadex/node.env` |
 | `deb/postinst` | Debian post-install: creates user, dirs, copies env template |
 | `deb/prerm` | Debian pre-remove: stops service |
 | `deb/postrm` | Debian post-remove: purges config on `dpkg --purge` |
+| `rpm/postinstall` | RPM post-install (`%post`): creates user, dirs, copies env template, `daemon-reload` |
+| `rpm/preuninstall` | RPM pre-uninstall (`%preun`): stops service, disables on real removal |
+| `rpm/postuninstall` | RPM post-uninstall (`%postun`): purges config on real removal, `daemon-reload` |
 
 Package metadata lives in `nodes/mainnet/Cargo.toml` under
 `[package.metadata.deb]` and `[package.metadata.generate-rpm]`.

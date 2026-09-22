@@ -1,0 +1,14 @@
+#!/bin/sh
+# %preun — runs before the package files are removed
+# $1 = 0 on real removal (last version going away), $1 >= 1 on upgrade
+set -e
+
+# Stop the service if it's running
+if command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet polkadex-node; then
+    systemctl stop polkadex-node || true
+fi
+
+# Disable the service on real removal (not upgrade)
+if [ "$1" = "0" ]; then
+    systemctl disable polkadex-node 2>/dev/null || true
+fi
