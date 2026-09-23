@@ -329,17 +329,21 @@ const FIX_BALANCES_FROZEN_FROM_SPEC: u32 = 391;
 impl OnRuntimeUpgrade for FixBalancesFrozen {
     fn on_runtime_upgrade() -> Weight {
         if crate::System::last_runtime_upgrade_spec_version() > FIX_BALANCES_FROZEN_FROM_SPEC {
-            log::info!("Skipping FixBalancesFrozen: already applied");
+            log::warn!("Skipping FixBalancesFrozen: already applied");
             return <Runtime as frame_system::Config>::DbWeight::get().reads(1);
         }
+        let mut iterated: u64 = 0;
+        let mut mutated: u64 = 0;
         let mut fixed: u64 = 0;
         for (who, locks) in pallet_balances::Locks::<Runtime>::iter() {
+            iterated += 1;
             let max_lock = locks.iter().map(|l| l.amount).max().unwrap_or_default();
             if max_lock == 0 {
                 continue;
             }
             // T::AccountStore = frame_system::Pallet<Runtime>, so balance data
             // lives in frame_system::Account (NOT pallet_balances::Account).
+            mutated += 1;
             frame_system::Account::<Runtime>::mutate(&who, |info| {
                 if max_lock > info.data.frozen {
                     info.data.frozen = max_lock;
@@ -348,8 +352,12 @@ impl OnRuntimeUpgrade for FixBalancesFrozen {
             });
         }
         log::info!("🔧 Fixed frozen field for {} accounts with stale locks", fixed);
+        // `iterated` covers the Locks::iter() read for every account visited (including
+        // those skipped for having no lock); `mutated` covers the Account read+write
+        // that `mutate` performs unconditionally for every account with a nonzero lock,
+        // whether or not `fixed` was actually bumped.
         <Runtime as frame_system::Config>::DbWeight::get()
-            .reads_writes(fixed * 2 + 1, fixed)
+            .reads_writes(iterated + mutated + 1, mutated)
     }
 }
 
@@ -371,7 +379,7 @@ const FIX_COUNCIL_PRIME_FROM_SPEC: u32 = 391;
 impl OnRuntimeUpgrade for FixCouncilPrime {
     fn on_runtime_upgrade() -> Weight {
         if crate::System::last_runtime_upgrade_spec_version() > FIX_COUNCIL_PRIME_FROM_SPEC {
-            log::info!("Skipping FixCouncilPrime: already applied");
+            log::warn!("Skipping FixCouncilPrime: already applied");
             return <Runtime as frame_system::Config>::DbWeight::get().reads(1);
         }
         use pallet_collective::Instance1 as CouncilCollective;
@@ -404,7 +412,7 @@ const CLEAR_OFFENCE_REPORTS_FROM_SPEC: u32 = 391;
 impl OnRuntimeUpgrade for ClearOffenceReports {
     fn on_runtime_upgrade() -> Weight {
         if crate::System::last_runtime_upgrade_spec_version() > CLEAR_OFFENCE_REPORTS_FROM_SPEC {
-            log::info!("Skipping ClearOffenceReports: already applied");
+            log::warn!("Skipping ClearOffenceReports: already applied");
             return <Runtime as frame_system::Config>::DbWeight::get().reads(1);
         }
         let result = frame_support::storage::migration::clear_storage_prefix(
@@ -440,7 +448,7 @@ const CLEAR_LEGACY_SUDO_KEY_FROM_SPEC: u32 = 391; // Runs once, upgrading into s
 impl OnRuntimeUpgrade for ClearLegacySudoKey {
     fn on_runtime_upgrade() -> Weight {
         if crate::System::last_runtime_upgrade_spec_version() > CLEAR_LEGACY_SUDO_KEY_FROM_SPEC {
-            log::info!("Skipping ClearLegacySudoKey: already applied");
+            log::warn!("Skipping ClearLegacySudoKey: already applied");
             return <Runtime as frame_system::Config>::DbWeight::get().reads(1);
         }
 
@@ -668,9 +676,10 @@ impl OnRuntimeUpgrade for PruneStaleIngressMessages {
 ///
 /// Background: OrmlVesting was removed from construct_runtime without a cleanup migration.
 /// The pallet applied `Currency::set_lock(*b"ormlvest", account, amount, ...)` to each
-/// beneficiary.  Without this migration, those 13 accounts can never remove the lock
-/// (no `claim()` extrinsic exists after pallet removal), so their vested tokens are
-/// permanently frozen.
+/// beneficiary.  Without this migration, those 12 accounts (12 VestingSchedules entries —
+/// confirmed on-chain; the 13th key cleared below is the pallet's own StorageVersion
+/// marker, not an account) can never remove the lock (no `claim()` extrinsic exists after
+/// pallet removal), so their vested tokens are permanently frozen.
 ///
 /// Key layout for OrmlVesting::VestingSchedules (StorageMap<Blake2_128Concat, AccountId, …>):
 ///   [0..16]  twox128("OrmlVesting")       = d84892f1db5f9dfd80c521d0a5647650
@@ -687,7 +696,7 @@ where
     fn on_runtime_upgrade() -> Weight {
         // F-030: one-shot, gated like the other spec-392 migrations
         if frame_system::Pallet::<T>::last_runtime_upgrade_spec_version() > 391 {
-            log::info!("Skipping ClearOrmlVestingLocks: already applied");
+            log::warn!("Skipping ClearOrmlVestingLocks: already applied");
             return T::DbWeight::get().reads(1);
         }
         use frame_support::traits::LockableCurrency;

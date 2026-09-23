@@ -738,8 +738,10 @@ impl pallet_safe_mode::Config for Runtime {
 	type EnterDepositAmount = ();
 	type ExtendDuration = ExtendDuration;
 	type ExtendDepositAmount = ();
-	type ForceEnterOrigin = EnsureRootWithSuccess<AccountId, ConstU32<9>>;
-	type ForceExtendOrigin = EnsureRootWithSuccess<AccountId, ConstU32<11>>;
+	// F-064: success value is the halt duration (see force_enter/force_extend in
+	// pallet_safe_mode) — must match EnterDuration/ExtendDuration, not leftover demo values.
+	type ForceEnterOrigin = EnsureRootWithSuccess<AccountId, EnterDuration>;
+	type ForceExtendOrigin = EnsureRootWithSuccess<AccountId, ExtendDuration>;
 	type ForceExitOrigin = EnsureRoot<AccountId>;
 	type ForceDepositOrigin = EnsureRoot<AccountId>;
 	type ReleaseDelay = ReleaseDelay;
@@ -3949,6 +3951,32 @@ mod tests {
             assert_eq!(
                 pallet_safe_mode::Pallet::<Runtime>::extend(RuntimeOrigin::signed(caller)),
                 Err(pallet_safe_mode::Error::<Runtime>::NotConfigured.into()),
+            );
+        });
+    }
+
+    // F-064: ForceEnterOrigin/ForceExtendOrigin's EnsureRootWithSuccess value IS the halt
+    // duration (pallet_safe_mode::force_enter/force_extend pass it straight to do_enter/
+    // do_extend) — it must be EnterDuration/ExtendDuration (4h/2h), not a leftover demo
+    // ConstU32<9>/ConstU32<11> that would let a Root-forced halt lapse in under two minutes.
+    #[test]
+    fn f064_force_enter_duration_matches_config() {
+        new_test_ext().execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(1);
+            assert!(
+                pallet_safe_mode::Pallet::<Runtime>::force_enter(RuntimeOrigin::root()).is_ok()
+            );
+            assert_eq!(
+                pallet_safe_mode::EnteredUntil::<Runtime>::get(),
+                Some(1 + EnterDuration::get()),
+            );
+
+            assert!(
+                pallet_safe_mode::Pallet::<Runtime>::force_extend(RuntimeOrigin::root()).is_ok()
+            );
+            assert_eq!(
+                pallet_safe_mode::EnteredUntil::<Runtime>::get(),
+                Some(1 + EnterDuration::get() + ExtendDuration::get()),
             );
         });
     }
