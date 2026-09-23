@@ -25,10 +25,16 @@ jobs:
       # preinstalled. This replaces scripts/init.sh, which mutated toolchains
       # unpinned (`rustup update nightly`/`stable`) and pulled an unrelated,
       # years-old `nightly-2021-06-28` toolchain nothing here still needs.
+      # No libssl-dev here on purpose — checked Cargo.lock for openssl-sys/
+      # native-tls/any C-level SSL binding crate (none exist; the workspace
+      # uses rustls) and confirmed via `ldd` that the built binary links no
+      # OpenSSL/libcrypto at all. It was carried forward as boilerplate
+      # (even ci.yml's commented-out equivalent line still lists it) without
+      # anyone having verified it's actually needed to compile.
       - name: System build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --assume-yes clang protobuf-compiler libssl-dev
+          sudo apt-get install --assume-yes clang protobuf-compiler
 
       - name: Cache rust dependencies
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4

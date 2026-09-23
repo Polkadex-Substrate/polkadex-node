@@ -83,7 +83,7 @@ at the end of this doc.
      `0x3920bcb4960a1eef5580cd5367ff3f430eef052774f78468852f7b9cb39f8a3c` —
      if it doesn't, the copied data directory isn't mainnet's, or
      `customSpecRaw.json` doesn't match what you were running before.
-   - `curl -H "Content-Type:application/json" -d '{"id":1,"jsonrpc":"2.0","method":"author_hasSessionKeys","params":["<your session key bytes>"]}' http://localhost:9944`
+   - `curl -H "Content-Type:application/json" -d '{"id":1,"jsonrpc":"2.0","method":"author_hasSessionKeys","params":["<your session key bytes>"]}' http://127.0.0.1:9944`
      confirms the keystore carried over.
    - Your validator resumes producing/backing blocks in the following
      sessions (check telemetry or `polkadot.js apps` staking tab).

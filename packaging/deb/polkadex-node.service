@@ -21,7 +21,7 @@ Type=simple
 User=polkadex
 Group=polkadex
 
-# Load operator-supplied env vars (NODE_NAME, VALIDATOR_FLAG, EXTRA_FLAGS, …)
+# Load operator-supplied env vars (NODE_NAME, VALIDATOR_FLAG, RPC_METHODS, EXTRA_FLAGS, …)
 EnvironmentFile=-/etc/polkadex/node.env
 
 ExecStart=/usr/bin/polkadex-node \
