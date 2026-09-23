@@ -77,3 +77,25 @@ it's left stopped.
 
 Package metadata lives in `nodes/mainnet/Cargo.toml` under
 `[package.metadata.deb]` and `[package.metadata.generate-rpm]`.
+
+## Manual testing checklist (before the first tag)
+
+Not covered by any automated check — needs real machines. Attach logs from
+each run when reporting results.
+
+- [ ] `dpkg -i` on a clean Ubuntu 22.04 install
+- [ ] `dpkg -i` on a clean Ubuntu 24.04 install
+- [ ] `dnf install` on a clean Rocky 9 install
+- [ ] Node reaches peers and syncs on each of the above
+- [ ] Reinstall the same package over an existing install (`dpkg -i` /
+      `dnf install` again) — confirm it doesn't break the running node
+- [ ] Upgrade to a newer package version over a **running** service — confirm
+      the service actually restarts (not just that the binary on disk
+      changed), and confirm the version in the logs after restart matches
+      the new package, not the old one
+- [ ] Upgrade over a package that was installed but never started — confirm
+      it's still not running afterward (no surprise auto-start)
+- [ ] Purge (`dpkg --purge` / equivalent) — confirm `/etc/polkadex` is
+      removed, `/var/lib/polkadex` (chain data) is not
+- [ ] One full run of `docs/migrate-to-packaged-node.md` end to end, starting
+      from a box set up the old (manual/zip) way
