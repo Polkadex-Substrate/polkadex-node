@@ -51,10 +51,10 @@ warn()  { echo "  [!] $*" >&2; }
 die()   { echo "  [✗] $*" >&2; exit 1; }
 
 ensure_cargo_plugin() {
-  local plugin="$1"
-  if ! cargo "$plugin" --version > /dev/null 2>&1; then
-    info "Installing cargo-$plugin …"
-    cargo install "cargo-$plugin" --locked
+  local plugin="$1" version="$2"
+  if ! cargo "$plugin" --version 2>/dev/null | grep -q "$version"; then
+    info "Installing cargo-$plugin $version …"
+    cargo install "cargo-$plugin" --version "$version" --locked
   fi
 }
 
@@ -70,25 +70,25 @@ fi
 
 info "Binary  : $BINARY ($(du -sh "$BINARY" | cut -f1))"
 
-# Strip debug symbols before packaging to reduce package size
-if command -v strip > /dev/null 2>&1; then
-  info "Stripping debug symbols …"
-  strip --strip-debug "$BINARY"
-  info "Stripped: $BINARY ($(du -sh "$BINARY" | cut -f1))"
-fi
+# Note: no manual strip step here — cargo-deb strips debug symbols itself by
+# default (strip_override defaults to allowing it), so stripping the binary
+# ourselves first was redundant.
 
 # ── 2. Debian package ──────────────────────────────────────────────────────
 if $BUILD_DEB; then
-  ensure_cargo_plugin "deb"
+  ensure_cargo_plugin "deb" "3.8.0"
 
   info "Building .deb …"
   # Run from the workspace root so cargo-deb can locate workspace members.
   # --manifest-path points at the node crate; --no-build skips compilation.
   # --output sets the destination directory for the produced .deb file.
+  # The `|| true` matters: under `pipefail`, if cargo-deb's output consists
+  # entirely of the filtered line, grep -v finds nothing to print and exits
+  # 1, which would abort this script even though cargo-deb itself succeeded.
   (cd "$REPO_ROOT" && cargo deb \
       --manifest-path "$NODE_MANIFEST" \
       --no-build \
-      --output "$DIST_DIR/" 2>&1 | grep -v "Only source paths starting with")
+      --output "$DIST_DIR/" 2>&1 | { grep -v "Only source paths starting with" || true; })
 
   DEB_PATH=$(find "$DIST_DIR" -name "*.deb" -newer "$BINARY" 2>/dev/null | sort | tail -1)
   if [ -n "$DEB_PATH" ] && [ -f "$DEB_PATH" ]; then
@@ -102,7 +102,7 @@ fi
 
 # ── 3. RPM package ─────────────────────────────────────────────────────────
 if $BUILD_RPM; then
-  ensure_cargo_plugin "generate-rpm"
+  ensure_cargo_plugin "generate-rpm" "0.21.0"
 
   info "Building .rpm …"
   # cargo-generate-rpm must run from the crate directory (it doesn't support --manifest-path

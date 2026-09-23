@@ -42,13 +42,24 @@ sudo dnf install dist/polkadex-node-*.rpm
 
 ## Post-install configuration
 
-1. Edit `/etc/polkadex/node.env` — set `NODE_NAME`, and `VALIDATOR_FLAG="--validator"`
-   if this node should validate (empty by default — installs as a full node).
+1. Edit `/etc/polkadex/node.env` — set `NODE_NAME`, `VALIDATOR_FLAG="--validator"`
+   if this node should validate (empty by default — installs as a full node),
+   and `RPC_METHODS` if you need `safe` (e.g. an externally-facing archive
+   node — see the comments in `node.env.example`).
 2. `sudo systemctl enable --now polkadex-node`
 3. `journalctl -u polkadex-node -f` — follow logs.
+4. Verify you're on mainnet: block 0's hash must be
+   `0x3920bcb4960a1eef5580cd5367ff3f430eef052774f78468852f7b9cb39f8a3c`
+   (`curl -d '{"id":1,"jsonrpc":"2.0","method":"chain_getBlockHash","params":[0]}' http://127.0.0.1:9944`).
 
 The chain spec lives at `/etc/polkadex/customSpecRaw.json`.  
 Node data is stored under `/var/lib/polkadex` (owned by the `polkadex` system user).
+
+Installing never auto-starts the service (`start = false` for deb,
+no unconditional start in the rpm scriptlet) — step 2 above is required.
+On a package **upgrade**, if the service was already running, it's restarted
+automatically so the new binary actually takes effect; if it wasn't running,
+it's left stopped.
 
 ## Files in this directory
 
@@ -60,7 +71,7 @@ Node data is stored under `/var/lib/polkadex` (owned by the `polkadex` system us
 | `deb/postinst` | Debian post-install: creates user, dirs, copies env template |
 | `deb/prerm` | Debian pre-remove: stops service |
 | `deb/postrm` | Debian post-remove: purges config on `dpkg --purge` |
-| `rpm/postinstall` | RPM post-install (`%post`): creates user, dirs, copies env template, `daemon-reload` |
+| `rpm/postinstall` | RPM post-install (`%post`): creates user, dirs, copies env template, `daemon-reload`, restarts the service on upgrade only if it was already running |
 | `rpm/preuninstall` | RPM pre-uninstall (`%preun`): stops service, disables on real removal |
 | `rpm/postuninstall` | RPM post-uninstall (`%postun`): purges config on real removal, `daemon-reload` |
 
