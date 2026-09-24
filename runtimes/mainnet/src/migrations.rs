@@ -742,7 +742,23 @@ where
                                 "ClearOrmlVestingLocks: removed ormlvest lock for account {:?}",
                                 account
                             );
+                        } else {
+                            // Never expected on mainnet (all 12 entries decode), but if it happens the
+                            // lock stays in place and this line is the only record of which key it was.
+                            log::warn!(
+                                target: "runtime::migration",
+                                "ClearOrmlVestingLocks: could not decode AccountId from key {:?}; lock left in place",
+                                &key[..]
+                            );
                         }
+                    } else {
+                        // Expected exactly once on mainnet: the pallet's own StorageVersion key (32 bytes).
+                        log::warn!(
+                            target: "runtime::migration",
+                            "ClearOrmlVestingLocks: skipping non-schedule key {:?} ({} bytes)",
+                            &key[..],
+                            key.len()
+                        );
                     }
                     next_key = key;
                 }
