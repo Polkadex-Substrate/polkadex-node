@@ -42,7 +42,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.cargo/bin
             target
           key: ${{ runner.os }}-release-cargo-${{ hashFiles('**/Cargo.lock') }}
 

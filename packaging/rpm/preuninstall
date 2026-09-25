@@ -3,12 +3,14 @@
 # $1 = 0 on real removal (last version going away), $1 >= 1 on upgrade
 set -e
 
-# Stop the service if it's running
-if command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet polkadex-node; then
-    systemctl stop polkadex-node || true
-fi
-
-# Disable the service on real removal (not upgrade)
+# Stop and disable the service on real removal only ($1 = 0). On an upgrade
+# ($1 >= 1) rpm runs the NEW package's %post first, which restarts the running
+# service onto the new binary, and THEN this OLD package's %preun. An
+# unconditional stop here would therefore leave every upgraded node stopped.
+# Same gating as %systemd_preun.
 if [ "$1" = "0" ]; then
+    if command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet polkadex-node; then
+        systemctl stop polkadex-node || true
+    fi
     systemctl disable polkadex-node 2>/dev/null || true
 fi

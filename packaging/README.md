@@ -87,12 +87,20 @@ each run when reporting results.
 - [ ] `dpkg -i` on a clean Ubuntu 24.04 install
 - [ ] `dnf install` on a clean Rocky 9 install
 - [ ] Node reaches peers and syncs on each of the above
+- [ ] Node appears on telemetry under the `NODE_NAME` set in `node.env`, on
+      Ubuntu 22.04 AND Rocky 9. An empty or default name means the
+      `${NODE_NAME}` expansion in the unit failed
 - [ ] Reinstall the same package over an existing install (`dpkg -i` /
-      `dnf install` again) — confirm it doesn't break the running node
+      `dnf install` again) — confirm it doesn't break the running node, and
+      end with `systemctl is-active polkadex-node`: a successful install that
+      leaves the service stopped is a failure
 - [ ] Upgrade to a newer package version over a **running** service — confirm
       the service actually restarts (not just that the binary on disk
-      changed), and confirm the version in the logs after restart matches
-      the new package, not the old one
+      changed), confirm the version in the logs after restart matches
+      the new package, not the old one, and end with
+      `systemctl is-active polkadex-node` (on rpm the old package's `%preun`
+      runs after the new `%post`, so this is where an unconditional stop
+      would show)
 - [ ] Upgrade over a package that was installed but never started — confirm
       it's still not running afterward (no surprise auto-start)
 - [ ] Purge (`dpkg --purge` / equivalent) — confirm `/etc/polkadex` is
