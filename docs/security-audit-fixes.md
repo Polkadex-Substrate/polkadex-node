@@ -579,7 +579,7 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 **Branch:** `fix/spec-392-blockers`
 **Date:** 2026-09-18
 
-**Vulnerability:** Live mainnet (spec 373, confirmed via RPC) has no active `pallet_sudo`, but the `Sudo::Key` storage slot was never wiped when sudo was originally removed years ago. It still holds the 2021 genesis root key (`0x70a5f4e7...`, corresponding to `esoK6TMuNq1utawjV81FWkTDZ6CTXSgmjhXXz4P1FD74ppL8Q` — confirmed live and unchanged since block 0). Spec 392 re-added `pallet_sudo` under the same pallet name at `pallet_index(45)` with no migration touching that slot. At enactment, the leftover value would have become live Root over mainnet with no `set_key` call needed — to an account not held by the current team.
+**Vulnerability:** Live mainnet (spec 373, confirmed via RPC) has no active `pallet_sudo`, but the `Sudo::Key` storage slot was never wiped when sudo was originally removed years ago. It still holds the 2021 genesis root key (confirmed live and unchanged since block 0). Spec 392 re-added `pallet_sudo` under the same pallet name at `pallet_index(45)` with no migration touching that slot. At enactment, the leftover value would have become live Root over mainnet with no `set_key` call needed — to an account not held by the current team.
 
 **Changes made:**
 - `runtimes/mainnet/src/lib.rs`: removed `impl pallet_sudo::Config for Runtime`; replaced `#[runtime::pallet_index(45)] pub type Sudo = ...` with a removal comment
@@ -589,7 +589,7 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 - `runtimes/mainnet/src/migrations.rs`: added `ClearLegacySudoKey` — a guarded, one-shot migration with `try-runtime` pre/post checks confirming the slot is empty after upgrade. Guarded against re-execution on any future upgrade. **Updated per PR review (visiondream3):** clears the entire `Sudo` pallet storage prefix via `sp_io::hashing::twox_128(b"Sudo")` + `frame_support::storage::unhashed::clear_prefix`, rather than only the `Key` item — mainnet also has a `:__STORAGE_VERSION__:` marker under the same prefix, and clearing the whole thing leaves nothing behind under a pallet name that no longer exists.
 - Wired `migrations::ClearLegacySudoKey` into the `Migrations` tuple in `lib.rs`
 
-**Note:** `runtimes/mainnet/src/configs/mod.rs` also has a `pallet_sudo::Config` impl, but that file is dead code — `configs` is never declared as a module anywhere in `lib.rs`, so it's not compiled. Left untouched; not a live risk.
+**Note:** `runtimes/mainnet/src/configs/mod.rs` also had a `pallet_sudo::Config` impl, but that file was dead code — `configs` was never declared as a module anywhere in `lib.rs`, so it was never compiled and was not a live risk. **Update (2026-09-25):** deleted outright rather than left in place, for the same reason `benchmarks.rs` was deleted — dead code with a stale pallet impl in it is exactly the kind of thing that gets copy-pasted back to life by accident.
 
 **Verification (2026-09-21):** ran `try-runtime on-runtime-upgrade live` against `wss://so.polkadex.ee` with no `--pallet` scoping (the first scoped run never loaded `Sudo` storage into its sandbox, since the pallet doesn't exist in the new runtime's metadata — that run's `removed=0` result was a fetch-scope artifact, not a real finding). Unfiltered run against the full live state: `🔑 Cleared legacy Sudo storage prefix (removed=2)` — both the `Key` value and the `:__STORAGE_VERSION__:` marker, confirmed on the very first pass against genuinely populated data. Second pass confirms `Skipping ClearLegacySudoKey: already applied` and storage roots match before/after — idempotency holds. No panics, no errors, across the full run.
 
@@ -664,7 +664,7 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 **Changes made:**
 - Changed `PoolAssets`' `ForceOrigin` to `EnsureRoot<AccountId>`. `Assets` (Instance1) `ForceOrigin` left as `EnsureRootOrHalfCouncil` — not targeted by this finding.
 
-**Note for reviewer:** worth confirming with the auditor whether Council-gating on `Assets` (Instance1) is intentionally out of scope, or whether F-072's "Root-only" language was meant to cover both instances.
+**Resolved (2026-09-25, visiondream3):** `Assets` (Instance1) `ForceOrigin` stays `EnsureRootOrHalfCouncil` deliberately. At this stage of the network a recovery path that doesn't require a two-month referendum is needed, and the audit itself called this the usual governance tradeoff rather than a finding — not in scope for this fix.
 
 ---
 

@@ -1809,8 +1809,12 @@ use sp_staking::currency_to_vote::U128CurrencyToVote;
 
 #[cfg(feature = "runtime-benchmarks")]
 impl BenchmarkHelper<parity_scale_codec::Compact<u128>, ()> for AssetU128 {
+	// F-066: id 0 is reserved (Instance1's AssetsCreateOrigin rejects it for signed
+	// origins). Offset by 1 so generated benchmark ids never collide with it. Instance2
+	// (PoolAssets) also uses this helper but has no such restriction, so the offset is
+	// harmless there.
 	fn create_asset_id_parameter(id: u32) -> parity_scale_codec::Compact<u128> {
-		parity_scale_codec::Compact::from(id as u128)
+		parity_scale_codec::Compact::from(id as u128 + 1)
 	}
 	fn create_reserve_id_parameter(_id: u32) -> () {
 		()
@@ -2158,7 +2162,10 @@ impl EnsureOriginWithArg<RuntimeOrigin, u128> for AssetsCreateOrigin {
 		<EnsureSigned<AccountId> as EnsureOrigin<RuntimeOrigin>>::try_origin(o)
 	}
 	#[cfg(feature = "runtime-benchmarks")]
-	fn try_successful_origin(_asset_id: &u128) -> Result<RuntimeOrigin, ()> {
+	fn try_successful_origin(asset_id: &u128) -> Result<RuntimeOrigin, ()> {
+		if *asset_id == 0 {
+			return Err(());
+		}
 		<EnsureSigned<AccountId> as EnsureOrigin<RuntimeOrigin>>::try_successful_origin()
 	}
 }
@@ -3981,6 +3988,19 @@ mod tests {
         });
     }
 
+    // F-002: pallet_sudo was removed from construct_runtime because a leftover Sudo::Key
+    // slot handed Root over mainnet to an unknown keyholder. pallet-sudo stays in the
+    // workspace (pdex-migration depends on it), so re-adding it to construct_runtime is a
+    // two-line change — this makes that regression a red test instead of a silent repeat.
+    #[test]
+    fn f002_no_sudo_pallet_in_runtime() {
+        use frame_support::traits::PalletsInfoAccess;
+        assert!(
+            AllPalletsWithSystem::infos().iter().all(|p| p.name != "Sudo"),
+            "pallet_sudo must not be present in construct_runtime! (F-002)",
+        );
+    }
+
     // F-065: NonTransfer proxy must block Contracts and Revive calls, since a contract
     // call can carry value and would otherwise bypass the Balances/Assets/PoolAssets/
     // AssetConversion block entirely.
@@ -3993,12 +4013,41 @@ mod tests {
             let revive_call = RuntimeCall::Revive(pallet_revive::Call::remove_code {
                 code_hash: Default::default(),
             });
+            let target = sp_runtime::MultiAddress::Id(AccountId::from([9u8; 32]));
+            let assets_call = RuntimeCall::Assets(pallet_assets::Call::<Runtime, Instance1>::transfer {
+                id: parity_scale_codec::Compact(1u128),
+                target: target.clone(),
+                amount: 1,
+            });
+            let pool_assets_call = RuntimeCall::PoolAssets(pallet_assets::Call::<Runtime, Instance2>::transfer {
+                id: parity_scale_codec::Compact(1u128),
+                target,
+                amount: 1,
+            });
+            let asset_conversion_call = RuntimeCall::AssetConversion(
+                pallet_asset_conversion::Call::<Runtime>::swap_exact_tokens_for_tokens {
+                    path: vec![
+                        Box::new(NativeOrWithId::Native),
+                        Box::new(NativeOrWithId::WithId(1u128)),
+                    ],
+                    amount_in: 1,
+                    amount_out_min: 0,
+                    send_to: AccountId::from([9u8; 32]),
+                    keep_alive: false,
+                },
+            );
 
             assert!(!ProxyType::NonTransfer.filter(&contracts_call));
             assert!(!ProxyType::NonTransfer.filter(&revive_call));
+            assert!(!ProxyType::NonTransfer.filter(&assets_call));
+            assert!(!ProxyType::NonTransfer.filter(&pool_assets_call));
+            assert!(!ProxyType::NonTransfer.filter(&asset_conversion_call));
             // Any proxy still allows everything.
             assert!(ProxyType::Any.filter(&contracts_call));
             assert!(ProxyType::Any.filter(&revive_call));
+            assert!(ProxyType::Any.filter(&assets_call));
+            assert!(ProxyType::Any.filter(&pool_assets_call));
+            assert!(ProxyType::Any.filter(&asset_conversion_call));
         });
     }
 
@@ -4011,6 +4060,17 @@ mod tests {
             assert!(AssetsCreateOrigin::try_origin(RuntimeOrigin::signed(caller.clone()), &0u128)
                 .is_err());
             assert!(AssetsCreateOrigin::try_origin(RuntimeOrigin::signed(caller), &1u128).is_ok());
+
+            // Id 0 is reserved from signed CreateOrigin, but Root must still be able to
+            // create it via force_create (separate ForceOrigin check, untouched by F-066).
+            assert!(pallet_assets::Pallet::<Runtime, Instance1>::force_create(
+                RuntimeOrigin::root(),
+                parity_scale_codec::Compact(0u128),
+                sp_runtime::MultiAddress::Id(AccountId::from([3u8; 32])),
+                true,
+                1,
+            )
+            .is_ok());
         });
     }
 
