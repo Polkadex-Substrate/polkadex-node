@@ -2,7 +2,9 @@ use crate::Runtime;
 use frame_support::{
     // ensure, // unused now that RebuildLmpPoolIdIndex try-runtime is commented out
     traits::{OnRuntimeUpgrade, Get, GetStorageVersion},
-    weights::Weight
+    weights::{Weight, constants::RocksDbWeight},
+    migrations::RemovePallet,
+    parameter_types,
 };
 use sp_std::marker::PhantomData;
 use polkadex_primitives::auction::FeeDistribution;
@@ -316,17 +318,32 @@ impl<T: pallet_child_bounties::Config> OnRuntimeUpgrade for ChildBountiesStorage
 /// but had a lock (e.g. fee-only reasons) are found with `frozen = 0` by the
 /// new try_state check. This migration corrects the `frozen` field to be at
 /// least the maximum of all existing locks.
+///
+/// F-030: guarded to run once (upgrading into spec 392) — this iterates every
+/// account with a lock, which is wasted work forever after the fix is applied,
+/// and re-running it on new, unrelated future state would be incorrect.
 pub struct FixBalancesFrozen;
+
+const FIX_BALANCES_FROZEN_FROM_SPEC: u32 = 391;
+
 impl OnRuntimeUpgrade for FixBalancesFrozen {
     fn on_runtime_upgrade() -> Weight {
+        if crate::System::last_runtime_upgrade_spec_version() > FIX_BALANCES_FROZEN_FROM_SPEC {
+            log::warn!("Skipping FixBalancesFrozen: already applied");
+            return <Runtime as frame_system::Config>::DbWeight::get().reads(1);
+        }
+        let mut iterated: u64 = 0;
+        let mut mutated: u64 = 0;
         let mut fixed: u64 = 0;
         for (who, locks) in pallet_balances::Locks::<Runtime>::iter() {
+            iterated += 1;
             let max_lock = locks.iter().map(|l| l.amount).max().unwrap_or_default();
             if max_lock == 0 {
                 continue;
             }
             // T::AccountStore = frame_system::Pallet<Runtime>, so balance data
             // lives in frame_system::Account (NOT pallet_balances::Account).
+            mutated += 1;
             frame_system::Account::<Runtime>::mutate(&who, |info| {
                 if max_lock > info.data.frozen {
                     info.data.frozen = max_lock;
@@ -335,8 +352,12 @@ impl OnRuntimeUpgrade for FixBalancesFrozen {
             });
         }
         log::info!("🔧 Fixed frozen field for {} accounts with stale locks", fixed);
+        // `iterated` covers the Locks::iter() read for every account visited (including
+        // those skipped for having no lock); `mutated` covers the Account read+write
+        // that `mutate` performs unconditionally for every account with a nonzero lock,
+        // whether or not `fixed` was actually bumped.
         <Runtime as frame_system::Config>::DbWeight::get()
-            .reads_writes(fixed * 2 + 1, fixed)
+            .reads_writes(iterated + mutated + 1, mutated)
     }
 }
 
@@ -346,9 +367,21 @@ impl OnRuntimeUpgrade for FixBalancesFrozen {
 
 /// The council prime on-chain is not in the members list (pre-existing state
 /// inconsistency from the mainnet fork). Clear it so the invariant holds.
+///
+/// F-030: guarded to run once (upgrading into spec 392) — harmless to re-run
+/// (only fires when the invariant is actually broken), but guarded anyway for
+/// consistency with the other one-shot migrations and to avoid an unnecessary
+/// storage read on every future upgrade forever.
 pub struct FixCouncilPrime;
+
+const FIX_COUNCIL_PRIME_FROM_SPEC: u32 = 391;
+
 impl OnRuntimeUpgrade for FixCouncilPrime {
     fn on_runtime_upgrade() -> Weight {
+        if crate::System::last_runtime_upgrade_spec_version() > FIX_COUNCIL_PRIME_FROM_SPEC {
+            log::warn!("Skipping FixCouncilPrime: already applied");
+            return <Runtime as frame_system::Config>::DbWeight::get().reads(1);
+        }
         use pallet_collective::Instance1 as CouncilCollective;
         if let Some(prime) = pallet_collective::Prime::<Runtime, CouncilCollective>::get() {
             let members = pallet_collective::Members::<Runtime, CouncilCollective>::get();
@@ -367,9 +400,21 @@ impl OnRuntimeUpgrade for FixCouncilPrime {
 /// making existing entries undecodable with the new runtime types.
 /// Old offence records are stale processed slash data — safe to clear.
 /// Uses raw prefix clearing because entries can't be decoded with new types.
+///
+/// F-030: guarded to run once (upgrading into spec 392). Without this guard,
+/// this would wipe legitimate future offence reports on every subsequent
+/// runtime upgrade too — not just the historical undecodable entries it was
+/// written for.
 pub struct ClearOffenceReports;
+
+const CLEAR_OFFENCE_REPORTS_FROM_SPEC: u32 = 391;
+
 impl OnRuntimeUpgrade for ClearOffenceReports {
     fn on_runtime_upgrade() -> Weight {
+        if crate::System::last_runtime_upgrade_spec_version() > CLEAR_OFFENCE_REPORTS_FROM_SPEC {
+            log::warn!("Skipping ClearOffenceReports: already applied");
+            return <Runtime as frame_system::Config>::DbWeight::get().reads(1);
+        }
         let result = frame_support::storage::migration::clear_storage_prefix(
             b"Offences",
             b"Reports",
@@ -385,6 +430,71 @@ impl OnRuntimeUpgrade for ClearOffenceReports {
         <Runtime as frame_system::Config>::DbWeight::get().writes(result.backend as u64 + 1)
     }
 }
+
+/// F-002 — ClearLegacySudoKey
+///
+/// `pallet_sudo` was removed from `construct_runtime!` years ago, but the
+/// `Sudo::Key` storage slot was never wiped and still holds the 2021 genesis
+/// root key (confirmed live via RPC). Spec 392 re-adds `pallet_sudo` under the
+/// same name with no migration touching that slot — without this fix, that
+/// leftover value becomes live Root over mainnet the instant the upgrade
+/// enacts, with no `set_key` call needed by anyone.
+///
+/// Guarded to run once, on the upgrade into spec 392, and never again.
+pub struct ClearLegacySudoKey;
+
+const CLEAR_LEGACY_SUDO_KEY_FROM_SPEC: u32 = 391; // Runs once, upgrading into spec 392
+
+impl OnRuntimeUpgrade for ClearLegacySudoKey {
+    fn on_runtime_upgrade() -> Weight {
+        if crate::System::last_runtime_upgrade_spec_version() > CLEAR_LEGACY_SUDO_KEY_FROM_SPEC {
+            log::warn!("Skipping ClearLegacySudoKey: already applied");
+            return <Runtime as frame_system::Config>::DbWeight::get().reads(1);
+        }
+
+        // Clear everything under the Sudo pallet prefix (Key and the storage
+        // version marker), so nothing remains under a pallet name that no longer exists.
+        let prefix = sp_io::hashing::twox_128(b"Sudo");
+        let result = frame_support::storage::unhashed::clear_prefix(&prefix, None, None);
+        log::info!("🔑 Cleared legacy Sudo storage prefix (removed={})", result.backend);
+        <Runtime as frame_system::Config>::DbWeight::get().writes(result.backend as u64 + 1)
+    }
+
+    #[cfg(feature = "try-runtime")]
+    fn pre_upgrade() -> Result<sp_std::vec::Vec<u8>, sp_runtime::TryRuntimeError> {
+        if crate::System::last_runtime_upgrade_spec_version() > CLEAR_LEGACY_SUDO_KEY_FROM_SPEC {
+            return Ok(sp_std::vec::Vec::new());
+        }
+        let key = frame_support::storage::storage_prefix(b"Sudo", b"Key");
+        let existed = sp_io::storage::exists(&key);
+        log::info!("🔍 ClearLegacySudoKey pre_upgrade: Sudo::Key exists = {}", existed);
+        Ok(sp_std::vec::Vec::new())
+    }
+
+    #[cfg(feature = "try-runtime")]
+    fn post_upgrade(_state: sp_std::vec::Vec<u8>) -> Result<(), sp_runtime::TryRuntimeError> {
+        use frame_support::ensure;
+        let key = frame_support::storage::storage_prefix(b"Sudo", b"Key");
+        ensure!(
+            !sp_io::storage::exists(&key),
+            "ClearLegacySudoKey: Sudo::Key still present after migration"
+        );
+        Ok(())
+    }
+}
+
+parameter_types! {
+    pub const OrderbookCommitteeStr: &'static str = "OrderbookCommittee";
+}
+
+/// F-029 — ClearOrderbookCommittee
+///
+/// `OrderbookCommittee` (pallet_collective Instance4) governed `OCEX`, which was
+/// removed from `construct_runtime!`. The committee pallet stayed active with
+/// nothing left to govern — an orphaned permission surface. Wipes all storage
+/// under its prefix (members, proposals, votes) using the framework's own
+/// `RemovePallet` migration.
+pub type ClearOrderbookCommittee = RemovePallet<OrderbookCommitteeStr, RocksDbWeight>;
 
 /// C6 Migration — RebuildLmpPoolIdIndex
 ///
@@ -566,9 +676,10 @@ impl OnRuntimeUpgrade for PruneStaleIngressMessages {
 ///
 /// Background: OrmlVesting was removed from construct_runtime without a cleanup migration.
 /// The pallet applied `Currency::set_lock(*b"ormlvest", account, amount, ...)` to each
-/// beneficiary.  Without this migration, those 13 accounts can never remove the lock
-/// (no `claim()` extrinsic exists after pallet removal), so their vested tokens are
-/// permanently frozen.
+/// beneficiary.  Without this migration, those 12 accounts (12 VestingSchedules entries —
+/// confirmed on-chain; the 13th key cleared below is the pallet's own StorageVersion
+/// marker, not an account) can never remove the lock (no `claim()` extrinsic exists after
+/// pallet removal), so their vested tokens are permanently frozen.
 ///
 /// Key layout for OrmlVesting::VestingSchedules (StorageMap<Blake2_128Concat, AccountId, …>):
 ///   [0..16]  twox128("OrmlVesting")       = d84892f1db5f9dfd80c521d0a5647650
@@ -583,6 +694,11 @@ where
     T::AccountId: Decode,
 {
     fn on_runtime_upgrade() -> Weight {
+        // F-030: one-shot, gated like the other spec-392 migrations
+        if frame_system::Pallet::<T>::last_runtime_upgrade_spec_version() > 391 {
+            log::warn!("Skipping ClearOrmlVestingLocks: already applied");
+            return T::DbWeight::get().reads(1);
+        }
         use frame_support::traits::LockableCurrency;
 
         // twox128("OrmlVesting") = d84892f1db5f9dfd80c521d0a5647650
@@ -626,7 +742,23 @@ where
                                 "ClearOrmlVestingLocks: removed ormlvest lock for account {:?}",
                                 account
                             );
+                        } else {
+                            // Never expected on mainnet (all 12 entries decode), but if it happens the
+                            // lock stays in place and this line is the only record of which key it was.
+                            log::warn!(
+                                target: "runtime::migration",
+                                "ClearOrmlVestingLocks: could not decode AccountId from key {:?}; lock left in place",
+                                &key[..]
+                            );
                         }
+                    } else {
+                        // Expected exactly once on mainnet: the pallet's own StorageVersion key (32 bytes).
+                        log::warn!(
+                            target: "runtime::migration",
+                            "ClearOrmlVestingLocks: skipping non-schedule key {:?} ({} bytes)",
+                            &key[..],
+                            key.len()
+                        );
                     }
                     next_key = key;
                 }

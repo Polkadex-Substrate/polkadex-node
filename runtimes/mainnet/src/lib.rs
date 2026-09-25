@@ -51,6 +51,7 @@ use frame_support::{
 	parameter_types,
 	traits::{
 		fungible::{HoldConsideration, Inspect}, AsEnsureOriginWithArg, EitherOfDiverse, EnsureOrigin,
+		EnsureOriginWithArg,
 		EqualPrivilegeOnly, Get, InstanceFilter, KeyOwnerProofSystem, LockIdentifier,
 		tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId}, ConstU64, ConstU32, ConstU16, ConstBool,
 		VariantCountOf, tokens::imbalance::{ResolveAssetTo, ResolveTo, OnUnbalanced}, Imbalance, Nothing, InsideBoth,
@@ -359,9 +360,6 @@ parameter_types! {
     pub const TechnicalMotionDuration: BlockNumber = 7 * DAYS;
     pub const TechnicalMaxProposals: u32 = 100;
     pub const TechnicalMaxMembers: u32 = 100;
-    pub const OrderbookMotionDuration: BlockNumber = DAYS;
-    pub const OrderbookMaxProposals: u32 = 100;
-    pub const OrderbookMaxMembers: u32 = 3;
     pub const ProposalBond: Permill = Permill::from_percent(5);
     pub const ProposalBondMinimum: Balance = 100 * PDEX;
     pub const SpendPeriod: BlockNumber = 24 * DAYS;
@@ -491,9 +489,7 @@ parameter_types! {
     pub const DelegatedStakingPalletId: PalletId = PalletId(*b"py/dlstk");
 	  pub const SlashRewardFraction: Perbill = Perbill::from_percent(1);
     pub const EnterDuration: BlockNumber = 4 * HOURS;
-    pub const EnterDepositAmount: Balance = 2_000_000 * DOLLARS;
     pub const ExtendDuration: BlockNumber = 2 * HOURS;
-    pub const ExtendDepositAmount: Balance = 1_000_000 * DOLLARS;
     pub const ReleaseDelay: u32 = 2 * DAYS;
 	  pub MbmServiceWeight: Weight = Perbill::from_percent(80) * RuntimeBlockWeights::get().max_block;
     pub const BeefySetIdSessionEntries: u32 = BondingDuration::get() * SessionsPerEra::get();
@@ -738,11 +734,14 @@ impl pallet_safe_mode::Config for Runtime {
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type WhitelistedCalls = SafeModeWhitelistedCalls;
 	type EnterDuration = EnterDuration;
-	type EnterDepositAmount = EnterDepositAmount;
+	// F-064: no permissionless entry into SafeMode. Only ForceEnterOrigin (Root) can enter or extend.
+	type EnterDepositAmount = ();
 	type ExtendDuration = ExtendDuration;
-	type ExtendDepositAmount = ExtendDepositAmount;
-	type ForceEnterOrigin = EnsureRootWithSuccess<AccountId, ConstU32<9>>;
-	type ForceExtendOrigin = EnsureRootWithSuccess<AccountId, ConstU32<11>>;
+	type ExtendDepositAmount = ();
+	// F-064: success value is the halt duration (see force_enter/force_extend in
+	// pallet_safe_mode) — must match EnterDuration/ExtendDuration, not leftover demo values.
+	type ForceEnterOrigin = EnsureRootWithSuccess<AccountId, EnterDuration>;
+	type ForceExtendOrigin = EnsureRootWithSuccess<AccountId, ExtendDuration>;
 	type ForceExitOrigin = EnsureRoot<AccountId>;
 	type ForceDepositOrigin = EnsureRoot<AccountId>;
 	type ReleaseDelay = ReleaseDelay;
@@ -871,10 +870,22 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 	fn filter(&self, c: &RuntimeCall) -> bool {
 		match self {
 			ProxyType::Any => true,
+			// F-065: NonTransfer previously only blocked native-currency transfer paths
+			// (Balances, Indices::transfer). Assets, PoolAssets, and AssetConversion are
+			// all live pallets that can move value between accounts (transfer, swaps,
+			// liquidity operations) — a "NonTransfer" proxy could move funds through any
+			// of them. Contracts and Revive calls can also carry value (a trivial contract
+			// forwarding a transfer would bypass the restriction entirely), so both are
+			// blocked wholesale too, same as the asset pallets above.
 			ProxyType::NonTransfer => !matches!(
 				c,
 				RuntimeCall::Balances(..)
 					| RuntimeCall::Indices(pallet_indices::Call::transfer { .. })
+					| RuntimeCall::Assets(..)
+					| RuntimeCall::PoolAssets(..)
+					| RuntimeCall::AssetConversion(..)
+					| RuntimeCall::Contracts(..)
+					| RuntimeCall::Revive(..)
 			),
 			ProxyType::Governance => matches!(
 				c,
@@ -882,7 +893,7 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 					| RuntimeCall::TechnicalCommittee(..)
 					| RuntimeCall::Elections(..)
 					| RuntimeCall::Treasury(..)
-					| RuntimeCall::OrderbookCommittee(..)
+				// F-029: OrderbookCommittee removed — no longer a valid RuntimeCall variant
 			),
 			ProxyType::Staking => matches!(c, RuntimeCall::Staking(..)),
 		}
@@ -1484,25 +1495,8 @@ impl pallet_collective::Config<TechnicalCollective> for Runtime {
 	type Consideration = ();
 }
 
-type OrderbookCollective = pallet_collective::Instance4;
-impl pallet_collective::Config<OrderbookCollective> for Runtime {
-	type RuntimeOrigin = RuntimeOrigin;
-	type Proposal = RuntimeCall;
-	type RuntimeEvent = RuntimeEvent;
-	type MotionDuration = OrderbookMotionDuration;
-	type MaxProposals = OrderbookMaxProposals;
-	type MaxMembers = OrderbookMaxMembers;
-	type DefaultVote = pallet_collective::PrimeDefaultVote;
-	type WeightInfo = pallet_collective::weights::SubstrateWeight<Runtime>;
-	type SetMembersOrigin = EitherOfDiverse<
-		EnsureRoot<AccountId>,
-		pallet_collective::EnsureProportionMoreThan<AccountId, TechnicalCollective, 1, 2>,
-	>;
-	type MaxProposalWeight = MaxCollectivesProposalWeight;
-	type DisapproveOrigin = EnsureRoot<AccountId>;
-	type KillOrigin = EnsureRoot<AccountId>;
-	type Consideration = ();
-}
+// F-029: OrderbookCollective / OrderbookCommittee removed — it governed OCEX,
+// which no longer exists in construct_runtime. See migrations::ClearOrderbookCommittee.
 
 type EnsureRootOrHalfCouncil = EitherOfDiverse<
 	EnsureRoot<AccountId>,
@@ -1649,12 +1643,6 @@ impl pallet_democracy::Config for Runtime {
 	type VetoOrigin = pallet_collective::EnsureMember<AccountId, TechnicalCollective>;
 	type PalletsOrigin = OriginCaller;
 	type Slash = Treasury;
-}
-
-impl pallet_sudo::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type RuntimeCall = RuntimeCall;
-	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
 
 impl<LocalCall> frame_system::offchain::CreateTransaction<LocalCall> for Runtime
@@ -1821,8 +1809,12 @@ use sp_staking::currency_to_vote::U128CurrencyToVote;
 
 #[cfg(feature = "runtime-benchmarks")]
 impl BenchmarkHelper<parity_scale_codec::Compact<u128>, ()> for AssetU128 {
+	// F-066: id 0 is reserved (Instance1's AssetsCreateOrigin rejects it for signed
+	// origins). Offset by 1 so generated benchmark ids never collide with it. Instance2
+	// (PoolAssets) also uses this helper but has no such restriction, so the offset is
+	// harmless there.
 	fn create_asset_id_parameter(id: u32) -> parity_scale_codec::Compact<u128> {
-		parity_scale_codec::Compact::from(id as u128)
+		parity_scale_codec::Compact::from(id as u128 + 1)
 	}
 	fn create_reserve_id_parameter(_id: u32) -> () {
 		()
@@ -2157,13 +2149,34 @@ impl pallet_beefy_mmr::Config for Runtime {
 
 // pallet_assets: Instance1 config implementation
 // https://github.com/paritytech/polkadot-sdk/blob/1530a8826416514c3326597338b3511a55040663/substrate/bin/node/runtime/src/lib.rs#L1784
+/// F-066: asset id 0 is reserved. `AsEnsureOriginWithArg<EnsureSigned<_>>` let any
+/// signed account claim any id, including 0. Any signed account may still create
+/// non-zero ids; only Root/ForceOrigin can create id 0, via `force_create`.
+pub struct AssetsCreateOrigin;
+impl EnsureOriginWithArg<RuntimeOrigin, u128> for AssetsCreateOrigin {
+	type Success = AccountId;
+	fn try_origin(o: RuntimeOrigin, asset_id: &u128) -> Result<Self::Success, RuntimeOrigin> {
+		if *asset_id == 0 {
+			return Err(o);
+		}
+		<EnsureSigned<AccountId> as EnsureOrigin<RuntimeOrigin>>::try_origin(o)
+	}
+	#[cfg(feature = "runtime-benchmarks")]
+	fn try_successful_origin(asset_id: &u128) -> Result<RuntimeOrigin, ()> {
+		if *asset_id == 0 {
+			return Err(());
+		}
+		<EnsureSigned<AccountId> as EnsureOrigin<RuntimeOrigin>>::try_successful_origin()
+	}
+}
+
 impl pallet_assets::Config<Instance1> for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Balance = u128;
     type AssetId = u128;
     type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
-    type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
+    type CreateOrigin = AssetsCreateOrigin;
     type ForceOrigin = EnsureRootOrHalfCouncil;
     type AssetDeposit = AssetDeposit;
     type AssetAccountDeposit = AssetAccountDeposit;
@@ -2191,7 +2204,10 @@ impl pallet_assets::Config<Instance2> for Runtime {
     type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
     type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
-    type ForceOrigin = EnsureRootOrHalfCouncil;
+    // F-072: PoolAssets force-operations (force_create/force_asset_status/etc.) are
+    // Root-only, not Root-or-HalfCouncil — pool asset lifecycle shouldn't be
+    // council-gated the same way general user-created assets are.
+    type ForceOrigin = EnsureRoot<AccountId>;
     type AssetDeposit = AssetDeposit;
     type AssetAccountDeposit = AssetAccountDeposit;
     type MetadataDepositBase = MetadataDepositBase;
@@ -2580,8 +2596,9 @@ mod runtime {
     // #[runtime::pallet_index(35)]
     // pub type OCEX = pallet_ocex_lmp::Pallet<Runtime>;
 
-    #[runtime::pallet_index(36)]
-    pub type OrderbookCommittee = pallet_collective::Pallet<Runtime, Instance4>;
+    // #36 was OrderbookCommittee - REMOVED (F-029: governed OCEX, which no longer
+    // exists in construct_runtime — an orphaned permission surface with nothing left
+    // to govern. See migrations::ClearOrderbookCommittee.)
 
     // #39 was Thea - REMOVED
 
@@ -2590,8 +2607,10 @@ mod runtime {
 
     // #44 was TheaExecutor - REMOVED
 
-    #[runtime::pallet_index(45)]
-    pub type Sudo = pallet_sudo::Pallet<Runtime>;
+    // #45 was Sudo - REMOVED (F-002: Sudo::Key storage slot on mainnet still holds
+    // the 2021 genesis root key from before sudo was first removed years ago. Re-adding
+    // pallet_sudo under the same name with no migration touching that slot would hand
+    // Root over mainnet to whoever holds that key at enactment. See migrations::ClearLegacySudoKey.)
 
     #[runtime::pallet_index(46)]
     pub type AssetConversion = pallet_asset_conversion::Pallet<Runtime>;
@@ -2963,6 +2982,10 @@ pub type Executive = frame_executive::Executive<
 type Migrations = (
 	// migrations::InitOcexFeeConfig<Runtime>, // OCEX removed from runtime
 	migrations::UpgradeSessionKeys,
+    // F-002: wipe dangling Sudo::Key before pallet_sudo is re-introduced without it
+    migrations::ClearLegacySudoKey,
+    // F-029: wipe orphaned OrderbookCommittee storage — governed OCEX, now removed
+    migrations::ClearOrderbookCommittee,
     // Pallet storage version migrations
     migrations::StakingStorageVersionMigration<Runtime>,
     migrations::SessionStorageVersionMigration<Runtime>,
@@ -3893,18 +3916,181 @@ impl_runtime_apis! {
 
 #[cfg(test)]
 mod tests {
-	use frame_system::offchain::CreateSignedTransaction;
+    use frame_system::offchain::CreateSignedTransaction;
 
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn validate_transaction_submitter_bounds() {
-		fn is_submit_signed_transaction<T>()
-		where
-			T: CreateSignedTransaction<RuntimeCall>,
-		{
-		}
+    #[test]
+    fn validate_transaction_submitter_bounds() {
+        fn is_submit_signed_transaction<T>()
+        where
+            T: CreateSignedTransaction<RuntimeCall>,
+        {
+        }
 
-		is_submit_signed_transaction::<Runtime>();
-	}
+        is_submit_signed_transaction::<Runtime>();
+    }
+
+    fn new_test_ext() -> sp_io::TestExternalities {
+        frame_system::GenesisConfig::<Runtime>::default()
+            .build_storage()
+            .unwrap()
+            .into()
+    }
+
+    // F-064: no permissionless entry into SafeMode. EnterDepositAmount/ExtendDepositAmount
+    // are () (i.e. Get<Option<_>>::get() == None), so enter()/extend() must fail with
+    // NotConfigured for any signed account, regardless of balance.
+    #[test]
+    fn f064_safe_mode_permissionless_enter_is_disabled() {
+        new_test_ext().execute_with(|| {
+            let caller = AccountId::from([1u8; 32]);
+            assert_eq!(
+                pallet_safe_mode::Pallet::<Runtime>::enter(RuntimeOrigin::signed(caller.clone())),
+                Err(pallet_safe_mode::Error::<Runtime>::NotConfigured.into()),
+            );
+
+            // extend() checks "are we currently entered?" before the deposit — force safe
+            // mode on via the Root-gated path first so the deposit check is actually reached.
+            assert!(
+                pallet_safe_mode::Pallet::<Runtime>::force_enter(RuntimeOrigin::root()).is_ok()
+            );
+            assert_eq!(
+                pallet_safe_mode::Pallet::<Runtime>::extend(RuntimeOrigin::signed(caller)),
+                Err(pallet_safe_mode::Error::<Runtime>::NotConfigured.into()),
+            );
+        });
+    }
+
+    // F-064: ForceEnterOrigin/ForceExtendOrigin's EnsureRootWithSuccess value IS the halt
+    // duration (pallet_safe_mode::force_enter/force_extend pass it straight to do_enter/
+    // do_extend) — it must be EnterDuration/ExtendDuration (4h/2h), not a leftover demo
+    // ConstU32<9>/ConstU32<11> that would let a Root-forced halt lapse in under two minutes.
+    #[test]
+    fn f064_force_enter_duration_matches_config() {
+        new_test_ext().execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(1);
+            assert!(
+                pallet_safe_mode::Pallet::<Runtime>::force_enter(RuntimeOrigin::root()).is_ok()
+            );
+            assert_eq!(
+                pallet_safe_mode::EnteredUntil::<Runtime>::get(),
+                Some(1 + EnterDuration::get()),
+            );
+
+            assert!(
+                pallet_safe_mode::Pallet::<Runtime>::force_extend(RuntimeOrigin::root()).is_ok()
+            );
+            assert_eq!(
+                pallet_safe_mode::EnteredUntil::<Runtime>::get(),
+                Some(1 + EnterDuration::get() + ExtendDuration::get()),
+            );
+        });
+    }
+
+    // F-002: pallet_sudo was removed from construct_runtime because a leftover Sudo::Key
+    // slot handed Root over mainnet to an unknown keyholder. pallet-sudo stays in the
+    // workspace (pdex-migration depends on it), so re-adding it to construct_runtime is a
+    // two-line change — this makes that regression a red test instead of a silent repeat.
+    #[test]
+    fn f002_no_sudo_pallet_in_runtime() {
+        use frame_support::traits::PalletsInfoAccess;
+        assert!(
+            AllPalletsWithSystem::infos().iter().all(|p| p.name != "Sudo"),
+            "pallet_sudo must not be present in construct_runtime! (F-002)",
+        );
+    }
+
+    // F-065: NonTransfer proxy must block Contracts and Revive calls, since a contract
+    // call can carry value and would otherwise bypass the Balances/Assets/PoolAssets/
+    // AssetConversion block entirely.
+    #[test]
+    fn f065_non_transfer_proxy_blocks_contracts_and_revive() {
+        new_test_ext().execute_with(|| {
+            let contracts_call = RuntimeCall::Contracts(pallet_contracts::Call::remove_code {
+                code_hash: Default::default(),
+            });
+            let revive_call = RuntimeCall::Revive(pallet_revive::Call::remove_code {
+                code_hash: Default::default(),
+            });
+            let target = sp_runtime::MultiAddress::Id(AccountId::from([9u8; 32]));
+            let assets_call = RuntimeCall::Assets(pallet_assets::Call::<Runtime, Instance1>::transfer {
+                id: parity_scale_codec::Compact(1u128),
+                target: target.clone(),
+                amount: 1,
+            });
+            let pool_assets_call = RuntimeCall::PoolAssets(pallet_assets::Call::<Runtime, Instance2>::transfer {
+                id: parity_scale_codec::Compact(1u128),
+                target,
+                amount: 1,
+            });
+            let asset_conversion_call = RuntimeCall::AssetConversion(
+                pallet_asset_conversion::Call::<Runtime>::swap_exact_tokens_for_tokens {
+                    path: vec![
+                        Box::new(NativeOrWithId::Native),
+                        Box::new(NativeOrWithId::WithId(1u128)),
+                    ],
+                    amount_in: 1,
+                    amount_out_min: 0,
+                    send_to: AccountId::from([9u8; 32]),
+                    keep_alive: false,
+                },
+            );
+
+            assert!(!ProxyType::NonTransfer.filter(&contracts_call));
+            assert!(!ProxyType::NonTransfer.filter(&revive_call));
+            assert!(!ProxyType::NonTransfer.filter(&assets_call));
+            assert!(!ProxyType::NonTransfer.filter(&pool_assets_call));
+            assert!(!ProxyType::NonTransfer.filter(&asset_conversion_call));
+            // Any proxy still allows everything.
+            assert!(ProxyType::Any.filter(&contracts_call));
+            assert!(ProxyType::Any.filter(&revive_call));
+            assert!(ProxyType::Any.filter(&assets_call));
+            assert!(ProxyType::Any.filter(&pool_assets_call));
+            assert!(ProxyType::Any.filter(&asset_conversion_call));
+        });
+    }
+
+    // F-066: asset id 0 is reserved. A signed origin must be rejected for id 0 and
+    // accepted for any non-zero id.
+    #[test]
+    fn f066_asset_id_zero_is_reserved() {
+        new_test_ext().execute_with(|| {
+            let caller = AccountId::from([2u8; 32]);
+            assert!(AssetsCreateOrigin::try_origin(RuntimeOrigin::signed(caller.clone()), &0u128)
+                .is_err());
+            assert!(AssetsCreateOrigin::try_origin(RuntimeOrigin::signed(caller), &1u128).is_ok());
+
+            // Id 0 is reserved from signed CreateOrigin, but Root must still be able to
+            // create it via force_create (separate ForceOrigin check, untouched by F-066).
+            assert!(pallet_assets::Pallet::<Runtime, Instance1>::force_create(
+                RuntimeOrigin::root(),
+                parity_scale_codec::Compact(0u128),
+                sp_runtime::MultiAddress::Id(AccountId::from([3u8; 32])),
+                true,
+                1,
+            )
+            .is_ok());
+        });
+    }
+
+    // F-072: PoolAssets ForceOrigin is Root-only, not Root-or-HalfCouncil. A synthetic
+    // "2 of 3 council members" origin — which the old EnsureRootOrHalfCouncil would have
+    // accepted — must now be rejected; only genuine Root may pass.
+    #[test]
+    fn f072_pool_assets_force_origin_is_root_only() {
+        new_test_ext().execute_with(|| {
+            type ForceOrigin = <Runtime as pallet_assets::Config<Instance2>>::ForceOrigin;
+
+            let council_majority: RuntimeOrigin =
+                pallet_collective::RawOrigin::<AccountId, CouncilCollective>::Members(2, 3).into();
+            assert!(
+                <ForceOrigin as EnsureOrigin<RuntimeOrigin>>::try_origin(council_majority).is_err()
+            );
+            assert!(
+                <ForceOrigin as EnsureOrigin<RuntimeOrigin>>::try_origin(RuntimeOrigin::root())
+                    .is_ok()
+            );
+        });
+    }
 }

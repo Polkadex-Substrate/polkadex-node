@@ -573,6 +573,121 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 ---
 
+### F-002 — Sudo::Key storage slot survives pallet_sudo re-addition (WORSE than August audit found)
+**Severity:** Critical — priority 1, before spec 392 can ship
+**Location:** `runtimes/mainnet/src/lib.rs`, `runtimes/mainnet/src/migrations.rs`, `runtimes/mainnet/src/configs/mod.rs` (dead code, not compiled), `runtimes/mainnet/src/benchmarks.rs`, `runtimes/mainnet/Cargo.toml`, `runtimes/mainnet/src/genesis_config_presets.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** Live mainnet (spec 373, confirmed via RPC) has no active `pallet_sudo`, but the `Sudo::Key` storage slot was never wiped when sudo was originally removed years ago. It still holds the 2021 genesis root key (confirmed live and unchanged since block 0). Spec 392 re-added `pallet_sudo` under the same pallet name at `pallet_index(45)` with no migration touching that slot. At enactment, the leftover value would have become live Root over mainnet with no `set_key` call needed — to an account not held by the current team.
+
+**Changes made:**
+- `runtimes/mainnet/src/lib.rs`: removed `impl pallet_sudo::Config for Runtime`; replaced `#[runtime::pallet_index(45)] pub type Sudo = ...` with a removal comment
+- `runtimes/mainnet/src/benchmarks.rs`: removed `[pallet_sudo, Sudo]`
+- `runtimes/mainnet/Cargo.toml`: removed the `pallet-sudo` dependency and its `std`/`try-runtime` feature entries (root workspace `Cargo.toml` dependency left in place — `pallets/pdex-migration` still needs it)
+- `runtimes/mainnet/src/genesis_config_presets.rs`: removed `SudoConfig` import and `sudo: SudoConfig { .. }` genesis field; `root_key` param renamed to `_root_key` (no longer consumed)
+- `runtimes/mainnet/src/migrations.rs`: added `ClearLegacySudoKey` — a guarded, one-shot migration with `try-runtime` pre/post checks confirming the slot is empty after upgrade. Guarded against re-execution on any future upgrade. **Updated per PR review (visiondream3):** clears the entire `Sudo` pallet storage prefix via `sp_io::hashing::twox_128(b"Sudo")` + `frame_support::storage::unhashed::clear_prefix`, rather than only the `Key` item — mainnet also has a `:__STORAGE_VERSION__:` marker under the same prefix, and clearing the whole thing leaves nothing behind under a pallet name that no longer exists.
+- Wired `migrations::ClearLegacySudoKey` into the `Migrations` tuple in `lib.rs`
+
+**Note:** `runtimes/mainnet/src/configs/mod.rs` also had a `pallet_sudo::Config` impl, but that file was dead code — `configs` was never declared as a module anywhere in `lib.rs`, so it was never compiled and was not a live risk. **Update (2026-09-25):** deleted outright rather than left in place, for the same reason `benchmarks.rs` was deleted — dead code with a stale pallet impl in it is exactly the kind of thing that gets copy-pasted back to life by accident.
+
+**Verification (2026-09-21):** ran `try-runtime on-runtime-upgrade live` against `wss://so.polkadex.ee` with no `--pallet` scoping (the first scoped run never loaded `Sudo` storage into its sandbox, since the pallet doesn't exist in the new runtime's metadata — that run's `removed=0` result was a fetch-scope artifact, not a real finding). Unfiltered run against the full live state: `🔑 Cleared legacy Sudo storage prefix (removed=2)` — both the `Key` value and the `:__STORAGE_VERSION__:` marker, confirmed on the very first pass against genuinely populated data. Second pass confirms `Skipping ClearLegacySudoKey: already applied` and storage roots match before/after — idempotency holds. No panics, no errors, across the full run.
+
+---
+
+### F-029 — OrderbookCommittee orphaned governance pallet
+**Severity:** Medium — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`, `runtimes/mainnet/src/migrations.rs`, `runtimes/mainnet/src/genesis_config_presets.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `OrderbookCommittee` (`pallet_collective::Instance4`, `pallet_index(36)`) governed `OCEX`, which was removed from `construct_runtime!`. The committee remained fully active — a live governance body with proposal/voting/membership storage and no pallet left to govern. An orphaned permission surface.
+
+**Changes made:**
+- `runtimes/mainnet/src/lib.rs`: removed the `OrderbookCollective` type alias and its `pallet_collective::Config<OrderbookCollective>` impl; removed the now-unused `OrderbookMotionDuration`/`OrderbookMaxProposals`/`OrderbookMaxMembers` parameter_types; replaced `#[runtime::pallet_index(36)] pub type OrderbookCommittee = ...` with a removal comment; removed `RuntimeCall::OrderbookCommittee(..)` from the `ProxyType::Governance` filter (no longer a valid call variant)
+- `runtimes/mainnet/src/genesis_config_presets.rs`: commented out the `orderbook_committee: Default::default()` genesis field
+- `runtimes/mainnet/src/migrations.rs`: added `ClearOrderbookCommittee` using the framework's own `frame_support::migrations::RemovePallet<P, DbWeight>` — wipes all storage under the `"OrderbookCommittee"` prefix (members, proposals, votes)
+- Wired `migrations::ClearOrderbookCommittee` into the `Migrations` tuple
+
+---
+
+### F-030 — Unguarded one-shot migrations re-execute on every future upgrade
+**Severity:** High — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/migrations.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `FixBalancesFrozen`, `FixCouncilPrime`, and `ClearOffenceReports` were wired directly into the `Migrations` tuple used by `Executive` with no "already applied" guard, unlike `UpgradeSessionKeys` which correctly checks `System::last_runtime_upgrade_spec_version()`. Since this tuple runs on every future runtime upgrade forever, `ClearOffenceReports` in particular would wipe legitimate future offence reports on the *next* upgrade after 392, not just the historical undecodable entries it was written for. `FixBalancesFrozen` would also re-scan every account with a lock on every future upgrade indefinitely.
+
+**Changes made:**
+- Added spec-version guards (`last_runtime_upgrade_spec_version() > 391`, mirroring the existing `UpgradeSessionKeys` pattern) to `FixBalancesFrozen`, `FixCouncilPrime`, and `ClearOffenceReports`. Each now skips with a log message if already applied.
+- **Per PR review (visiondream3):** `ClearOrmlVestingLocks` was also unguarded and got the same treatment — added the identical spec-version guard to its `on_runtime_upgrade`. It's naturally idempotent once the prefix is empty, but there's no reason to leave it as the one ungated exception when every other one-shot migration in this set follows the same pattern.
+
+**Verification (2026-09-21):** unfiltered `try-runtime on-runtime-upgrade live` against `wss://so.polkadex.ee` confirmed all four migrations fire against genuinely populated real data on the first pass, then correctly skip on the second (idempotency) pass: `Fixed frozen field for 1 accounts with stale locks`, `🧹 Cleared 3629 Offences::Reports entries`, `ClearOrmlVestingLocks: unlocked 12 accounts, ran 13 clear_prefix iterations`. All real, nonzero counts — not scoping artifacts.
+
+---
+
+### F-065 — NonTransfer proxy filter only blocked native-currency paths
+**Severity:** High — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `ProxyType::NonTransfer` only excluded `RuntimeCall::Balances(..)` and `RuntimeCall::Indices(pallet_indices::Call::transfer)`. `Assets`, `PoolAssets`, and `AssetConversion` are all live pallets that can move value between accounts (transfer, swaps, liquidity operations) — a proxy delegated as "NonTransfer" could still move funds through any of the three. **Per PR review (visiondream3):** `Contracts` and `Revive` calls can also carry value — a trivial contract forwarding a transfer would bypass the restriction entirely.
+
+**Changes made:**
+- Added `RuntimeCall::Assets(..)`, `RuntimeCall::PoolAssets(..)`, `RuntimeCall::AssetConversion(..)`, `RuntimeCall::Contracts(..)`, `RuntimeCall::Revive(..)` to the `NonTransfer` filter's exclusion match
+
+---
+
+### F-066 — Asset id 0 not reserved
+**Severity:** Medium — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `pallet_assets::Config<Instance1>::CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>` let any signed account create an asset with any id, including 0.
+
+**Changes made:**
+- Added `AssetsCreateOrigin`, a custom `EnsureOriginWithArg<RuntimeOrigin, u128>` impl that rejects asset id 0 for any signed origin, delegating to `EnsureSigned` otherwise. Root/`ForceOrigin` can still create id 0 via `force_create`. Wired in as `Instance1`'s `CreateOrigin`. `PoolAssets` (Instance2) left unchanged — the finding didn't target it and LP-token ids don't carry the same special meaning.
+
+---
+
+### F-072 — PoolAssets ForceOrigin was Root-or-HalfCouncil, not Root-only
+**Severity:** Medium — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `pallet_assets::Config<Instance2>::ForceOrigin` (PoolAssets) was `EnsureRootOrHalfCouncil`, wider than the audit's "Root-only" finding. Pool asset lifecycle force-operations shouldn't be council-gated the same way general user-created assets are.
+
+**Changes made:**
+- Changed `PoolAssets`' `ForceOrigin` to `EnsureRoot<AccountId>`. `Assets` (Instance1) `ForceOrigin` left as `EnsureRootOrHalfCouncil` — not targeted by this finding.
+
+**Resolved (2026-09-25, visiondream3):** `Assets` (Instance1) `ForceOrigin` stays `EnsureRootOrHalfCouncil` deliberately. At this stage of the network a recovery path that doesn't require a two-month referendum is needed, and the audit itself called this the usual governance tradeoff rather than a finding — not in scope for this fix.
+
+---
+
+### F-064 — Permissionless SafeMode entry priced too cheap (correction — not actually fixed on first pass)
+**Severity:** High — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-21
+
+**Vulnerability:** Originally checked only `ForceEnterOrigin`/`ForceExitOrigin`/`ForceDepositOrigin` (all correctly `EnsureRoot`-based) and wrongly logged this as already resolved. **Per PR review (visiondream3):** missed that `pallet_safe_mode` also exposes permissionless `enter()`/`extend()` calls, gated only by a deposit amount, not an origin check — `EnterDepositAmount` was `2,000,000 * DOLLARS` and `ExtendDepositAmount` was `1,000,000 * DOLLARS`. Any signed account with that much PDEX could unilaterally halt the chain (SafeMode restricts dispatch to `SafeModeWhitelistedCalls` — System/SafeMode/TxPause only) without needing Root at all. This is the actual "permissionless halt" the August audit flagged.
+
+**Changes made:**
+- Removed the `EnterDepositAmount`/`ExtendDepositAmount` constants entirely (kept `EnterDuration`/`ExtendDuration`)
+- Set `type EnterDepositAmount = ();` and `type ExtendDepositAmount = ();` in `pallet_safe_mode::Config` — `pallet_safe_mode`'s `enter()`/`extend()` calls `Config::EnterDepositAmount::get().ok_or(Error::NotConfigured)?`, so `()` (returning `None`) disables the permissionless path entirely. Only the Root-gated `Force*Origin` calls can now enter/extend/exit SafeMode.
+
+**Unit tests added for F-064/F-065/F-066/F-072 (2026-09-21):** `try-runtime on-runtime-upgrade` only exercises storage migrations (F-002/F-029/F-030) — it never dispatches an extrinsic, so it can't verify these four `Config`/filter-level access-control changes at all. Added dedicated tests in `runtimes/mainnet/src/lib.rs`'s `#[cfg(test)] mod tests`, all passing:
+- `f064_safe_mode_permissionless_enter_is_disabled` — calls `enter()`/`extend()` from a signed origin, asserts `Error::NotConfigured`. (`extend()` requires forcing SafeMode on first via `force_enter(Root)`, since `do_extend` checks "are we entered?" before the deposit.)
+- `f065_non_transfer_proxy_blocks_contracts_and_revive` — calls `ProxyType::NonTransfer.filter(...)` directly against `Contracts`/`Revive` calls, asserts `false`; confirms `ProxyType::Any` still allows them.
+- `f066_asset_id_zero_is_reserved` — calls `AssetsCreateOrigin::try_origin` directly with asset id `0` (rejected) and `1` (accepted).
+- `f072_pool_assets_force_origin_is_root_only` — constructs a synthetic "2 of 3 council members" origin (`pallet_collective::RawOrigin::Members(2, 3)`, what the old `EnsureRootOrHalfCouncil` would have accepted) and confirms `PoolAssets`' `ForceOrigin` now rejects it while genuine Root still passes.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
@@ -597,6 +712,8 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | H2 | 🟠 High | pallets/pdex-migration | Third approver's beneficiary used for mint |
 | H9 | 🟠 High | pallets/xcm-helper | XCM fee whitelist commented out; zero fee hardcoded |
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
-| R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M1–M16 | 🟡 Medium | various | See full findings table |
 | L1–L14 | ⚪ Low | various | See full findings table |
+
+**Verified already resolved, no action taken (2026-09-18):**
+- **R3-H5** (WASM builder on mutable fork branch) — `substrate-wasm-builder = { version = "31.1.0" }` in root `Cargo.toml` is a plain crates.io pin on all of `mainnet`, `testnet`, `security/audit-fixes`, `feature/node-packaging`. No `[patch]` override. Not a git dependency anywhere.
