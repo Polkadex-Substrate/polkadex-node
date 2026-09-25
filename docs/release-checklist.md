@@ -18,7 +18,7 @@ Roles: **Dev** writes the code and opens PRs. **Reviewers** are two people who a
 
 ## 2. Tag
 
-- [ ] Tag is created on the `mainnet` branch only, named `vX.Y.Z`, annotated with the release title.
+- [ ] Tag is created on the `mainnet` branch only, named `vX.Y.Z`, annotated with the release title. Enforced, not assumed: the release workflow's first step asserts `git merge-base --is-ancestor "$GITHUB_SHA" origin/mainnet` and fails otherwise, since Actions cannot filter tags by branch.
 - [ ] Tag commit hash is recorded in the release notes.
 
 ## 3. Build and verify
@@ -26,7 +26,7 @@ Roles: **Dev** writes the code and opens PRs. **Reviewers** are two people who a
 - [ ] The release workflow ran on the tag and produced: binary, `.deb`, `.rpm`, `customSpecRaw.json`, `SHA256SUMS`, as a draft release.
 - [ ] Release manager downloads all artefacts and runs `sha256sum -c SHA256SUMS`.
 - [ ] Release manager confirms the workflow run used the toolchain from `rust-toolchain.toml` and that the pin check job passed.
-- [ ] Dev installs the `.deb` on a clean Ubuntu 22.04 and the `.rpm` on a clean Rocky 9, starts the service, confirms it reaches peers, reports genesis `0x3920bcb4960a1eef5580cd5367ff3f430eef052774f78468852f7b9cb39f8a3c`, and appears on telemetry under the `NODE_NAME` set in `node.env`. An empty or default name on telemetry is a failure. Logs attached to the draft release.
+- [ ] Dev installs the `.deb` on a clean Ubuntu 22.04 and the `.rpm` on a clean Rocky 9, starts the service, confirms it reaches peers, reports genesis `0x3920bcb4960a1eef5580cd5367ff3f430eef052774f78468852f7b9cb39f8a3c`, and appears on telemetry under the `NODE_NAME` set in `node.env` on both distributions. An empty or default name on telemetry is a failure. Then upgrades the package over itself and confirms `systemctl is-active polkadex-node` afterwards and the new version in the logs; a successful install that leaves the service stopped is a failure. Logs attached to the draft release.
 
 ## 4. Sign and publish
 
@@ -51,11 +51,16 @@ Roles: **Dev** writes the code and opens PRs. **Reviewers** are two people who a
 
 ## 7. Runtime upgrade (only when the release carries one)
 
-- [ ] The client upgrade is not a condition for enactment. Confirmed for this release by comparing the host functions the new runtime imports against the live runtime: nothing new that an older client lacks. Ops records the comparison result. Validators on the old client keep producing and finalising after enactment and only miss BEEFY participation, which nothing consumes yet.
+- [ ] The client upgrade is not a condition for enactment. Confirmed for this release, not assumed, by three checks that Ops runs and records:
+  1. Host functions: decompress the new runtime (`:code` from the chain or the built `.compact.compressed.wasm`, strip the 8-byte magic, `zstd -d`), list its imports (`wasm-objdump -x -j Import` or a WASM import-section parser), and diff against the live runtime's imports. Every new import must be a host function the oldest supported client provides. The oldest supported client for this release is v6.2.0 on polkadot-sdk 1.1.0.
+  2. Runtime APIs: diff `state_getRuntimeVersion.apis` between live and new. Any version change on an API the client calls (Core, BlockBuilder, TaggedTransactionQueue, BabeApi, GrandpaApi, SessionKeys, OffchainWorkerApi, TransactionPaymentApi) must be shown compatible with the oldest supported client.
+  3. The real thing: run the oldest supported client binary (the `polkadex/mainnet:v6.2.0` image) against a silo that has the new runtime applied, and confirm it imports and authors blocks.
+  Validators on the old client keep producing and finalising after enactment and only miss BEEFY participation, which nothing consumes yet.
 - [ ] Validators holding at least two thirds of active stake are known to be online and following the chain in the day before enactment, by telemetry, peer version, or direct contact.
-- [ ] BEEFY stays unstarted at enactment. It is started later through `beefy.set_new_genesis` by governance, only once validators holding more than two thirds of the active set have real BEEFY keys and a BEEFY-capable client. Starting it earlier leaves it permanently stuck at the first session that cannot be finalised.
+- [ ] BEEFY stays unstarted at enactment. Observed, not assumed: `beefy.genesisBlock()` reads `None` on testnet after the soak and on mainnet after enactment. If it ever reads `Some`, the warning below applies. It is started later through `beefy.set_new_genesis` by governance, only once validators holding more than two thirds of the active set have real BEEFY keys and a BEEFY-capable client. Starting it earlier leaves it permanently stuck at the first session that cannot be finalised.
+- [ ] The governance call that chills validators still on placeholder keys is designed and merged in the spec after this one, with an owner and an issue, before a BEEFY start date is announced. It is a dependency of starting BEEFY, not an afterthought.
 - [ ] Reaching that threshold is done by shrinking the set, not by persuasion alone: after a published deadline, validators whose BEEFY session key is still the placeholder are chilled by a governance call (runtime item for the following spec). Chill in rounds, never below a set where the three largest operators together hold under a third of remaining stake. If the upgraded set is too small for that, extend the deadline rather than chill deeper. Chilled validators rejoin by rotating keys and calling validate.
-- [ ] The `set_code` proposal goes through governance as documented for this runtime. No Sudo exists.
+- [ ] The `set_code` proposal goes through governance as documented for this runtime. No Sudo exists, and the runtime test asserting that no pallet named `Sudo` is in the metadata passed on the tagged commit.
 - [ ] At enactment: Ops watches block production and finality for two sessions. If either stalls, escalate immediately.
 - [ ] After enactment: validators rotate keys if required. Ops confirms the new session key set on the team's validators.
 
