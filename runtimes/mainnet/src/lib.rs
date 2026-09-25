@@ -3030,11 +3030,19 @@ impl HandleCredit<AccountId, Assets> for CreditToBlockAuthor {
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benches {
+	// Only pallets that exist in `construct_runtime` may be listed here. The previous list named
+	// four removed pallets (HyperFungibleToken, OCEX, PDEXMigration, Rewards), which made the
+	// `runtime-benchmarks` build fail to compile (audit F-027 / F-109). Add a pallet here when it
+	// is in the runtime and its `runtime-benchmarks` feature is forwarded in Cargo.toml.
 	frame_benchmarking::define_benchmarks!(
-		[pallet_hyper_fungible_token, HyperFungibleToken]
-		[pallet_ocex_lmp, OCEX]
-		[pdex_migration, PDEXMigration]
-		[pallet_rewards, Rewards]
+		[frame_benchmarking, BaselineBench::<Runtime>]
+		[frame_system, SystemBench::<Runtime>]
+		[pallet_balances, Balances]
+		[pallet_timestamp, Timestamp]
+		[pallet_assets, Assets]
+		[pallet_utility, Utility]
+		[pallet_proxy, Proxy]
+		[pallet_multisig, Multisig]
 	);
 }
 
@@ -3850,8 +3858,9 @@ impl_runtime_apis! {
 			Vec<frame_benchmarking::BenchmarkList>,
 			Vec<frame_support::traits::StorageInfo>,
 		) {
-			use frame_benchmarking::BenchmarkList;
+			use frame_benchmarking::{baseline::Pallet as BaselineBench, BenchmarkList};
 			use frame_support::traits::StorageInfoTrait;
+			use frame_system_benchmarking::Pallet as SystemBench;
 
 			let mut list = Vec::<BenchmarkList>::new();
 			list_benchmarks!(list, extra);
@@ -3864,9 +3873,13 @@ impl_runtime_apis! {
 		fn dispatch_benchmark(
 			config: frame_benchmarking::BenchmarkConfig,
 		) -> Result<Vec<frame_benchmarking::BenchmarkBatch>, alloc::string::String> {
-			use frame_benchmarking::BenchmarkBatch;
+			use frame_benchmarking::{baseline, baseline::Pallet as BaselineBench, BenchmarkBatch};
 			use sp_storage::TrackedStorageKey;
 			use frame_support::traits::WhitelistedStorageKeys;
+			use frame_system_benchmarking::Pallet as SystemBench;
+
+			impl frame_system_benchmarking::Config for Runtime {}
+			impl baseline::Config for Runtime {}
 
 			let whitelist: Vec<TrackedStorageKey> = AllPalletsWithSystem::whitelisted_storage_keys();
 
