@@ -5,108 +5,74 @@ on:
     tags:
       - 'v*'
 
+# SECURITY (F-082): least-privilege default. Only the release job needs to
+# create a release / upload assets; nothing here needs broader write access.
+permissions:
+  contents: write
+
 jobs:
   build-and-publish-release:
-    name: Build Application And Publish Release
+    name: Build packages and publish release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # SECURITY (F-082): no toolchain install step here on purpose. The repo's
+      # own rust-toolchain.toml (channel 1.91.0, correct targets) is picked up
+      # automatically by rustup the moment any cargo/rustup command runs from
+      # inside the checkout — GitHub's ubuntu-latest runner ships rustup
+      # preinstalled. This replaces scripts/init.sh, which mutated toolchains
+      # unpinned (`rustup update nightly`/`stable`) and pulled an unrelated,
+      # years-old `nightly-2021-06-28` toolchain nothing here still needs.
+      # No libssl-dev here on purpose — checked Cargo.lock for openssl-sys/
+      # native-tls/any C-level SSL binding crate (none exist; the workspace
+      # uses rustls) and confirmed via `ldd` that the built binary links no
+      # OpenSSL/libcrypto at all. It was carried forward as boilerplate
+      # (even ci.yml's commented-out equivalent line still lists it) without
+      # anyone having verified it's actually needed to compile.
+      - name: System build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --assume-yes clang protobuf-compiler
 
       - name: Cache rust dependencies
-        uses: actions/cache@v2
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-release-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build application
+      - name: Build release binary
+        run: cargo build --release -p polkadex-node
+
+      - name: Build .deb and .rpm packages
+        run: ./packaging/build-packages.sh
+
+      - name: Assemble release artifacts and checksums
         run: |
-          ./scripts/init.sh
-          cargo build --release
-          cat extras/customSpecRaw.json > customSpecRaw.json
+          set -euo pipefail
+          cp target/release/polkadex-node dist/polkadex-node
+          cp extras/customSpecRaw.json dist/customSpecRaw.json
+          cd dist
+          sha256sum polkadex-node customSpecRaw.json *.deb *.rpm > SHA256SUMS
+          cat SHA256SUMS
 
-      - name: Prepare artifact
-        run: |
-          zip PolkadexNodeUbuntu.zip --junk-paths target/release/polkadex-node extras/customSpecRaw.json extras/polkadex.service
-          zip PolkadexParachainNode.zip --junk-paths target/release/parachain-polkadex-node
-
-      - name: Release
-        uses: softprops/action-gh-release@v1
+      - name: Create draft release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          files: |
-            PolkadexNodeUbuntu.zip
-            customSpecRaw.json
-            PolkadexParachainNode.zip
-          name: Release ${{ github.ref_name }}
+          # SECURITY (F-082): draft, not published — a human confirms the
+          # release before it goes live to validators pulling packages.
+          draft: true
           prerelease: false
-          draft: false
-
-      - name: Upload mainnet node artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: PolkadexNodeUbuntu
-          path: ./PolkadexNodeUbuntu.zip
-          if-no-files-found: error
-
-      - name: Upload parachain node artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: PolkadexParachainNode
-          path: ./PolkadexParachainNode.zip
-          if-no-files-found: error
-
-  push-to-docker-registry:
-    name: Push Docker Image To Docker Hub
-    runs-on: ubuntu-latest
-    needs: [ build-and-publish-release ]
-    steps:
-      - name: Log in to the Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
-
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Extract metadata (tags, labels) for docker
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: polkadex/mainnet
-
-      - name: Download artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: PolkadexNodeUbuntu
-
-      - name: Unzip artifact
-        run: unzip PolkadexNodeUbuntu.zip -d ${{ github.workspace }}
-
-      - name: Build and push to Docker Hub
-        uses: docker/build-push-action@v3
-        with:
-          push: true
-          file: ${{ github.workspace }}/.docker/ci/release/Dockerfile
-          context: ${{ github.workspace }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-  update-on-finality:
-    name: OnFinality Network Spec Update
-    runs-on: ubuntu-latest
-    needs: [ build-and-publish-release, push-to-docker-registry ]
-    steps:
-      - name: Update image version of the existing network spec
-        uses: OnFinality-io/action-onf-release@v1
-        with:
-          onf-access-key: ${{ secrets.ONF_ACCESS_KEY }}
-          onf-secret-key: ${{ secrets.ONF_SECRET_KEY }}
-          onf-workspace-id: ${{ secrets.ONF_WORKSPACE_ID }}
-          onf-network-key: ${{ secrets.ONF_NETWORK_KEY }}
-          onf-sub-command: image
-          onf-action: add
-          image-version: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body_path: .github/release-notes-template.md
+          generate_release_notes: true
+          files: |
+            dist/*.deb
+            dist/*.rpm
+            dist/polkadex-node
+            dist/customSpecRaw.json
+            dist/SHA256SUMS

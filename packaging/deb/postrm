@@ -1,0 +1,11 @@
+#!/bin/sh
+# postrm — runs after the package files are removed
+set -e
+
+#DEBHELPER#
+
+if [ "$1" = "purge" ]; then
+    # Remove config directory on purge (not plain remove — preserves node data on upgrade)
+    rm -rf /etc/polkadex || true
+    systemctl daemon-reload 2>/dev/null || true
+fi

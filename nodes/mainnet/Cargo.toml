@@ -12,6 +12,106 @@ repository = "https://github.com/Polkadex-Substrate/polkadex-node"
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 
+# ── Debian package (cargo-deb) ─────────────────────────────────────────────
+[package.metadata.deb]
+name            = "polkadex-node"
+priority        = "optional"
+section         = "net"
+maintainer      = "Polkadex OÜ <ops@polkadex.ee>"
+copyright       = "2021-2026 Polkadex OÜ"
+license-file    = ["../../LICENSE", "0"]
+# SECURITY/CORRECTNESS: no libssl dependency — confirmed via `ldd` the binary
+# links no OpenSSL/libcrypto at all (this workspace uses rustls; `openssl`/
+# `openssl-sys` are absent from Cargo.lock). ca-certificates is still needed
+# for TLS root certificate verification.
+depends         = "$auto, ca-certificates"
+extended-description = """\
+Polkadex is a peer-to-peer orderbook-based cryptocurrency exchange
+built on the Substrate/Polkadot ecosystem. This package ships the
+polkadex-node binary for running a validator or full-node on mainnet."""
+assets = [
+  # binary — path relative to this Cargo.toml (nodes/mainnet/), resolves to workspace target/
+  # /usr/bin, not /usr/local/bin — Debian policy reserves /usr/local for the
+  # local admin; packages must not write there.
+  ["../../target/release/polkadex-node",   "usr/bin/polkadex-node",                          "755"],
+  # chain spec
+  ["../../extras/customSpecRaw.json",       "etc/polkadex/customSpecRaw.json",               "644"],
+  # README
+  ["../../README.md",                       "usr/share/doc/polkadex-node/README.md",          "644"],
+  # Env template — NOT under usr/share/doc/. Doc directories are strippable
+  # (dpkg path-exclude, minimal images) and postinst's copy of this file into
+  # /etc/polkadex/node.env must not be allowed to silently no-op if it's gone.
+  ["../../packaging/node.env.example",      "usr/share/polkadex-node/node.env.example",      "644"],
+  # NOTE: the .service file is NOT listed here — cargo-deb's systemd-units integration
+  # picks it up from maintainer-scripts dir and installs it to lib/systemd/system/ automatically.
+]
+maintainer-scripts = "../../packaging/deb"
+# cargo-deb finds packaging/deb/polkadex-node.service and installs it + injects #DEBHELPER#
+# start = false: install must stay passive (README/migration doc both document
+# a manual `systemctl enable --now` as the activation step). restart_after_upgrade
+# defaults to true and is what we want — see packaging/deb/postinst.
+systemd-units = { unit-name = "polkadex-node", enable = false, start = false }
+conf-files = ["/etc/polkadex/customSpecRaw.json"]
+
+# ── RPM package (cargo-generate-rpm) ──────────────────────────────────────
+[package.metadata.generate-rpm]
+name        = "polkadex-node"
+license     = "GPL-3.0-or-later"
+summary     = "Polkadex Blockchain node"
+description = """\
+Polkadex is a peer-to-peer orderbook-based cryptocurrency exchange
+built on the Substrate/Polkadot ecosystem. This package ships the
+polkadex-node binary for running a validator or full-node on mainnet."""
+group       = "Applications/Internet"
+# Scriptlets — mirror packaging/deb/{postinst,prerm,postrm}. Without these the
+# rpm package installs the binary and unit file but never creates the
+# polkadex user/dirs or enables the service — it can't start.
+post_install_script   = "../../packaging/rpm/postinstall"
+pre_uninstall_script  = "../../packaging/rpm/preuninstall"
+post_uninstall_script = "../../packaging/rpm/postuninstall"
+
+[package.metadata.generate-rpm.requires]
+# SECURITY/CORRECTNESS: no openssl dependency — confirmed via `ldd` the binary
+# links no OpenSSL/libcrypto at all (this workspace uses rustls; `openssl`/
+# `openssl-sys` are absent from Cargo.lock). The old `openssl = ">= 1.1"` line
+# was also the wrong package name regardless (that's the CLI tool on RHEL/
+# Rocky, not the library — `openssl-libs` would have been the library, but
+# neither is actually needed).
+ca-certificates = "*"
+
+[[package.metadata.generate-rpm.assets]]
+source = "../../target/release/polkadex-node"
+# /usr/bin, not /usr/local/bin — Debian policy reserves /usr/local for the
+# local admin; matches the deb package, and FHS gives the same guidance on
+# RHEL/Rocky (packages belong in /usr/bin, not /usr/local).
+dest   = "/usr/bin/polkadex-node"
+mode   = "0755"
+
+[[package.metadata.generate-rpm.assets]]
+source = "../../extras/customSpecRaw.json"
+dest   = "/etc/polkadex/customSpecRaw.json"
+mode   = "0644"
+config = true
+
+[[package.metadata.generate-rpm.assets]]
+# Single source of truth for the unit file — lives under packaging/deb/ because
+# cargo-deb's dh_installsystemd integration requires it there; the rpm package
+# just references the same file rather than keeping a second copy.
+source = "../../packaging/deb/polkadex-node.service"
+dest   = "/usr/lib/systemd/system/polkadex-node.service"
+mode   = "0644"
+
+[[package.metadata.generate-rpm.assets]]
+source = "../../README.md"
+dest   = "/usr/share/doc/polkadex-node/README.md"
+mode   = "0644"
+
+[[package.metadata.generate-rpm.assets]]
+# NOT under usr/share/doc/ — see the matching comment in the deb assets above.
+source = "../../packaging/node.env.example"
+dest   = "/usr/share/polkadex-node/node.env.example"
+mode   = "0644"
+
 [build-dependencies]
 substrate-build-script-utils = { workspace = true }
 
