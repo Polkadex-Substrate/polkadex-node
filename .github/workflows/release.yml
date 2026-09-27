@@ -14,17 +14,36 @@ jobs:
   build-and-publish-release:
     name: Build packages and publish release
     runs-on: ubuntu-latest
+    # Build inside Rocky Linux 9 (glibc 2.34) so the single binary runs on both
+    # supported targets: Rocky 9 (glibc 2.34) and Ubuntu 22.04 (glibc 2.35).
+    # ubuntu-latest is Ubuntu 24.04 (glibc 2.39); a binary linked there needs
+    # symbol versions neither target has.
+    container:
+      image: rockylinux:9
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Full history: the branch gate below needs the mainnet ancestry.
+          fetch-depth: 0
 
-      # SECURITY (F-082): no toolchain install step here on purpose. The repo's
-      # own rust-toolchain.toml (channel 1.91.0, correct targets) is picked up
-      # automatically by rustup the moment any cargo/rustup command runs from
-      # inside the checkout — GitHub's ubuntu-latest runner ships rustup
-      # preinstalled. This replaces scripts/init.sh, which mutated toolchains
-      # unpinned (`rustup update nightly`/`stable`) and pulled an unrelated,
-      # years-old `nightly-2021-06-28` toolchain nothing here still needs.
+      # Procedure 2 (docs/release-procedures.md): a tag trigger cannot be
+      # restricted to one branch, so the workflow refuses to build a tag whose
+      # commit is not on mainnet. Runs before anything is produced.
+      - name: Tag branch gate
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch origin mainnet
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/mainnet || { echo "tag is not on mainnet"; exit 1; }
+          echo "tag $GITHUB_REF_NAME at $GITHUB_SHA is on mainnet"
+
+      # SECURITY (F-082): rustup is installed with no default toolchain. The
+      # repo's own rust-toolchain.toml (channel 1.91.0, correct targets) is
+      # picked up automatically the moment any cargo/rustup command runs from
+      # inside the checkout. This replaces scripts/init.sh, which mutated
+      # toolchains unpinned (`rustup update nightly`/`stable`) and pulled an
+      # unrelated, years-old `nightly-2021-06-28` toolchain nothing here needs.
       # No libssl-dev here on purpose — checked Cargo.lock for openssl-sys/
       # native-tls/any C-level SSL binding crate (none exist; the workspace
       # uses rustls) and confirmed via `ldd` that the built binary links no
@@ -33,8 +52,10 @@ jobs:
       # anyone having verified it's actually needed to compile.
       - name: System build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install --assume-yes clang protobuf-compiler
+          set -euo pipefail
+          dnf install -y gcc gcc-c++ clang make cmake protobuf-compiler git rpm-build binutils
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Cache rust dependencies
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -46,7 +67,17 @@ jobs:
           key: ${{ runner.os }}-release-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build release binary
-        run: cargo build --release -p polkadex-node
+        # --locked: a Cargo.lock that does not match the manifests fails the
+        # build instead of silently resolving a different dependency set.
+        run: cargo build --release --locked -p polkadex-node
+
+      - name: Check glibc requirement of the built binary
+        run: |
+          set -euo pipefail
+          req=$(objdump -T target/release/polkadex-node | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1)
+          echo "highest glibc symbol version required: $req"
+          # Rocky 9 ships 2.34, Ubuntu 22.04 ships 2.35; anything above 2.34 fails here.
+          [ "$(printf '%s\n' "$req" GLIBC_2.34 | sort -V | tail -1)" = "GLIBC_2.34" ] || { echo "binary requires $req, newer than the 2.34 baseline"; exit 1; }
 
       - name: Build .deb and .rpm packages
         run: ./packaging/build-packages.sh

@@ -1,15 +1,19 @@
 #!/bin/sh
 # prerm — runs before the package files are removed
+# $1 = "remove" on real removal, "upgrade <new-version>" on upgrade,
+#      "deconfigure"/"failed-upgrade" in error paths.
 set -e
 
 #DEBHELPER#
 
-# Stop the service if it's running
-if command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet polkadex-node; then
-    systemctl stop polkadex-node || true
-fi
-
-# Disable the service on full removal (not upgrade)
+# Stop and disable the service on real removal only. On an upgrade dpkg runs
+# this OLD package's prerm before unpacking the new files, and cargo-deb's
+# generated postinst then does `deb-systemd-invoke try-restart`, which only
+# restarts a unit that is still running. An unconditional stop here would
+# therefore leave every upgraded node stopped. Same gating as the rpm %preun.
 if [ "$1" = "remove" ]; then
+    if command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet polkadex-node; then
+        systemctl stop polkadex-node || true
+    fi
     systemctl disable polkadex-node 2>/dev/null || true
 fi
