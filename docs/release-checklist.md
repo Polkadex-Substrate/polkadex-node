@@ -46,13 +46,14 @@ Roles: **Dev** writes the code and opens PRs. **Reviewers** are two people who a
 - [ ] Announcement sent: release link, verify steps, client upgrade window, migration doc link.
 - [ ] If a runtime upgrade follows: enactment date and the key rotation instruction included.
 - [ ] A named person watches telemetry during the window and contacts validators that drop.
-- [ ] Stop rule: validators holding over 10 percent of active stake off for more than an hour pauses the announcement and the upgrade date.
+- [ ] Stop rule: more than 10 percent of active validators, counted by validator, off for more than an hour pauses the announcement and the upgrade date.
 - [ ] External communications sent to users and exchanges, with a prepared statement for failure. Ops owns the wording.
 
 ## 7. Runtime upgrade (only when the release carries one)
 
 - [ ] Client compatibility confirmed by the three checks in procedure 4, results recorded. Old-client validators keep producing and finalising after enactment.
-- [ ] Validators holding at least two thirds of active stake are known to be online and following the chain the day before enactment.
+- [ ] More than two thirds of active validators, counted by validator and not by stake, are known to be online and following the chain the day before enactment (procedure 4).
+- [ ] BEEFY authority bound equals the validator cap, and `beefy.authorities()` on testnet has the same length as `session.validators()` after the soak (procedure 5).
 - [ ] BEEFY is unstarted: `beefy.genesisBlock()` reads `None` on testnet after the soak and on mainnet after enactment (procedure 5).
 - [ ] The chill call for validators on placeholder keys has an owner and an issue before any BEEFY start date is announced (procedure 5).
 - [ ] The `set_code` proposal goes through governance. The runtime test that no pallet named `Sudo` exists passed on the tagged commit.

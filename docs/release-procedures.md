@@ -46,15 +46,15 @@ The question is whether validators still on an older client can execute the new 
 2. **Runtime APIs.** Compare `state_getRuntimeVersion.apis` between live and new. Any version change on an API the client itself calls (Core, BlockBuilder, TaggedTransactionQueue, BabeApi, GrandpaApi, SessionKeys, OffchainWorkerApi, TransactionPaymentApi, AuthorityDiscoveryApi) must be shown compatible with the oldest supported client, by reading what changed in that version. New APIs that the client does not call are irrelevant.
 3. **The real thing.** Run the oldest supported client binary, the `polkadex/mainnet:v6.2.0` image, against a silo that has the new runtime applied. Confirm it imports blocks and authors them. This is the only check that catches what nobody thought to measure.
 
-If any check fails, the client upgrade becomes a condition for enactment and section 7 waits until validators holding two thirds of active stake are on the new client.
+If any check fails, the client upgrade becomes a condition for enactment and section 7 waits until more than two thirds of the active validators, counted by validator and not by stake, are on the new client. GRANDPA gives every validator in the set one vote regardless of stake, so a finality quorum is 134 of 200 validators, and two large operators cannot stand in for it.
 
 ## Procedure 5: BEEFY and the validator set
 
-BEEFY must not start until validators holding more than two thirds of the active set have real BEEFY keys and a BEEFY-capable client. Started earlier, it sticks permanently at the first session it cannot finalise.
+BEEFY must not start until more than two thirds of the active validators, counted by validator, have real BEEFY keys and a BEEFY-capable client. BEEFY counts authorities, not stake: with N authorities it needs `N - floor((N-1)/3)` signatures, which is 134 of 200. Started earlier, it sticks permanently at the first session it cannot finalise.
 
 - At enactment the runtime sets no BEEFY genesis. Confirm by reading `beefy.genesisBlock()`: it must be `None` on testnet after the soak and on mainnet after enactment. If it ever reads `Some` before the threshold is met, treat it as an incident.
-- Track the threshold from chain state: a validator's BEEFY session key that is all zeros is the placeholder from the migration. Count stake behind real keys.
+- Track the threshold from chain state: a validator's BEEFY session key that is all zeros is the placeholder from the migration. Count validators with real keys, and check `beefy.authorities()` has the same length as `session.validators()` after enactment; a shorter list means the BEEFY authority bound is truncating the set and must be fixed before any start.
 - Reaching the threshold is done by shrinking the set, not persuasion alone. After a published deadline, validators still on placeholder keys are chilled by a governance call. That call is a runtime item for the spec after the upgrade and needs an owner and an issue before any BEEFY start date is announced.
-- Chill in rounds. Never take the set below a size where the three largest operators together hold under a third of the remaining stake. If the upgraded set is too small for that, extend the deadline rather than chill deeper.
+- Chill in rounds. Never take the set below a size where the three largest operators together run a third or more of the remaining validators, since that many nodes going down together would stop finality. If the upgraded set is too small for that, extend the deadline rather than chill deeper.
 - Chilled validators rejoin by rotating keys and calling `validate`. Do not force-unstake; that starts a 28-era unbonding clock for no benefit.
 - When the threshold holds for a few eras, governance starts BEEFY with `beefy.set_new_genesis` pointing a little ahead of the current block.
