@@ -68,9 +68,7 @@ pallet-statement = { workspace = true }
 pallet-asset-tx-payment = { workspace = true }
 pallet-society = { workspace = true }
 xcm = { workspace = true }
-pallet-revive = { workspace = true }
 pallet-skip-feeless-payment = { workspace = true }
-pallet-contracts = { workspace = true }
 pallet-alliance = { workspace = true }
 pallet-delegated-staking = { workspace = true }
 pallet-insecure-randomness-collective-flip = { workspace = true }
@@ -222,9 +220,7 @@ std = [
 	"sp-statement-store/std",
 	"sp-storage?/std",
 	"xcm/std",
-	"pallet-revive/std",
 	"pallet-skip-feeless-payment/std",
-	"pallet-contracts/std",
 	"pallet-alliance/std",
 	"pallet-delegated-staking/std",
 	"pallet-insecure-randomness-collective-flip/std",
@@ -266,7 +262,6 @@ runtime-benchmarks = [
 	"pallet-bounties/runtime-benchmarks",
 	"pallet-child-bounties/runtime-benchmarks",
 	"pallet-collective/runtime-benchmarks",
-	"pallet-contracts/runtime-benchmarks",
 	"pallet-delegated-staking/runtime-benchmarks",
 	"pallet-democracy/runtime-benchmarks",
 	"pallet-election-provider-multi-phase/runtime-benchmarks",
@@ -282,7 +277,6 @@ runtime-benchmarks = [
 	"pallet-offences/runtime-benchmarks",
 	"pallet-preimage/runtime-benchmarks",
 	"pallet-proxy/runtime-benchmarks",
-	"pallet-revive/runtime-benchmarks",
 	"pallet-safe-mode/runtime-benchmarks",
 	"pallet-scheduler/runtime-benchmarks",
 	"pallet-session/runtime-benchmarks",
@@ -345,5 +339,4 @@ try-runtime = [
 	"pallet-statement/try-runtime",
 	"pallet-asset-tx-payment/try-runtime",
 	"pallet-migrations/try-runtime",
-	"pallet-revive/try-runtime",
 ]

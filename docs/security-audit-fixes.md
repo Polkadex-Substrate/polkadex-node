@@ -627,6 +627,32 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 ---
 
+### Contracts and Revive removed from the runtime (independent audit findings A02, A07)
+
+**Severity:** High (A02) / Medium (A07) — release blockers on PR 14
+**Location:** `runtimes/mainnet/src/lib.rs`, `runtimes/mainnet/Cargo.toml`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-28
+
+**Findings:** an independent audit (2026-09-25) found `pallet_contracts` failing the runtime's own `__construct_runtime_integrity_test` invariant (A02: the max per-block Contracts storage-write workload this runtime's block weights admit exceeded the pallet's memory allocation model), and `pallet_revive`'s Ethereum fee adapter still a placeholder — `FeeInfo = ()` returns zero fees and zero fee-to-weight conversion for Ethereum calls (A07).
+
+**Decision:** rather than tune Contracts' Schedule to pass the integrity test (tried first, reverted — see PR 14 history), the client decided to remove both pallets outright. Neither exists on mainnet today (spec 373 has never had either), nothing calls into either pallet's own extrinsics, and there's no storage to migrate for either on mainnet.
+
+**One real dependency found and resolved:** the runtime's `UncheckedExtrinsic` type was `pallet_revive::evm::runtime::UncheckedExtrinsic<Address, Signature, EthExtraImpl>` — Revive's Ethereum-compatible extrinsic wrapper, which lets a chain accept raw Ethereum-signed transactions directly. Removing `pallet_revive::Config` broke this immediately (its `Encode`/`Decode` impls require `Runtime: pallet_revive::Config`). Reverted to the plain `generic::UncheckedExtrinsic<Address, RuntimeCall, Signature, TxExtension>` — which is what mainnet at spec 373 already uses, so this is a return to the live format, not a removal of one. Confirmed no impact on the Ethereum↔Polkadex bridge (Hyperbridge/ISMP + `pallet-hyper-fungible-token`): traced both call paths — outbound `send()` authenticates via plain `ensure_signed(origin)`, and inbound messages arrive through `pallet-ismp` verifying a proof and calling the bridge pallet's `IsmpModule` callbacks internally, never through a user-submitted extrinsic. Neither touches the Ethereum-compatible extrinsic envelope. Also confirmed there's no Ethereum JSON-RPC service anywhere in this node, so raw Ethereum transaction submission wasn't reachable today regardless.
+
+**Changes made:**
+- Removed `impl pallet_contracts::Config`, `impl pallet_revive::Config`, and `impl TryFrom<RuntimeCall> for pallet_revive::Call<Runtime>`
+- Removed both `#[runtime::pallet_index]` bindings (52 = Revive, 54 = Contracts), following the same commented-out-with-reason pattern already used for other removed pallets
+- Removed the active `ContractsApi` runtime-API impl and the already-dead, commented-out `ReviveApi` impl
+- Removed `pallet_contracts::Migration<Runtime>` from the `Migrations` tuple
+- Removed `EthExtraImpl`/`EthExtra` and the `SetWeightLimit for RuntimeCall` impl (both existed only to support the Revive-based extrinsic type)
+- Removed the `pallet-revive`/`pallet-contracts` dependency lines and all `std`/`runtime-benchmarks`/`try-runtime` feature entries from `runtimes/mainnet/Cargo.toml` (left the root workspace `Cargo.toml` definitions alone — `pallets/ocex/Cargo.toml` still has an unused `pallet-revive` dependency line, unrelated to this change, harmless but worth a separate cleanup)
+- See F-065 below for the `NonTransfer` proxy filter and test updates
+
+**To bring either back later:** add a real fee adapter for Revive (not a placeholder), tune Contracts' Schedule properly if re-added, and stand up an actual Ethereum RPC service before re-introducing the Ethereum-compatible extrinsic type — in a dedicated spec bump, not bundled with this one.
+
+---
+
 ### F-065 — NonTransfer proxy filter only blocked native-currency paths
 **Severity:** High — part of priority-1 "small live fixes" bucket for spec 392
 **Location:** `runtimes/mainnet/src/lib.rs`
@@ -637,6 +663,10 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 **Changes made:**
 - Added `RuntimeCall::Assets(..)`, `RuntimeCall::PoolAssets(..)`, `RuntimeCall::AssetConversion(..)`, `RuntimeCall::Contracts(..)`, `RuntimeCall::Revive(..)` to the `NonTransfer` filter's exclusion match
+
+**Update (2026-09-25, independent audit finding A01):** `Contracts`/`Revive` in the filter didn't cover everything — `Recovery` was missed. `create_recovery` moves no value directly, but it lets a NonTransfer delegate configure the real account's recovery friends/threshold (itself, as sole friend, zero delay), then `initiate_recovery`/`vouch_recovery`/`claim_recovery` from its own unrestricted origin and call `as_recovered`, which dispatches with a fresh Signed origin carrying no proxy restriction at all — full account takeover through a call that superficially "moves no value." Added `RuntimeCall::Recovery(..)` to the exclusion match. Verified with an end-to-end regression through the actual `Proxy::proxy` extrinsic (not just `ProxyType::filter()` in isolation, which can't observe whether the inner call was actually filtered — `do_proxy()` swallows that into a `ProxyExecuted` event rather than the outer call's return value).
+
+**Update (2026-09-28):** `Contracts` and `Revive` are no longer in `construct_runtime` at all (see the new entry above on their removal) — `RuntimeCall::Contracts`/`::Revive` aren't valid variants any more, so those two arms were dropped from the filter and its test. Nothing to block if the calls don't exist.
 
 ---
 

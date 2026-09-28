@@ -53,7 +53,7 @@ use frame_support::{
 		fungible::{HoldConsideration, Inspect}, AsEnsureOriginWithArg, EitherOfDiverse, EnsureOrigin,
 		EnsureOriginWithArg,
 		EqualPrivilegeOnly, Get, InstanceFilter, KeyOwnerProofSystem, LockIdentifier,
-		tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId}, ConstU64, ConstU32, ConstU16, ConstBool,
+		tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId}, ConstU32, ConstU16, ConstBool,
 		VariantCountOf, tokens::imbalance::{ResolveAssetTo, ResolveTo, OnUnbalanced}, Imbalance, Nothing, InsideBoth,
 		Contains
 	},
@@ -98,7 +98,7 @@ pub use sp_runtime::BuildStorage;
 use sp_runtime::{
     curve::PiecewiseLinear, generic, impl_opaque_keys,
     transaction_validity::{TransactionPriority, TransactionSource, TransactionValidity},
-    ApplyExtrinsicResult, FixedPointNumber, Perbill, Percent, Permill, Perquintill, FixedU128, // DispatchError unused after ismp removal
+    ApplyExtrinsicResult, FixedPointNumber, Perbill, Percent, Permill, Perquintill, // DispatchError unused after ismp removal
     traits::{
         self, AccountIdConversion, BlakeTwo256, Block as BlockT, BlockNumberProvider, NumberFor,
         OpaqueKeys, SaturatedConversion, StaticLookup, Keccak256,
@@ -111,7 +111,6 @@ use sp_version::RuntimeVersion;
 use static_assertions::const_assert;
 use scale_info::TypeInfo;
 use sp_npos_elections::ExtendedBalance;
-use pallet_revive::evm::runtime::EthExtra;
 //pub use pallet_transaction_payment::{FungibleAdapter, Multiplier, TargetedFeeAdjustment};
 #[allow(deprecated)]
 pub use pallet_transaction_payment::{CurrencyAdapter, Multiplier, TargetedFeeAdjustment};
@@ -468,14 +467,6 @@ parameter_types! {
     pub const MinAllowedBytes: u32 = 1024;
     pub const MaxAllowedBytes: u32 = 4096;
     pub const ProposalHoldReason: RuntimeHoldReason = RuntimeHoldReason::Council(pallet_collective::HoldReason::ProposalSubmission);
-    pub const DepositPerItem: Balance = deposit(1, 0);
-	  pub const DepositPerByte: Balance = deposit(0, 1);
-    pub const DefaultDepositLimit: Balance = deposit(1024, 1024 * 1024);
-    pub Schedule: pallet_contracts::Schedule<Runtime> = Default::default();
-    pub CodeHashLockupDepositPercent: Perbill = Perbill::from_percent(30);
-    pub const ReviveDepositPerChildTrieItem: Balance = deposit(1, 0) / 100;
-    pub const ReviveMaxEthExtrinsicWeight: FixedU128 = FixedU128::from_rational(9, 10);
-    pub const ReviveGasScale: u32 = 10u32;
     pub const AllianceMotionDuration: BlockNumber = ALLIANCE_MOTION_DURATION_IN_BLOCKS;
     pub const AllianceMaxProposals: u32 = 100;
     pub const AllianceMaxMembers: u32 = 100;
@@ -874,9 +865,12 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 			// (Balances, Indices::transfer). Assets, PoolAssets, and AssetConversion are
 			// all live pallets that can move value between accounts (transfer, swaps,
 			// liquidity operations) — a "NonTransfer" proxy could move funds through any
-			// of them. Contracts and Revive calls can also carry value (a trivial contract
-			// forwarding a transfer would bypass the restriction entirely), so both are
-			// blocked wholesale too, same as the asset pallets above.
+			// of them.
+			//
+			// Contracts and Revive are no longer in construct_runtime at all (removed —
+			// neither existed on mainnet, Contracts failed the runtime integrity test,
+			// Revive's fee adapter was a placeholder), so RuntimeCall::Contracts/::Revive
+			// aren't valid variants any more and don't need an entry here.
 			//
 			// A01 (audit, 2026-09-25): Recovery was not blocked either. create_recovery
 			// doesn't move value directly, but it lets a NonTransfer delegate configure the
@@ -894,8 +888,6 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 					| RuntimeCall::Assets(..)
 					| RuntimeCall::PoolAssets(..)
 					| RuntimeCall::AssetConversion(..)
-					| RuntimeCall::Contracts(..)
-					| RuntimeCall::Revive(..)
 					| RuntimeCall::Recovery(..)
 			),
 			ProxyType::Governance => matches!(
@@ -2280,48 +2272,6 @@ impl pallet_asset_conversion::Config for Runtime {
     type BenchmarkHelper = pallet_asset_conversion::NativeOrWithIdFactory<u128>;
 }
 
-impl pallet_contracts::Config for Runtime {
-	type Time = Timestamp;
-	type Randomness = RandomnessCollectiveFlip;
-	type Currency = Balances;
-	type RuntimeEvent = RuntimeEvent;
-	type RuntimeCall = RuntimeCall;
-	/// The safest default is to allow no calls at all.
-	///
-	/// Runtimes should whitelist dispatchables that are allowed to be called from contracts
-	/// and make sure they are stable. Dispatchables exposed to contracts are not allowed to
-	/// change because that would break already deployed contracts. The `Call` structure itself
-	/// is not allowed to change the indices of existing pallets, too.
-	type CallFilter = Nothing;
-	type DepositPerItem = DepositPerItem;
-	type DepositPerByte = DepositPerByte;
-	type DefaultDepositLimit = DefaultDepositLimit;
-	type CallStack = [pallet_contracts::Frame<Self>; 5];
-	type WeightPrice = pallet_transaction_payment::Pallet<Self>;
-	type WeightInfo = pallet_contracts::weights::SubstrateWeight<Self>;
-	type ChainExtension = ();
-	type Schedule = Schedule;
-	type AddressGenerator = pallet_contracts::DefaultAddressGenerator;
-	type MaxCodeLen = ConstU32<{ 123 * 1024 }>;
-	type MaxStorageKeyLen = ConstU32<128>;
-	type UnsafeUnstableInterface = ConstBool<false>;
-	type UploadOrigin = EnsureSigned<Self::AccountId>;
-	type InstantiateOrigin = EnsureSigned<Self::AccountId>;
-	type MaxDebugBufferLen = ConstU32<{ 2 * 1024 * 1024 }>;
-	type MaxTransientStorageSize = ConstU32<{ 1 * 1024 * 1024 }>;
-	type RuntimeHoldReason = RuntimeHoldReason;
-	#[cfg(not(feature = "runtime-benchmarks"))]
-	type Migrations = ();
-	#[cfg(feature = "runtime-benchmarks")]
-	type Migrations = pallet_contracts::migration::codegen::BenchMigrations;
-	type MaxDelegateDependencies = ConstU32<32>;
-	type CodeHashLockupDepositPercent = CodeHashLockupDepositPercent;
-	type Debug = ();
-	type Environment = ();
-	type ApiVersion = ();
-	type Xcm = ();
-}
-
 impl pallet_collective::Config<AllianceCollective> for Runtime {
     type RuntimeOrigin = RuntimeOrigin;
     type Proposal = RuntimeCall;
@@ -2418,47 +2368,6 @@ impl pallet_delegated_staking::Config for Runtime {
     type SlashRewardFraction = SlashRewardFraction;
     type RuntimeHoldReason = RuntimeHoldReason;
     type CoreStaking = Staking;
-}
-
-impl pallet_revive::Config for Runtime {
-	type Time = Timestamp;
-	type Balance = Balance;
-	type Currency = Balances;
-	type RuntimeEvent = RuntimeEvent;
-	type RuntimeCall = RuntimeCall;
-	type RuntimeOrigin = RuntimeOrigin;
-	type DepositPerItem = DepositPerItem;
-	type DepositPerByte = DepositPerByte;
-	type DepositPerChildTrieItem = ReviveDepositPerChildTrieItem;
-	type WeightInfo = pallet_revive::weights::SubstrateWeight<Self>;
-	type AddressMapper = pallet_revive::AccountId32Mapper<Self>;
-	type RuntimeMemory = ConstU32<{ 128 * 1024 * 1024 }>;
-	type PVFMemory = ConstU32<{ 512 * 1024 * 1024 }>;
-	type UnsafeUnstableInterface = ConstBool<false>;
-	type AllowEVMBytecode = ConstBool<false>;
-	type UploadOrigin = EnsureSigned<Self::AccountId>;
-	type InstantiateOrigin = EnsureSigned<Self::AccountId>;
-	type RuntimeHoldReason = RuntimeHoldReason;
-	type CodeHashLockupDepositPercent = CodeHashLockupDepositPercent;
-	type ChainId = ConstU64<420_420_420>;
-	type NativeToEthRatio = ConstU32<1_000_000>; // 10^(18 - 12) Eth is 10^18, Native is 10^12.
-	type FindAuthor = <Runtime as pallet_authorship::Config>::FindAuthor;
-	type Precompiles = ();
-	type FeeInfo = ();
-	type MaxEthExtrinsicWeight = ReviveMaxEthExtrinsicWeight;
-	type DebugEnabled = ConstBool<false>;
-	type GasScale = ReviveGasScale;
-}
-
-impl TryFrom<RuntimeCall> for pallet_revive::Call<Runtime> {
-    type Error = ();
-
-    fn try_from(value: RuntimeCall) -> Result<Self, Self::Error> {
-        match value {
-            RuntimeCall::Revive(call) => Ok(call),
-            _ => Err(()),
-        }
-    }
 }
 
 impl pallet_skip_feeless_payment::Config for Runtime {
@@ -2648,14 +2557,18 @@ mod runtime {
     #[runtime::pallet_index(51)]
     pub type PoolAssets = pallet_assets::Pallet<Runtime, Instance2>;
 
-    #[runtime::pallet_index(52)]
-    pub type Revive = pallet_revive::Pallet<Runtime>;
+    // #52 was Revive - REMOVED (never on mainnet, placeholder fee adapter, no migration
+    // needed — no storage exists for it on mainnet)
+    // #[runtime::pallet_index(52)]
+    // pub type Revive = pallet_revive::Pallet<Runtime>;
 
     #[runtime::pallet_index(53)]
     pub type SkipFeelessPayment = pallet_skip_feeless_payment::Pallet<Runtime>;
 
-    #[runtime::pallet_index(54)]
-    pub type Contracts = pallet_contracts::Pallet<Runtime>;
+    // #54 was Contracts - REMOVED (never on mainnet, failed the runtime integrity test,
+    // no migration needed — no storage exists for it on mainnet)
+    // #[runtime::pallet_index(54)]
+    // pub type Contracts = pallet_contracts::Pallet<Runtime>;
 
     #[runtime::pallet_index(55)]
     pub type Alliance = pallet_alliance::Pallet<Runtime>;
@@ -2939,41 +2852,15 @@ pub type TxExtension = (
 	frame_system::WeightReclaim<Runtime>,
 );
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct EthExtraImpl;
-
-impl EthExtra for EthExtraImpl {
-	type Config = Runtime;
-	type Extension = TxExtension;
-
-	fn get_eth_extension(nonce: u32, tip: Balance) -> Self::Extension {
-		(
-			frame_system::CheckNonZeroSender::<Runtime>::new(),
-			frame_system::CheckSpecVersion::<Runtime>::new(),
-			frame_system::CheckTxVersion::<Runtime>::new(),
-			frame_system::CheckGenesis::<Runtime>::new(),
-			frame_system::CheckEra::from(crate::generic::Era::Immortal),
-			frame_system::CheckNonce::<Runtime>::from(nonce),
-			frame_system::CheckWeight::<Runtime>::new(),
-			pallet_asset_conversion_tx_payment::ChargeAssetTxPayment::<Runtime>::from(tip, None)
-				.into(),
-			frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
-			frame_system::WeightReclaim::<Runtime>::new(),
-		)
-	}
-}
-
-// RuntimeCall must implement SetWeightLimit for pallet_revive::evm::runtime::UncheckedExtrinsic
-// Revive is not included in construct_runtime, so this is a no-op impl.
-impl pallet_revive::evm::runtime::SetWeightLimit for RuntimeCall {
-	fn set_weight_limit(&mut self, _: Weight) -> Weight {
-		Weight::zero()
-	}
-}
-
 /// Unchecked extrinsic type as expected by this runtime.
-//pub type UncheckedExtrinsic = generic::UncheckedExtrinsic<Address, RuntimeCall, Signature, TxExtension>;
-pub type UncheckedExtrinsic = pallet_revive::evm::runtime::UncheckedExtrinsic<Address, Signature, EthExtraImpl>;
+///
+/// Removed pallet_revive (2026-09-28, see security-audit-fixes.md F-065/A07): mainnet at spec
+/// 373 has no Revive and never used the Ethereum-compatible extrinsic wrapper, so this reverts
+/// to the plain type the chain and every existing wallet already use — not dropping a live
+/// capability. Raw Ethereum transaction support (pallet_revive::evm::runtime::UncheckedExtrinsic
+/// + EthExtraImpl, removed here) can come back in a later spec alongside a real fee adapter and
+/// an actual Ethereum RPC service, neither of which exist in this node today.
+pub type UncheckedExtrinsic = generic::UncheckedExtrinsic<Address, RuntimeCall, Signature, TxExtension>;
 /// Unchecked signature payload type as expected by this runtime.
 pub type UncheckedSignaturePayload = generic::UncheckedSignaturePayload<Address, Signature, TxExtension>;
 /// The payload being signed in transactions.
@@ -3037,15 +2924,9 @@ type Migrations = (
     migrations::ClearOrmlVestingLocks<Runtime>,
     // Existing migrations
     pallet_alliance::migration::Migration<Runtime>,
-    pallet_contracts::Migration<Runtime>,
     // pallet_identity::migration::versioned::V0ToV1<Runtime, IDENTITY_MIGRATION_KEY_LIMIT>,
     // ^ Removed: try-runtime confirmed on-chain identity storage already at v2; V0→V1 is a stale no-op.
 );
-
-type EventRecord = frame_system::EventRecord<
-	<Runtime as frame_system::Config>::RuntimeEvent,
-	<Runtime as frame_system::Config>::Hash,
->;
 
 //use crate::impls::CreditToBlockAuthor;
 
@@ -3329,245 +3210,6 @@ impl_runtime_apis! {
 	// 		Assets::account_balances(account)
 	// 	}
 	// }
-
-	impl pallet_contracts::ContractsApi<Block, AccountId, Balance, BlockNumber, Hash, EventRecord> for Runtime
-	{
-		fn call(
-			origin: AccountId,
-			dest: AccountId,
-			value: Balance,
-			gas_limit: Option<Weight>,
-			storage_deposit_limit: Option<Balance>,
-			input_data: Vec<u8>,
-		) -> pallet_contracts::ContractExecResult<Balance, EventRecord> {
-			let gas_limit = gas_limit.unwrap_or(RuntimeBlockWeights::get().max_block);
-			Contracts::bare_call(
-				origin,
-				dest,
-				value,
-				gas_limit,
-				storage_deposit_limit,
-				input_data,
-				pallet_contracts::DebugInfo::UnsafeDebug,
-				pallet_contracts::CollectEvents::UnsafeCollect,
-				pallet_contracts::Determinism::Enforced,
-			)
-		}
-
-		fn instantiate(
-			origin: AccountId,
-			value: Balance,
-			gas_limit: Option<Weight>,
-			storage_deposit_limit: Option<Balance>,
-			code: pallet_contracts::Code<Hash>,
-			data: Vec<u8>,
-			salt: Vec<u8>,
-		) -> pallet_contracts::ContractInstantiateResult<AccountId, Balance, EventRecord>
-		{
-			let gas_limit = gas_limit.unwrap_or(RuntimeBlockWeights::get().max_block);
-			Contracts::bare_instantiate(
-				origin,
-				value,
-				gas_limit,
-				storage_deposit_limit,
-				code,
-				data,
-				salt,
-				pallet_contracts::DebugInfo::UnsafeDebug,
-				pallet_contracts::CollectEvents::UnsafeCollect,
-			)
-		}
-
-		fn upload_code(
-			origin: AccountId,
-			code: Vec<u8>,
-			storage_deposit_limit: Option<Balance>,
-			determinism: pallet_contracts::Determinism,
-		) -> pallet_contracts::CodeUploadResult<Hash, Balance>
-		{
-			Contracts::bare_upload_code(
-				origin,
-				code,
-				storage_deposit_limit,
-				determinism,
-			)
-		}
-
-		fn get_storage(
-			address: AccountId,
-			key: Vec<u8>,
-		) -> pallet_contracts::GetStorageResult {
-			Contracts::get_storage(
-				address,
-				key
-			)
-		}
-	}
-
-	//impl pallet_revive::ReviveApi<Block, AccountId, Balance, Nonce, BlockNumber> for Runtime
-	//{
-	//	fn balance(address: H160) -> primitive_types::U256 {
-	//		Revive::evm_balance(&address)
-	//	}
-	//
-	//	fn block_gas_limit() -> primitive_types::U256 {
-	//		Revive::evm_block_gas_limit()
-	//	}
-	//
-	//	fn gas_price() -> primitive_types::U256 {
-	//		Revive::evm_gas_price()
-	//	}
-	//
-	//	fn nonce(address: H160) -> Nonce {
-	//		let account = <Runtime as pallet_revive::Config>::AddressMapper::to_account_id(&address);
-	//		System::account_nonce(account)
-	//	}
-	//
-	//	fn eth_transact(tx: pallet_revive::evm::GenericTransaction) -> Result<pallet_revive::EthTransactInfo<Balance>, pallet_revive::EthTransactError>
-	//	{
-	//		let blockweights: BlockWeights = <Runtime as frame_system::Config>::BlockWeights::get();
-	//		let tx_fee = |pallet_call, mut dispatch_info: DispatchInfo| {
-	//			let call = RuntimeCall::Revive(pallet_call);
-	//			dispatch_info.extension_weight = EthExtraImpl::get_eth_extension(0, 0u32.into()).weight(&call);
-	//			let uxt: UncheckedExtrinsic = sp_runtime::generic::UncheckedExtrinsic::new_bare(call).into();
-	//
-	//			pallet_transaction_payment::Pallet::<Runtime>::compute_fee(
-	//				uxt.encoded_size() as u32,
-	//				&dispatch_info,
-	//				0u32.into(),
-	//			)
-	//		};
-	//
-	//		Revive::bare_eth_transact(tx, blockweights.max_block, tx_fee)
-	//	}
-	//
-	//	fn call(
-	//		origin: AccountId,
-	//		dest: H160,
-	//		value: Balance,
-	//		gas_limit: Option<Weight>,
-	//		storage_deposit_limit: Option<Balance>,
-	//		input_data: Vec<u8>,
-	//	) -> pallet_revive::ContractResult<pallet_revive::ExecReturnValue, Balance> {
-	//		Revive::bare_call(
-	//			RuntimeOrigin::signed(origin),
-	//			dest,
-	//			value,
-	//			gas_limit.unwrap_or(RuntimeBlockWeights::get().max_block),
-	//			pallet_revive::DepositLimit::Balance(storage_deposit_limit.unwrap_or(u128::MAX)),
-	//			input_data,
-	//		)
-	//	}
-	//
-	//	fn instantiate(
-	//		origin: AccountId,
-	//		value: Balance,
-	//		gas_limit: Option<Weight>,
-	//		storage_deposit_limit: Option<Balance>,
-	//		code: pallet_revive::Code,
-	//		data: Vec<u8>,
-	//		salt: Option<[u8; 32]>,
-	//	) -> pallet_revive::ContractResult<pallet_revive::InstantiateReturnValue, Balance>
-	//	{
-	//		Revive::bare_instantiate(
-	//			RuntimeOrigin::signed(origin),
-	//			value,
-	//			gas_limit.unwrap_or(RuntimeBlockWeights::get().max_block),
-	//			pallet_revive::DepositLimit::Balance(storage_deposit_limit.unwrap_or(u128::MAX)),
-	//			code,
-	//			data,
-	//			salt,
-	//		)
-	//	}
-	//
-	//	fn upload_code(
-	//		origin: AccountId,
-	//		code: Vec<u8>,
-	//		storage_deposit_limit: Option<Balance>,
-	//	) -> pallet_revive::CodeUploadResult<Balance>
-	//	{
-	//		Revive::bare_upload_code(
-	//			RuntimeOrigin::signed(origin),
-	//			code,
-	//			storage_deposit_limit.unwrap_or(u128::MAX),
-	//		)
-	//	}
-	//
-	//	fn get_storage(
-	//		address: H160,
-	//		key: [u8; 32],
-	//	) -> pallet_revive::GetStorageResult {
-	//		Revive::get_storage(
-	//			address,
-	//			key
-	//		)
-	//	}
-	//
-	//	fn trace_block(
-	//		block: Block,
-	//		tracer_type: pallet_revive::evm::TracerType,
-	//	) -> Vec<(u32, pallet_revive::evm::Trace)> {
-	//		use pallet_revive::tracing::trace;
-	//		let mut tracer = Revive::evm_tracer(tracer_type);
-	//		let mut traces = vec![];
-	//		let (header, extrinsics) = block.deconstruct();
-	//		Executive::initialize_block(&header);
-	//		for (index, ext) in extrinsics.into_iter().enumerate() {
-	//			trace(tracer.as_tracing(), || {
-	//				let _ = Executive::apply_extrinsic(ext);
-	//			});
-	//
-	//			if let Some(tx_trace) = tracer.collect_trace() {
-	//				traces.push((index as u32, tx_trace));
-	//			}
-	//		}
-	//
-	//		traces
-	//	}
-	//
-	//	fn trace_tx(
-	//		block: Block,
-	//		tx_index: u32,
-	//		tracer_type: pallet_revive::evm::TracerType,
-	//	) -> Option<pallet_revive::evm::Trace> {
-	//		use pallet_revive::tracing::trace;
-	//		let mut tracer = Revive::evm_tracer(tracer_type);
-	//		let (header, extrinsics) = block.deconstruct();
-	//
-	//		Executive::initialize_block(&header);
-	//		for (index, ext) in extrinsics.into_iter().enumerate() {
-	//			if index as u32 == tx_index {
-	//			trace(tracer.as_tracing(), || {
-	//					let _ = Executive::apply_extrinsic(ext);
-	//				});
-	//				break;
-	//			} else {
-	//				let _ = Executive::apply_extrinsic(ext);
-	//			}
-	//		}
-	//
-	//		tracer.collect_trace()
-	//	}
-	//
-	//	fn trace_call(
-	//		tx: pallet_revive::evm::GenericTransaction,
-	//		tracer_type: pallet_revive::evm::TracerType,
-	//		)
-	//		-> Result<pallet_revive::evm::Trace, pallet_revive::EthTransactError>
-	//	{
-	//		use pallet_revive::tracing::trace;
-	//		let mut tracer = Revive::evm_tracer(tracer_type);
-	//		let result = trace(tracer.as_tracing(), || Self::eth_transact(tx));
-	//
-	//		if let Some(trace) = tracer.collect_trace() {
-	//			Ok(trace)
-	//		} else if let Err(err) = result {
-	//			Err(err)
-	//		} else {
-	//			Ok(tracer.empty_trace())
-	//		}
-	//	}
-	//}
 
 	impl pallet_transaction_payment_rpc_runtime_api::TransactionPaymentApi<
 		Block,
@@ -4105,14 +3747,8 @@ mod tests {
     // call can carry value and would otherwise bypass the Balances/Assets/PoolAssets/
     // AssetConversion block entirely.
     #[test]
-    fn f065_non_transfer_proxy_blocks_contracts_and_revive() {
+    fn f065_non_transfer_proxy_blocks_asset_and_recovery_paths() {
         new_test_ext().execute_with(|| {
-            let contracts_call = RuntimeCall::Contracts(pallet_contracts::Call::remove_code {
-                code_hash: Default::default(),
-            });
-            let revive_call = RuntimeCall::Revive(pallet_revive::Call::remove_code {
-                code_hash: Default::default(),
-            });
             let target = sp_runtime::MultiAddress::Id(AccountId::from([9u8; 32]));
             let assets_call = RuntimeCall::Assets(pallet_assets::Call::<Runtime, Instance1>::transfer {
                 id: parity_scale_codec::Compact(1u128),
@@ -4136,18 +3772,23 @@ mod tests {
                     keep_alive: false,
                 },
             );
+            // A01: create_recovery doesn't move value directly, but it's an authority
+            // escalation path — see the NonTransfer filter's comment for the full chain.
+            let recovery_call = RuntimeCall::Recovery(pallet_recovery::Call::<Runtime>::create_recovery {
+                friends: vec![AccountId::from([9u8; 32])],
+                threshold: 1,
+                delay_period: 0,
+            });
 
-            assert!(!ProxyType::NonTransfer.filter(&contracts_call));
-            assert!(!ProxyType::NonTransfer.filter(&revive_call));
             assert!(!ProxyType::NonTransfer.filter(&assets_call));
             assert!(!ProxyType::NonTransfer.filter(&pool_assets_call));
             assert!(!ProxyType::NonTransfer.filter(&asset_conversion_call));
+            assert!(!ProxyType::NonTransfer.filter(&recovery_call));
             // Any proxy still allows everything.
-            assert!(ProxyType::Any.filter(&contracts_call));
-            assert!(ProxyType::Any.filter(&revive_call));
             assert!(ProxyType::Any.filter(&assets_call));
             assert!(ProxyType::Any.filter(&pool_assets_call));
             assert!(ProxyType::Any.filter(&asset_conversion_call));
+            assert!(ProxyType::Any.filter(&recovery_call));
         });
     }
 
