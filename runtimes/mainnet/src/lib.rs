@@ -877,6 +877,16 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 			// of them. Contracts and Revive calls can also carry value (a trivial contract
 			// forwarding a transfer would bypass the restriction entirely), so both are
 			// blocked wholesale too, same as the asset pallets above.
+			//
+			// A01 (audit, 2026-09-25): Recovery was not blocked either. create_recovery
+			// doesn't move value directly, but it lets a NonTransfer delegate configure the
+			// real account's recovery friends/threshold — set itself as the sole friend with
+			// a zero delay, then initiate_recovery/vouch_recovery/claim_recovery from its own
+			// (unrestricted) origin and call as_recovered, which dispatches with a fresh
+			// Signed origin for the real account with no proxy filter attached at all. That's
+			// full account takeover through a call that superficially "moves no value."
+			// Recovery is inherently an authority-escalation mechanism, so it's blocked
+			// wholesale for NonTransfer rather than picking apart which of its calls are safe.
 			ProxyType::NonTransfer => !matches!(
 				c,
 				RuntimeCall::Balances(..)
@@ -886,6 +896,7 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 					| RuntimeCall::AssetConversion(..)
 					| RuntimeCall::Contracts(..)
 					| RuntimeCall::Revive(..)
+					| RuntimeCall::Recovery(..)
 			),
 			ProxyType::Governance => matches!(
 				c,
@@ -3984,6 +3995,57 @@ mod tests {
             assert_eq!(
                 pallet_safe_mode::EnteredUntil::<Runtime>::get(),
                 Some(1 + EnterDuration::get() + ExtendDuration::get()),
+            );
+        });
+    }
+
+    // A01 (audit, 2026-09-25): end-to-end reproduction of the Recovery escalation path,
+    // through the actual Proxy::proxy extrinsic (not just ProxyType::filter() in isolation
+    // — pallet_proxy's do_proxy() attaches the filter as a call-level origin filter, so the
+    // outer proxy() extrinsic always returns Ok(()) regardless of whether the inner call was
+    // filtered; the only observable signal is whether the inner call's storage effect
+    // actually happened). A NonTransfer delegate dispatches create_recovery naming itself as
+    // the sole friend with a zero delay — before the fix this would succeed, letting the
+    // delegate immediately initiate/vouch/claim recovery and gain a fresh Signed origin over
+    // the real account via as_recovered, with no proxy restriction at all attached to it.
+    #[test]
+    fn a01_nontransfer_proxy_cannot_install_recovery() {
+        new_test_ext().execute_with(|| {
+            let real = AccountId::from([10u8; 32]);
+            let attacker = AccountId::from([11u8; 32]);
+            let _ = pallet_balances::Pallet::<Runtime>::force_set_balance(
+                RuntimeOrigin::root(),
+                sp_runtime::MultiAddress::Id(real.clone()),
+                1_000 * crate::constants::currency::PDEX,
+            );
+
+            assert!(pallet_proxy::Pallet::<Runtime>::add_proxy(
+                RuntimeOrigin::signed(real.clone()),
+                sp_runtime::MultiAddress::Id(attacker.clone()),
+                ProxyType::NonTransfer,
+                0,
+            )
+            .is_ok());
+
+            let create_recovery = RuntimeCall::Recovery(pallet_recovery::Call::<Runtime>::create_recovery {
+                friends: vec![attacker.clone()],
+                threshold: 1,
+                delay_period: 0,
+            });
+            // The outer proxy() call itself always returns Ok(()) — do_proxy() swallows the
+            // inner dispatch's filtered-call error into a ProxyExecuted event rather than
+            // propagating it. What must be checked is whether create_recovery actually ran.
+            assert!(pallet_proxy::Pallet::<Runtime>::proxy(
+                RuntimeOrigin::signed(attacker),
+                sp_runtime::MultiAddress::Id(real.clone()),
+                Some(ProxyType::NonTransfer),
+                Box::new(create_recovery),
+            )
+            .is_ok());
+
+            assert!(
+                pallet_recovery::Recoverable::<Runtime>::get(&real).is_none(),
+                "A01: NonTransfer proxy must not be able to install a Recovery config on the real account",
             );
         });
     }
