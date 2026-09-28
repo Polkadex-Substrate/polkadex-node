@@ -989,7 +989,13 @@ impl pallet_babe::Config for Runtime {
 
 impl pallet_beefy::Config for Runtime {
 	type BeefyId = BeefyId;
-	type MaxAuthorities = ConstU32<10>;
+	// A04 (audit, 2026-09-25): was ConstU32<10>, while every other consensus pallet
+	// (Babe, Grandpa, AuthorityDiscovery) uses the shared MaxAuthorities = 200. pallet-beefy
+	// truncates both active and queued authority lists to this bound in on_new_session, so
+	// with more than 10 validators the BEEFY set silently became a strict subset of the real
+	// session set — narrowing BEEFY's security and making readiness measurements against the
+	// full validator population misleading. Aligned to the shared bound.
+	type MaxAuthorities = MaxAuthorities;
 	type MaxNominators = ConstU32<0>;
 	type MaxSetIdSessionEntries = BeefySetIdSessionEntries;
 	type OnNewValidatorSet = MmrLeaf;
@@ -3995,6 +4001,38 @@ mod tests {
             assert_eq!(
                 pallet_safe_mode::EnteredUntil::<Runtime>::get(),
                 Some(1 + EnterDuration::get() + ExtendDuration::get()),
+            );
+        });
+    }
+
+    // A04 (audit, 2026-09-25): pallet_beefy::on_new_session truncates the authority list to
+    // Config::MaxAuthorities. With the old ConstU32<10>, any session with more than 10
+    // validators silently lost the rest from the BEEFY set. Drive on_new_session directly
+    // with 11 dummy validators (one more than the old cap, comfortably under the new shared
+    // MaxAuthorities = 200) and confirm none get truncated.
+    #[test]
+    fn a04_beefy_authorities_not_truncated_past_ten() {
+        use sp_consensus_beefy::ecdsa_crypto::AuthorityId as BeefyId;
+        use sp_core::crypto::UncheckedFrom;
+        use frame_support::traits::OneSessionHandler;
+
+        new_test_ext().execute_with(|| {
+            let validators: Vec<(AccountId, BeefyId)> = (0u8..11)
+                .map(|i| (AccountId::from([i; 32]), BeefyId::unchecked_from([i; 33])))
+                .collect();
+
+            let pairs: Vec<(&AccountId, BeefyId)> =
+                validators.iter().map(|(a, k)| (a, k.clone())).collect();
+            <pallet_beefy::Pallet<Runtime> as OneSessionHandler<AccountId>>::on_new_session(
+                false,
+                pairs.clone().into_iter(),
+                pairs.into_iter(),
+            );
+
+            assert_eq!(
+                pallet_beefy::Authorities::<Runtime>::get().len(),
+                11,
+                "A04: BEEFY authority list must not be truncated below the shared MaxAuthorities bound",
             );
         });
     }
