@@ -1,6 +1,6 @@
 # Security Audit — Fix Log
 
-Tracking all changes applied from the 14 August 2026 security audit.  
+Tracking all changes applied from the 14 August 2026 security audit (@charanks030).  
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
