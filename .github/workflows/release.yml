@@ -58,7 +58,15 @@ jobs:
       - name: System build dependencies
         run: |
           set -euo pipefail
-          dnf install -y gcc gcc-c++ clang make cmake protobuf-compiler git rpm-build binutils
+          dnf install -y gcc gcc-c++ clang make cmake git rpm-build binutils unzip
+          # protoc: Rocky 9 ships no protobuf-compiler package, so take the pinned
+          # upstream release and check its hash before trusting it.
+          PROTOC_VER=25.3
+          PROTOC_SHA256=f853e691868d0557425ea290bf7ba6384eef2fa9b04c323afab49a770ba9da80
+          curl -sSfL -o /tmp/protoc.zip "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VER}/protoc-${PROTOC_VER}-linux-x86_64.zip"
+          echo "${PROTOC_SHA256}  /tmp/protoc.zip" | sha256sum -c -
+          unzip -q -o /tmp/protoc.zip -d /usr/local bin/protoc 'include/*'
+          protoc --version
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
