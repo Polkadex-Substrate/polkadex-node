@@ -2558,7 +2558,7 @@ mod runtime {
     pub type PoolAssets = pallet_assets::Pallet<Runtime, Instance2>;
 
     // #52 was Revive - REMOVED (never on mainnet, placeholder fee adapter, no migration
-    // needed — no storage exists for it on mainnet)
+    // needed — no storage exists for it on mainnet). Do not reuse this index.
     // #[runtime::pallet_index(52)]
     // pub type Revive = pallet_revive::Pallet<Runtime>;
 
@@ -2566,7 +2566,7 @@ mod runtime {
     pub type SkipFeelessPayment = pallet_skip_feeless_payment::Pallet<Runtime>;
 
     // #54 was Contracts - REMOVED (never on mainnet, failed the runtime integrity test,
-    // no migration needed — no storage exists for it on mainnet)
+    // no migration needed — no storage exists for it on mainnet). Do not reuse this index.
     // #[runtime::pallet_index(54)]
     // pub type Contracts = pallet_contracts::Pallet<Runtime>;
 

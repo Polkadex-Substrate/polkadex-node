@@ -10450,7 +10450,6 @@ dependencies = [
  "pallet-assets",
  "pallet-balances",
  "pallet-lmp",
- "pallet-revive",
  "pallet-timestamp",
  "parity-scale-codec",
  "polkadex-primitives",

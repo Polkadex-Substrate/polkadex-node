@@ -634,7 +634,9 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 **Branch:** `fix/spec-392-blockers`
 **Date:** 2026-09-28
 
-**Findings:** an independent audit (2026-09-25) found `pallet_contracts` failing the runtime's own `__construct_runtime_integrity_test` invariant (A02: the max per-block Contracts storage-write workload this runtime's block weights admit exceeded the pallet's memory allocation model), and `pallet_revive`'s Ethereum fee adapter still a placeholder — `FeeInfo = ()` returns zero fees and zero fee-to-weight conversion for Ethereum calls (A07).
+**Findings:** an independent audit (2026-09-25, polkadexaj + visiondream3 — report location TBD, see note below) found `pallet_contracts` failing the runtime's own `__construct_runtime_integrity_test` invariant (A02: the max per-block Contracts storage-write workload this runtime's block weights admit exceeded the pallet's memory allocation model), and `pallet_revive`'s Ethereum fee adapter still a placeholder — `FeeInfo = ()` returns zero fees and zero fee-to-weight conversion for Ethereum calls (A07).
+
+> **Note (2026-09-30):** this section and the F-065 update below cite this audit without a locatable report — no path in this repo, no link to a private ops doc. Author now attributed (polkadexaj + visiondream3, per Tejas); the report's actual storage location is still needed before this citation is fully traceable, per polkadexaj's PR 14 review comment.
 
 **Decision:** rather than tune Contracts' Schedule to pass the integrity test (tried first, reverted — see PR 14 history), the client decided to remove both pallets outright. Neither exists on mainnet today (spec 373 has never had either), nothing calls into either pallet's own extrinsics, and there's no storage to migrate for either on mainnet.
 
@@ -646,10 +648,29 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 - Removed the active `ContractsApi` runtime-API impl and the already-dead, commented-out `ReviveApi` impl
 - Removed `pallet_contracts::Migration<Runtime>` from the `Migrations` tuple
 - Removed `EthExtraImpl`/`EthExtra` and the `SetWeightLimit for RuntimeCall` impl (both existed only to support the Revive-based extrinsic type)
-- Removed the `pallet-revive`/`pallet-contracts` dependency lines and all `std`/`runtime-benchmarks`/`try-runtime` feature entries from `runtimes/mainnet/Cargo.toml` (left the root workspace `Cargo.toml` definitions alone — `pallets/ocex/Cargo.toml` still has an unused `pallet-revive` dependency line, unrelated to this change, harmless but worth a separate cleanup)
+- Removed the `pallet-revive`/`pallet-contracts` dependency lines and all `std`/`runtime-benchmarks`/`try-runtime` feature entries from `runtimes/mainnet/Cargo.toml` (left the root workspace `Cargo.toml` definitions alone)
 - See F-065 below for the `NonTransfer` proxy filter and test updates
+- Marked the freed pallet indices 52 and 54 "do not reuse" in the commented-out bindings, so nobody assigns a new pallet to either without a deliberate decision
 
-**To bring either back later:** add a real fee adapter for Revive (not a placeholder), tune Contracts' Schedule properly if re-added, and stand up an actual Ethereum RPC service before re-introducing the Ethereum-compatible extrinsic type — in a dedicated spec bump, not bundled with this one.
+**Update (2026-09-30, polkadexaj PR 14 review):**
+- `pallets/ocex/Cargo.toml`'s unused `pallet-revive` dependency line (flagged above as a "separate cleanup") is now removed — it was never called from OCEX's source, but per polkadexaj it's what pulled `pallet-revive-fixtures`/`solc` into the benchmark build in the first place. Removal is complete now, not partial.
+- **Testnet extrinsic format:** reverting `UncheckedExtrinsic` to the generic type is a no-op for mainnet (spec 373 never had Revive), but **testnet's branch currently uses the Revive-wrapped type** (confirmed by reading `origin/testnet`'s `lib.rs` directly) — so this genuinely changes testnet's extrinsic envelope and metadata, not just mainnet's. OFE and wallet flows need a smoke test after this lands on testnet. On `transaction_version`: it's a single value in this one runtime crate's `RuntimeVersion`, shared by both networks since they run the identical compiled WASM — there's no mechanism for a testnet-only bump without forking into a separate runtime, which is out of scope. The existing `transaction_version: 3` bump (already done for spec 392) covers this extrinsic-format change too, since testnet's move to spec 392 is the single event that introduces both.
+
+---
+
+### BEEFY MaxAuthorities aligned to the shared consensus bound (independent audit finding A04)
+
+**Severity:** High — release blocker on PR 14
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-28
+
+**Finding:** an independent audit (2026-09-25, polkadexaj + visiondream3 — report location TBD, same note as above) found `pallet_beefy::Config::MaxAuthorities` hardcoded to `ConstU32<10>`, while every other consensus pallet (Babe, Grandpa, AuthorityDiscovery) uses the shared `MaxAuthorities = 200`. `pallet-beefy`'s `on_new_session` truncates both active and queued authority lists to this bound — with more than 10 validators, the BEEFY set silently became a strict subset of the real session set, narrowing BEEFY's security margin and making readiness measurements against the full validator population misleading.
+
+**Changes made:**
+- Aligned `pallet_beefy::Config::MaxAuthorities` to the shared `MaxAuthorities` constant
+
+**Verification:** added `a04_beefy_authorities_not_truncated_past_ten`, which drives `on_new_session` directly (via `OneSessionHandler`) with 11 dummy validators and confirms none get truncated. Verified the test fails at exactly 10 authorities with the old `ConstU32<10>` and passes with the fix.
 
 ---
 
@@ -664,7 +685,7 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 **Changes made:**
 - Added `RuntimeCall::Assets(..)`, `RuntimeCall::PoolAssets(..)`, `RuntimeCall::AssetConversion(..)`, `RuntimeCall::Contracts(..)`, `RuntimeCall::Revive(..)` to the `NonTransfer` filter's exclusion match
 
-**Update (2026-09-25, independent audit finding A01):** `Contracts`/`Revive` in the filter didn't cover everything — `Recovery` was missed. `create_recovery` moves no value directly, but it lets a NonTransfer delegate configure the real account's recovery friends/threshold (itself, as sole friend, zero delay), then `initiate_recovery`/`vouch_recovery`/`claim_recovery` from its own unrestricted origin and call `as_recovered`, which dispatches with a fresh Signed origin carrying no proxy restriction at all — full account takeover through a call that superficially "moves no value." Added `RuntimeCall::Recovery(..)` to the exclusion match. Verified with an end-to-end regression through the actual `Proxy::proxy` extrinsic (not just `ProxyType::filter()` in isolation, which can't observe whether the inner call was actually filtered — `do_proxy()` swallows that into a `ProxyExecuted` event rather than the outer call's return value).
+**Update (2026-09-25, independent audit finding A01, polkadexaj + visiondream3):** `Contracts`/`Revive` in the filter didn't cover everything — `Recovery` was missed. `create_recovery` moves no value directly, but it lets a NonTransfer delegate configure the real account's recovery friends/threshold (itself, as sole friend, zero delay), then `initiate_recovery`/`vouch_recovery`/`claim_recovery` from its own unrestricted origin and call `as_recovered`, which dispatches with a fresh Signed origin carrying no proxy restriction at all — full account takeover through a call that superficially "moves no value." Added `RuntimeCall::Recovery(..)` to the exclusion match. Verified with an end-to-end regression through the actual `Proxy::proxy` extrinsic (not just `ProxyType::filter()` in isolation, which can't observe whether the inner call was actually filtered — `do_proxy()` swallows that into a `ProxyExecuted` event rather than the outer call's return value).
 
 **Update (2026-09-28):** `Contracts` and `Revive` are no longer in `construct_runtime` at all (see the new entry above on their removal) — `RuntimeCall::Contracts`/`::Revive` aren't valid variants any more, so those two arms were dropped from the filter and its test. Nothing to block if the calls don't exist.
 
