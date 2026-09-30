@@ -4,7 +4,7 @@ Tracking all changes applied from the 14 August 2026 security audit.
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 18 fixed (as of last update) · 47 open  
+**Totals:** 65 findings in this repo · 18 fixed (as of last update) · 43 open (corrected 2026-09-30: C7, H4, R2-H1, R4-A were double-listed here despite being fully fixed and written up above — removed)  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -634,9 +634,7 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 **Branch:** `fix/spec-392-blockers`
 **Date:** 2026-09-28
 
-**Findings:** an independent audit (2026-09-25, polkadexaj + visiondream3 — report location TBD, see note below) found `pallet_contracts` failing the runtime's own `__construct_runtime_integrity_test` invariant (A02: the max per-block Contracts storage-write workload this runtime's block weights admit exceeded the pallet's memory allocation model), and `pallet_revive`'s Ethereum fee adapter still a placeholder — `FeeInfo = ()` returns zero fees and zero fee-to-weight conversion for Ethereum calls (A07).
-
-> **Note (2026-09-30):** this section and the F-065 update below cite this audit without a locatable report — no path in this repo, no link to a private ops doc. Author now attributed (polkadexaj + visiondream3, per Tejas); the report's actual storage location is still needed before this citation is fully traceable, per polkadexaj's PR 14 review comment.
+**Findings:** an independent audit (2026-09-25, polkadexaj + visiondream3) found `pallet_contracts` failing the runtime's own `__construct_runtime_integrity_test` invariant (A02: the max per-block Contracts storage-write workload this runtime's block weights admit exceeded the pallet's memory allocation model), and `pallet_revive`'s Ethereum fee adapter still a placeholder — `FeeInfo = ()` returns zero fees and zero fee-to-weight conversion for Ethereum calls (A07).
 
 **Decision:** rather than tune Contracts' Schedule to pass the integrity test (tried first, reverted — see PR 14 history), the client decided to remove both pallets outright. Neither exists on mainnet today (spec 373 has never had either), nothing calls into either pallet's own extrinsics, and there's no storage to migrate for either on mainnet.
 
@@ -665,7 +663,7 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 **Branch:** `fix/spec-392-blockers`
 **Date:** 2026-09-28
 
-**Finding:** an independent audit (2026-09-25, polkadexaj + visiondream3 — report location TBD, same note as above) found `pallet_beefy::Config::MaxAuthorities` hardcoded to `ConstU32<10>`, while every other consensus pallet (Babe, Grandpa, AuthorityDiscovery) uses the shared `MaxAuthorities = 200`. `pallet-beefy`'s `on_new_session` truncates both active and queued authority lists to this bound — with more than 10 validators, the BEEFY set silently became a strict subset of the real session set, narrowing BEEFY's security margin and making readiness measurements against the full validator population misleading.
+**Finding:** an independent audit (2026-09-25, polkadexaj + visiondream3) found `pallet_beefy::Config::MaxAuthorities` hardcoded to `ConstU32<10>`, while every other consensus pallet (Babe, Grandpa, AuthorityDiscovery) uses the shared `MaxAuthorities = 200`. `pallet-beefy`'s `on_new_session` truncates both active and queued authority lists to this bound — with more than 10 validators, the BEEFY set silently became a strict subset of the real session set, narrowing BEEFY's security margin and making readiness measurements against the full validator population misleading.
 
 **Changes made:**
 - Aligned `pallet_beefy::Config::MaxAuthorities` to the shared `MaxAuthorities` constant
@@ -743,14 +741,10 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 | ID | Severity | Location | Finding |
 |---|---|---|---|
-| C7 | 🔴 Critical | nodes/, session-keys/ | Master BIP39 seed committed in repo — rotate all session keys |
-| H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
-| R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
 | R3-H2 | 🟠 High | pallets/ocex | OCW mutex released on failed acquisition; unsafe RPC namespaces |
 | R3-H3 | 🟠 High | pallets/ocex | Aggregator HTTP response uncapped |
 | R3-H12 | 🟠 High | pallets/ocex | LMP config metrics write-only; epoch budget over-issued |
 | R3-H13 | 🟠 High | pallets/ocex | close_auction non-transactional; place_bid commented out |
-| R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
 | R3-H6 | 🟠 High | pallets/liquidity-mining | Pools keyed by market_maker, callbacks look up by pool_id |
 | R3-H7 | 🟠 High | pallets/liquidity-mining | remove_liquidity_failed mints 10¹²× shares |
 | R3-H8 | 🟠 High | pallets/liquidity-mining | force_close_pool sends funds to personal account |
