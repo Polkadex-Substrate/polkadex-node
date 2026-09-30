@@ -24,16 +24,16 @@ A node may hold the ledger if all of these are true:
 
 ## Usage
 
-Requires Python 3.9 or newer, and free memory roughly equal to the size of the offchain column, which for a node that ran to the halt may be 8 to 16 GB. The scan loads every ledger node before walking.
+Requires Python 3.9 or newer. `extract_ocex_trie.py` loads every ledger node into memory before walking; on a node that ran to the halt that column can exceed 30 GB and the process is killed. Use `extract_lowmem.py` instead: same arguments, plus `--index <dir>` (default `ocex-index` in the current directory). It makes one pass over the database writing only a hash-to-key index to disk (about 1 GB of RAM, roughly 10 minutes for 15 million keys), then walks the trie with point lookups. The index is reused on later runs.
 
 ```
 pip install -r requirements.txt
 
 # 1. Report what the database contains. Read-only, takes about a minute.
-python3 extract_ocex_trie.py --db /path/to/chains/polkadex_main_network/db/full --scan
+python3 extract_lowmem.py --db /path/to/chains/polkadex_main_network/db/full --scan
 
 # 2. If the scan reports the halt root present, extract the ledger at that root.
-python3 extract_ocex_trie.py --db /path/to/chains/polkadex_main_network/db/full \
+python3 extract_lowmem.py --db /path/to/chains/polkadex_main_network/db/full \
     --root 0x0899feaee1f47b34036109f56c76b5fbd22ec9e339ecc57fa0bcc58f6a2f05c0 \
     --out balances.csv
 ```
