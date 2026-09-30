@@ -58,7 +58,7 @@ jobs:
       - name: System build dependencies
         run: |
           set -euo pipefail
-          dnf install -y gcc gcc-c++ clang make cmake git rpm-build binutils unzip
+          dnf install -y gcc gcc-c++ clang clang-devel llvm-devel make cmake git rpm-build binutils unzip pkgconf-pkg-config perl
           # protoc: Rocky 9 ships no protobuf-compiler package, so take the pinned
           # upstream release and check its hash before trusting it.
           PROTOC_VER=25.3
