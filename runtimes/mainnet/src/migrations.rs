@@ -253,23 +253,6 @@ impl<T: pallet_session::Config> OnRuntimeUpgrade for SessionStorageVersionMigrat
     }
 }
 
-/// Migration for pallet-grandpa v4 -> v5
-pub struct GrandpaStorageVersionMigration<T>(PhantomData<T>);
-impl<T: pallet_grandpa::Config> OnRuntimeUpgrade for GrandpaStorageVersionMigration<T> {
-    fn on_runtime_upgrade() -> Weight {
-        let current = pallet_grandpa::Pallet::<T>::on_chain_storage_version();
-        let target = pallet_grandpa::Pallet::<T>::in_code_storage_version();
-
-        if current < target {
-            log::info!("🔧 Updating GRANDPA pallet storage version from {:?} to {:?}", current, target);
-            target.put::<pallet_grandpa::Pallet<T>>();
-            T::DbWeight::get().reads_writes(1, 1)
-        } else {
-            T::DbWeight::get().reads(1)
-        }
-    }
-}
-
 /// Migration for pallet-identity v1 -> v2
 pub struct IdentityStorageVersionMigration<T>(PhantomData<T>);
 impl<T: pallet_identity::Config> OnRuntimeUpgrade for IdentityStorageVersionMigration<T> {

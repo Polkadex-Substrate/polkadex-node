@@ -2893,7 +2893,8 @@ type Migrations = (
     // Pallet storage version migrations
     migrations::StakingStorageVersionMigration<Runtime>,
     migrations::SessionStorageVersionMigration<Runtime>,
-    migrations::GrandpaStorageVersionMigration<Runtime>,
+    // pallet-grandpa v4 -> v5: moves the authority list from :grandpa_authorities into Authorities
+    pallet_grandpa::migrations::MigrateV4ToV5<Runtime>,
     migrations::IdentityStorageVersionMigration<Runtime>,
     migrations::ChildBountiesStorageVersionMigration<Runtime>,
     // Storage version bumps for pallets missing on-chain version markers
