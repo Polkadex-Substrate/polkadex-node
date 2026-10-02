@@ -44,7 +44,7 @@ Roles: **Dev** writes the code and opens PRs. **Reviewers** are two people who a
 ## 6. Validators
 
 - [ ] Announcement sent: release link, verify steps, client upgrade window, migration doc link.
-- [ ] If a runtime upgrade follows: enactment date and the key rotation instruction included.
+- [ ] If a runtime upgrade follows: enactment date and the key rotation instruction included (procedure 6).
 - [ ] A named person watches telemetry during the window and contacts validators that drop.
 - [ ] Stop rule: more than 10 percent of active validators, counted by validator, off for more than an hour pauses the announcement and the upgrade date.
 - [ ] External communications sent to users and exchanges, with a prepared statement for failure. Ops owns the wording.
@@ -56,9 +56,9 @@ Roles: **Dev** writes the code and opens PRs. **Reviewers** are two people who a
 - [ ] BEEFY authority bound equals the validator cap, and `beefy.authorities()` on testnet has the same length as `session.validators()` after the soak (procedure 5).
 - [ ] BEEFY is unstarted: `beefy.genesisBlock()` reads `None` on testnet after the soak and on mainnet after enactment (procedure 5).
 - [ ] The chill call for validators on placeholder keys has an owner and an issue before any BEEFY start date is announced (procedure 5).
-- [ ] The `set_code` proposal goes through governance. The runtime test that no pallet named `Sudo` exists passed on the tagged commit.
+- [ ] The `set_code` proposal goes through governance. The uploading account holds the preimage fee and deposit (procedure 6). The runtime test that no pallet named `Sudo` exists passed on the tagged commit.
 - [ ] At enactment: Ops watches block production and finality for two sessions. A stall escalates immediately.
-- [ ] After enactment: validators rotate keys if required. Ops confirms the new session key set on the team's validators.
+- [ ] After enactment: validators rotate keys if required, signing with the stash (procedure 6). Ops confirms the new session key set on the team's validators.
 
 ## 8. After
 

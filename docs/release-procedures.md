@@ -58,3 +58,14 @@ BEEFY must not start until more than two thirds of the active validators, counte
 - Chill in rounds. Never take the set below a size where the three largest operators together run a third or more of the remaining validators, since that many nodes going down together would stop finality. If the upgraded set is too small for that, extend the deadline rather than chill deeper.
 - Chilled validators rejoin by rotating keys and calling `validate`. Do not force-unstake; that starts a 28-era unbonding clock for no benefit.
 - When the threshold holds for a few eras, governance starts BEEFY with `beefy.set_new_genesis` pointing a little ahead of the current block.
+
+## Procedure 6: notes for the 392 upgrade
+
+Points 1 and 2 go into the release notes and the validator announcement (section 6). Point 3 is for whoever uploads the runtime.
+
+1. **Session keys.** From 392 on, session keys belong to the account that signs `session.setKeys`. `ValidatorIdOf` is `ConvertInto`, because `StashOf`, which mapped a controller to its stash, no longer exists in the SDK. To rotate, run `author_rotateKeys` on the node, then sign `session.setKeys` with the stash account. Pass the `author_rotateKeys` output as `keys` and `0x` as `proof`. A `setKeys` signed by a controller account succeeds but stores the keys on the controller, so nothing changes for the validator. Many validators have a separate controller, so the announcement must say this plainly.
+   - Keys set before the upgrade keep working. Rotating after it replaces the placeholder BEEFY and mixnet keys from the migration (procedure 5).
+   - In Polkadot.js Apps, the Session Key button under Staking > Account Actions signs with the controller. With a separate controller, use Developer > Extrinsics and select the stash as the signing account.
+   - A validator who already signed with the controller runs `author_rotateKeys` again and signs with the stash. The same keys sent from the stash fail with `DuplicatedKey`, because the controller now holds them.
+2. **One error line at the upgrade block.** In the first block that runs 392, each node logs one error line that starts with `Corrupted state at`, followed by the `System::Events` storage key as a byte list, `[38, 170, 57, 78, ...]`. The new runtime reads the events that the old runtime wrote in that block, and the event format changed. It is harmless and does not repeat, so it does not count against the soak in procedure 1.
+3. **Preimage cost.** Uploading the `set_code` preimage costs a fee plus a reserved deposit: [PREIMAGE FEE AND DEPOSIT]. The uploading account must hold both before the upload.
