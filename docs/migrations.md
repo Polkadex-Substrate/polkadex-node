@@ -61,8 +61,6 @@ These all follow the same pattern: compare on-chain storage version with in-code
 | `SessionStorageVersionMigration` | `pallet_session` |
 | `IdentityStorageVersionMigration` | `pallet_identity` |
 | `ChildBountiesStorageVersionMigration` | `pallet_child_bounties` |
-
-`pallet_grandpa::migrations::MigrateV4ToV5` is not a bump. It moves the authority list from the well-known key `:grandpa_authorities` into `Grandpa::Authorities`, removes the old key, and only runs at on-chain version 4. Mainnet is at v4, so it runs there.
 | `StorageVersionMigration<pallet_balances>` | Balances |
 | `StorageVersionMigration<pallet_election_provider_multi_phase>` | EPM |
 | `StorageVersionMigration<pallet_collective::Instance1>` | Council |
@@ -76,6 +74,8 @@ These all follow the same pattern: compare on-chain storage version with in-code
 | `StorageVersionMigration<pallet_democracy>` | Democracy |
 | `StorageVersionMigration<pallet_preimage>` | Preimage |
 | `StorageVersionMigration<pallet_assets::Instance1>` | Assets |
+
+`pallet_grandpa::migrations::MigrateV4ToV5` is not a bump. It moves the authority list from the well-known key `:grandpa_authorities` into `Grandpa::Authorities`, removes the old key, and only runs at on-chain version 4. Mainnet is at v4, so it runs there.
 
 - **Mainnet:** All required to sync on-chain storage version markers with the upgraded in-code versions. Without these, pallets may refuse to run their own internal migrations.
 - **After first run:** Remove from the tuple.
