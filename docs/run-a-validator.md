@@ -230,7 +230,7 @@ sudo systemctl status validator
 ```
 
 ### Generating the Session Keys
-You need to tell the chain your Session keys by signing and submitting an extrinsic. This is what associates your validator node with your Controller account on Polkadex.
+You need to tell the chain your Session keys by signing and submitting an extrinsic. This is what associates your validator node with your Stash account on Polkadex.
 
 #### Option 1: PolkadotJS-APPS
 You can generate your `Session keys` in the client via the apps RPC. If you are doing this, make sure that you have the PolkadotJS-Apps explorer attached to your validator node. You can configure the apps dashboard to connect to the endpoint of your validator in the Settings tab. If you are connected to a default endpoint hosted by the Polkadex Team, you will not be able to use this method since making RPC requests to this node would affect the local keystore hosted on a <i>public node</i> and you want to make sure you are interacting with the keystore for <i>your node</i>.
@@ -253,9 +253,11 @@ You can restart your node at this point.
 
 #### Submitting the `setKeys` Transaction
 
-You need to tell the chain your Session keys by signing and submitting an extrinsic. This is what associates your validator with your Controller account.
+You need to tell the chain your Session keys by signing and submitting an extrinsic. This is what associates your validator with your Stash account.
 
 Go to [Staking > Account Actions](https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fmainnet.polkadex.trade#/staking/actions), and click "Session Key" on the bonding account you generated earlier. Enter the output from `author_rotateKeys` in the field and click "Set Session Key".
+
+> **Note:** From runtime 392 on, session keys belong to the account that signs `setKeys`, so sign it with your Stash account. The "Session Key" button signs with the Controller account. If your Controller is a separate account, use Developer > Extrinsics instead: select your Stash account, choose `session` and `setKeys`, and enter the output from `author_rotateKeys` as `keys` and `0x` as `proof`. A `setKeys` signed by the Controller succeeds but does not change your validator's keys. If you already signed it with the Controller, run `author_rotateKeys` again and sign the new keys with your Stash account.
 
 ![Set Session Key](./screenshots/session_key.png)
 
