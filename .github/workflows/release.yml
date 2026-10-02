@@ -40,6 +40,12 @@ jobs:
       # Procedure 2 (docs/release-procedures.md): a tag trigger cannot be
       # restricted to one branch, so the workflow refuses to build a tag whose
       # commit is not on mainnet. Runs before anything is produced.
+      # The workspace is owned by the runner user while the container runs as root, and
+      # checkout only marks it safe inside its own temporary HOME. Without this, git in later
+      # steps fails with "dubious ownership" and the build cannot embed the commit.
+      - name: Mark the workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Tag branch gate
         if: startsWith(github.ref, 'refs/tags/')
         run: |
