@@ -24,7 +24,13 @@ license-file    = ["../../LICENSE", "0"]
 # links no OpenSSL/libcrypto at all (this workspace uses rustls; `openssl`/
 # `openssl-sys` are absent from Cargo.lock). ca-certificates is still needed
 # for TLS root certificate verification.
-depends         = "$auto, ca-certificates"
+# The library dependencies are listed by hand rather than with $auto: $auto
+# runs dpkg-shlibdeps, which the Rocky 9 release container does not have, and
+# cargo-deb then only warns and ships a package with no library dependencies.
+# The minimums are the versions the binary is linked against in that container
+# (glibc 2.34, GCC 11), so they cover every symbol version it can need. The
+# release workflow checks this line against the built binary and package.
+depends         = "libc6 (>= 2.34), libgcc-s1 (>= 11), libstdc++6 (>= 11), ca-certificates"
 extended-description = """\
 Polkadex is a peer-to-peer orderbook-based cryptocurrency exchange
 built on the Substrate/Polkadot ecosystem. This package ships the

@@ -85,16 +85,24 @@ if $BUILD_DEB; then
   # The `|| true` matters: under `pipefail`, if cargo-deb's output consists
   # entirely of the filtered line, grep -v finds nothing to print and exits
   # 1, which would abort this script even though cargo-deb itself succeeded.
+  DEB_LOG="$(mktemp)"
   (cd "$REPO_ROOT" && cargo deb \
       --manifest-path "$NODE_MANIFEST" \
       --no-build \
-      --output "$DIST_DIR/" 2>&1 | { grep -v "Only source paths starting with" || true; })
+      --output "$DIST_DIR/" 2>&1 | { grep -v "Only source paths starting with" || true; }) | tee "$DEB_LOG"
+  # With $auto in depends and no dpkg-shlibdeps on the machine, cargo-deb only
+  # warns and builds a package with no library dependencies. Stop instead.
+  if grep -qE 'dpkg-shlibdeps|No \$auto deps' "$DEB_LOG"; then
+    rm -f "$DEB_LOG"
+    die "cargo-deb could not work out the library dependencies (see above). List them in depends in $NODE_MANIFEST."
+  fi
+  rm -f "$DEB_LOG"
 
   DEB_PATH=$(find "$DIST_DIR" -name "*.deb" -newer "$BINARY" 2>/dev/null | sort | tail -1)
   if [ -n "$DEB_PATH" ] && [ -f "$DEB_PATH" ]; then
     info ".deb    : $DEB_PATH ($(du -sh "$DEB_PATH" | cut -f1))"
     dpkg-deb --info "$DEB_PATH" 2>/dev/null \
-      | grep -E "Package|Version|Architecture|Installed-Size" || true
+      | grep -E "Package|Version|Architecture|Installed-Size|Depends" || true
   else
     warn "Could not locate the produced .deb in $DIST_DIR — check output above."
   fi
