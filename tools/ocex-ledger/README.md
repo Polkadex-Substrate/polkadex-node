@@ -24,7 +24,7 @@ A node may hold the ledger if all of these are true:
 
 ## Usage
 
-Requires Python 3.9 or newer. `extract_ocex_trie.py` loads every ledger node into memory before walking; on a node that ran to the halt that column can exceed 30 GB and the process is killed. Use `extract_lowmem.py` instead: same arguments, plus `--index <dir>` (default `ocex-index` in the current directory). It makes one pass over the database writing only a hash-to-key index to disk (about 1 GB of RAM, roughly 10 minutes for 15 million keys), then walks the trie with point lookups. The index is reused on later runs.
+Requires Python 3.9 or newer. `extract_ocex_trie.py` loads every ledger node into memory before walking; on a node that ran to the halt that column can exceed 30 GB and the process is killed. Use `extract_lowmem.py` instead: same arguments, plus `--index <dir>` (default `ocex-index` in the current directory). It makes one pass over the database writing only a hash-to-key index to disk (about 1 GB of RAM, roughly 10 minutes for 15 million keys), then walks the trie with point lookups. The index is reused on later runs against the same database, as long as that database has not changed. It records which database it was built from, and a run against a different or changed database stops and asks for the index to be removed. A running node keeps changing its database, so stop the node or work on a copy if you want to reuse the index.
 
 ```
 pip install -r requirements.txt
@@ -49,3 +49,13 @@ The console output of the scan, and `balances.csv` if produced. Do not send the 
 ## Verification
 
 Each trie node is verified against its blake2 hash during traversal, and the root is compared to the on-chain state hash. A CSV that traverses cleanly from `0x0899fe...` cannot have been altered without the mismatch being reported. Independent copies from different validators should be byte-identical.
+
+The export stops without writing a CSV if the balances of any account cannot be decoded, and names the account. Balances are written exactly, with all of their digits (up to 29 significant digits), and the totals are summed without rounding.
+
+## Tests
+
+```
+python3 -m unittest test_extract
+```
+
+The tests build small tries in memory and in a temporary RocksDB database; they need only `rocksdict`.

@@ -38,10 +38,11 @@ Read-only: the DB is opened with RocksDB read_only access and never written.
 import argparse
 import csv
 import hashlib
+import os
 import struct
 import sys
 from collections import defaultdict
-from decimal import Decimal
+from decimal import Decimal, Inexact, localcontext
 
 try:
     from rocksdict import Rdict, Options, AccessType
@@ -92,13 +93,29 @@ def decode_db_value(raw):
     return val, rc
 
 
+MAX_SCALE = 28  # rust_decimal never stores a larger scale
+
+
 def decode_decimal(data, pos):
+    """rust_decimal::Decimal: u32 flags, then the 96-bit mantissa as hi, lo, mid.
+    Built from sign, digits and exponent, which involves no rounding. Decimal(m).scaleb()
+    rounds to the context's 28 digits, and a 96-bit mantissa can have 29."""
     flags, hi, lo, mid = struct.unpack_from("<IIII", data, pos)
     mant = (hi << 64) | (mid << 32) | lo
     scale = (flags >> 16) & 0xFF
-    neg = bool(flags & 0x8000_0000)
-    d = Decimal(mant).scaleb(-scale)
-    return (-d if neg else d), pos + 16
+    if scale > MAX_SCALE:
+        raise ValueError(f"decimal scale {scale} is above {MAX_SCALE}")
+    neg = bool(flags & 0x8000_0000) and mant != 0  # a negative zero is written as 0
+    return Decimal((int(neg), tuple(int(c) for c in str(mant)), -scale)), pos + 16
+
+
+def format_decimal(d):
+    """Plain notation without trailing zeros, exact at any length.
+    Decimal.normalize() rounds to the context's 28 digits."""
+    s = format(d, "f")
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s
 
 
 def decode_asset_id(data, pos):
@@ -349,7 +366,7 @@ def main():
         sys.exit("trie_root pointer is empty/zero; pass --root <on-chain state_hash of snapshot 694063>")
     print(f"opening trie at root 0x{root.hex()}")
 
-    accounts, other, state_info = {}, {}, None
+    accounts, other, failed, state_info = {}, {}, {}, None
     stats = None
     for key, val, stats in walk(nodes, ("hash", root), verify=not args.no_verify):
         if key == STATE_INFO_KEY:
@@ -358,7 +375,7 @@ def main():
             try:
                 accounts[key] = decode_balances(val)
             except Exception as e:
-                other[key] = (val, f"balance decode failed: {e}")
+                failed[key] = f"{type(e).__name__}: {e}"
         else:
             other[key] = (val, "non-account key")
 
@@ -367,19 +384,31 @@ def main():
     print(f"\ntraversal ok: {dict(stats)}")
     print(f"state_info inside trie: {state_info}")
     print(f"accounts with balances: {len(accounts):,}; other keys: {len(other):,}")
+    # The hash checks prove the bytes are the committed ones, not that every account
+    # was understood. Write nothing unless every account decoded.
+    if failed:
+        for acct, err in sorted(failed.items()):
+            print(f"  balances of 0x{acct.hex()} {to_ss58(acct)} could not be decoded: {err}")
+        sys.exit(f"{len(failed):,} account(s) could not be decoded; {args.out} not written")
 
     totals = defaultdict(Decimal)
     holders = defaultdict(int)
-    with open(args.out, "w", newline="") as f:
+    partial = args.out + ".partial"
+    # Totals must not round either. 100 digits hold any sum of 29-digit balances at
+    # scales up to 28, and Inexact is trapped so a rounded total raises instead.
+    with open(partial, "w", newline="") as f, localcontext() as ctx:
+        ctx.prec = 100
+        ctx.traps[Inexact] = True
         w = csv.writer(f)
         w.writerow(["account_ss58_polkadex", "account_hex", "asset", "asset_id", "balance"])
         for acct in sorted(accounts):
             for asset, bal in sorted(accounts[acct].items(), key=lambda x: str(x[0])):
                 name = "PDEX" if asset == "PDEX" else KNOWN_ASSETS.get(asset, "")
-                w.writerow([to_ss58(acct), "0x" + acct.hex(), name, asset, f"{bal.normalize():f}"])
+                w.writerow([to_ss58(acct), "0x" + acct.hex(), name, asset, format_decimal(bal)])
                 if bal != 0:
                     totals[name or asset] += bal
                     holders[name or asset] += 1
+    os.replace(partial, args.out)  # the CSV appears only once it is complete
     print(f"\nwrote {args.out}")
     print(f"\n{'asset':>12} {'holders':>8} {'total':>24}")
     for k in sorted(totals, key=lambda x: str(x)):
