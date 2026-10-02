@@ -25,6 +25,12 @@ jobs:
     container:
       image: rockylinux:9
     steps:
+      # rockylinux:9 ships without git. Without it actions/checkout falls back to a REST API
+      # archive with no .git, so the tag branch gate below has no git and no repository, and the
+      # build cannot embed the commit (the version printed 7.0.0-unknown).
+      - name: Install git for checkout
+        run: dnf install -y git
+
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
