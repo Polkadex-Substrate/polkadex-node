@@ -194,7 +194,7 @@ curl -H "Content-Type: application/json" -d '{"id":1,"jsonrpc":"2.0","method":"a
 ```
 
 **Step 2 — Submit set_keys on-chain**  
-Each validator's controller account calls:
+Which account signs depends on the runtime. On 373 the validator's controller account signs, as before. From 392 on, session keys belong to the account that signs, so the stash account signs: a call from a separate controller account succeeds but does not set the validator's keys. Where the stash is its own controller, it is the same account either way.
 ```
 session::set_keys(keys: <0x hex from step 1>, proof: 0x)
 ```
@@ -202,7 +202,7 @@ via Polkadot.js Apps → Extrinsics → session → setKeys.
 
 **Step 3 — Wait for activation**  
 New keys become active at the next session boundary (≈ 1 era on mainnet). Verify with:  
-`session::nextKeys(validatorAccountId)` — should return the new pubkeys.
+`session::nextKeys(<stash>)` — should return the new pubkeys.
 
 **Step 4 — Confirm and purge old keystores**  
 On each validator node, verify the old BABE/GRANDPA/OB/THEA/BEEFY/mixnet pubkeys derived from the committed seeds are no longer present in the node's keystore directory. Remove any stale keystore files that correspond to the old pubkeys.
