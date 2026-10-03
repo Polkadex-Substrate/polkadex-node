@@ -1,0 +1,54 @@
+#!/bin/sh
+# %post — runs after the package files are unpacked
+# $1 = 1 on first install, $1 >= 2 on upgrade (rpm convention)
+set -e
+
+# Create dedicated service user if it doesn't exist
+if ! id -u polkadex > /dev/null 2>&1; then
+    useradd --system --no-create-home --shell /sbin/nologin \
+            --home-dir /var/lib/polkadex \
+            --comment "Polkadex Node" \
+            polkadex
+fi
+
+# Create data and config directories
+install -d -m 0750 -o polkadex -g polkadex /var/lib/polkadex
+install -d -m 0755                          /etc/polkadex
+
+# Install default env file if not already present. Deliberately NOT
+# suppressed with `|| true` — the template lives under /usr/share/polkadex-node/
+# (not /usr/share/doc/, which is strippable with `rpm --excludedocs` / on
+# minimal images) specifically so this failing is a real, visible error
+# instead of silently leaving the node unconfigured with no /etc/polkadex/node.env.
+if [ ! -f /etc/polkadex/node.env ]; then
+    install -m 0640 -o root -g polkadex \
+        /usr/share/polkadex-node/node.env.example \
+        /etc/polkadex/node.env
+fi
+
+systemctl daemon-reload 2>/dev/null || true
+
+# Upgrade/restart behaviour — must match the deb package (see packaging/deb/
+# postinst, which gets this from cargo-deb's systemd-units start=false /
+# restart_after_upgrade=true defaults):
+#   fresh install ($1 = 1): never auto-start. Matches the documented flow —
+#     operator edits node.env, then runs `systemctl enable --now` themselves.
+#   upgrade ($1 >= 2) and the service was already running: restart it, so the
+#     new binary actually takes effect. Without this, `dnf upgrade` replaces
+#     the file on disk but the old process keeps running the old code until
+#     something restarts it — silently, with no indication anything's stale.
+#   upgrade and it wasn't running: leave it stopped, don't force-start
+#     something the operator deliberately isn't running.
+if [ "$1" -ge 2 ] 2>/dev/null; then
+    if systemctl is-active --quiet polkadex-node 2>/dev/null; then
+        systemctl restart polkadex-node 2>/dev/null || true
+    fi
+fi
+
+echo ""
+echo "Polkadex node installed."
+echo "  Config  : /etc/polkadex/node.env  (edit NODE_NAME, VALIDATOR_FLAG, RPC_METHODS, EXTRA_FLAGS)"
+echo "  Data    : /var/lib/polkadex"
+echo "  Enable  : sudo systemctl enable --now polkadex-node"
+echo "  Logs    : journalctl -u polkadex-node -f"
+echo ""
