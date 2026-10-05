@@ -201,11 +201,10 @@ session::set_keys(keys: <0x hex from step 1>, proof: 0x)
 via Polkadot.js Apps → Extrinsics → session → setKeys.
 
 **Step 3 — Wait for activation**  
-New keys become active at the next session boundary (≈ 1 era on mainnet). Verify with:  
-`session::nextKeys(<stash>)` — should return the new pubkeys.
+Keys set during session N are queued at the start of session N+1 and become active at the start of session N+2. A mainnet session is 4 hours (6 sessions per 24 hour era), so activation comes 4 to 8 hours after set_keys. `session::nextKeys(<stash>)` returns the new pubkeys as soon as set_keys executes, so it confirms the submission, not activation. Note `session::currentIndex` when you submit. Once it has advanced by 2, confirm the new pubkeys are in the active sets: BABE (`babe::authorities`), GRANDPA (the `GrandpaApi_grandpa_authorities` runtime API), im-online (`imOnline::keys`), authority discovery (`authorityDiscovery::keys`), and any other key type the node signs with.
 
 **Step 4 — Confirm and purge old keystores**  
-On each validator node, verify the old BABE/GRANDPA/OB/THEA/BEEFY/mixnet pubkeys derived from the committed seeds are no longer present in the node's keystore directory. Remove any stale keystore files that correspond to the old pubkeys.
+Only after Step 3 shows the new keys active. Until then the old keys are the active ones: the node signs with whichever of its keys is in the active set, so removing them early stops it authoring and voting, and if many validators do so at once, block production and finality can stall. Then, on each validator node, verify the old BABE/GRANDPA/OB/THEA/BEEFY/mixnet pubkeys derived from the committed seeds are no longer present in the node's keystore directory. Remove any stale keystore files that correspond to the old pubkeys.
 
 **Step 5 — THEA bridge authority set**  
 The new THEA ECDSA pubkey must be registered with the bridge authority set. Depending on how THEA's validator set rotation is managed, this may require a governance call or a direct `change_authorities` dispatch from the governance origin.
