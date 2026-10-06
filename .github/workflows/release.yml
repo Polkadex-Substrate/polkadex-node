@@ -4,109 +4,186 @@ on:
   push:
     tags:
       - 'v*'
+  # Manual run from any branch builds the packages as workflow artifacts only:
+  # no branch gate, no draft release. Lets the container build and the glibc
+  # check be exercised before the first real tag.
+  workflow_dispatch:
+
+# SECURITY (F-082): least-privilege default. Only the release job needs to
+# create a release / upload assets; nothing here needs broader write access.
+permissions:
+  contents: write
 
 jobs:
   build-and-publish-release:
-    name: Build Application And Publish Release
+    name: Build packages and publish release
     runs-on: ubuntu-latest
+    # Build inside Rocky Linux 9 (glibc 2.34) so the single binary runs on both
+    # supported targets: Rocky 9 (glibc 2.34) and Ubuntu 22.04 (glibc 2.35).
+    # ubuntu-latest is Ubuntu 24.04 (glibc 2.39); a binary linked there needs
+    # symbol versions neither target has.
+    container:
+      image: rockylinux:9
     steps:
+      # rockylinux:9 ships without git. Without it actions/checkout falls back to a REST API
+      # archive with no .git, so the tag branch gate below has no git and no repository, and the
+      # build cannot embed the commit (the version printed 7.0.0-unknown).
+      - name: Install git for checkout
+        run: dnf install -y git
+
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Full history: the branch gate below needs the mainnet ancestry.
+          fetch-depth: 0
+
+      # Procedure 2 (docs/release-procedures.md): a tag trigger cannot be
+      # restricted to one branch, so the workflow refuses to build a tag whose
+      # commit is not on mainnet. Runs before anything is produced.
+      # The workspace is owned by the runner user while the container runs as root, and
+      # checkout only marks it safe inside its own temporary HOME. Without this, git in later
+      # steps fails with "dubious ownership" and the build cannot embed the commit.
+      - name: Mark the workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Tag branch gate
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch origin mainnet
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/mainnet || { echo "tag is not on mainnet"; exit 1; }
+          echo "tag $GITHUB_REF_NAME at $GITHUB_SHA is on mainnet"
+
+      # SECURITY (F-082): rustup is installed with no default toolchain. The
+      # repo's own rust-toolchain.toml (channel 1.91.0, correct targets) is
+      # picked up automatically the moment any cargo/rustup command runs from
+      # inside the checkout. This replaces scripts/init.sh, which mutated
+      # toolchains unpinned (`rustup update nightly`/`stable`) and pulled an
+      # unrelated, years-old `nightly-2021-06-28` toolchain nothing here needs.
+      # No libssl-dev here on purpose — checked Cargo.lock for openssl-sys/
+      # native-tls/any C-level SSL binding crate (none exist; the workspace
+      # uses rustls) and confirmed via `ldd` that the built binary links no
+      # OpenSSL/libcrypto at all. It was carried forward as boilerplate
+      # (even ci.yml's commented-out equivalent line still lists it) without
+      # anyone having verified it's actually needed to compile.
+      - name: System build dependencies
+        run: |
+          set -euo pipefail
+          dnf install -y gcc gcc-c++ clang clang-devel llvm-devel make cmake git rpm-build binutils unzip pkgconf-pkg-config perl
+          # protoc: Rocky 9 ships no protobuf-compiler package, so take the pinned
+          # upstream release and check its hash before trusting it.
+          PROTOC_VER=25.3
+          PROTOC_SHA256=f853e691868d0557425ea290bf7ba6384eef2fa9b04c323afab49a770ba9da80
+          curl -sSfL -o /tmp/protoc.zip "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VER}/protoc-${PROTOC_VER}-linux-x86_64.zip"
+          echo "${PROTOC_SHA256}  /tmp/protoc.zip" | sha256sum -c -
+          unzip -q -o /tmp/protoc.zip -d /usr/local bin/protoc 'include/*'
+          protoc --version
+          # rustup-init: pinned release, checked against its published sha256 before it runs,
+          # the same way as protoc above.
+          RUSTUP_VER=1.29.1
+          RUSTUP_SHA256=dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71
+          curl --proto '=https' --tlsv1.2 -sSfL -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/${RUSTUP_VER}/x86_64-unknown-linux-gnu/rustup-init"
+          echo "${RUSTUP_SHA256}  /tmp/rustup-init" | sha256sum -c -
+          chmod +x /tmp/rustup-init
+          /tmp/rustup-init -y --no-modify-path --default-toolchain none
+          rm -f /tmp/rustup-init
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Cache rust dependencies
-        uses: actions/cache@v2
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-release-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build application
+      - name: Build release binary
+        # --locked: a Cargo.lock that does not match the manifests fails the
+        # build instead of silently resolving a different dependency set.
+        run: cargo build --release --locked -p polkadex-node
+
+      - name: Check glibc requirement of the built binary
         run: |
-          ./scripts/init.sh
-          cargo build --release
-          cat extras/customSpecRaw.json > customSpecRaw.json
+          set -euo pipefail
+          req=$(objdump -T target/release/polkadex-node | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1)
+          echo "highest glibc symbol version required: $req"
+          # Rocky 9 ships 2.34, Ubuntu 22.04 ships 2.35; anything above 2.34 fails here.
+          [ "$(printf '%s\n' "$req" GLIBC_2.34 | sort -V | tail -1)" = "GLIBC_2.34" ] || { echo "binary requires $req, newer than the 2.34 baseline"; exit 1; }
 
-      - name: Prepare artifact
+      - name: Build .deb and .rpm packages
+        run: ./packaging/build-packages.sh
+
+      - name: Check package dependencies against the binary
+        # The .deb library dependencies are written by hand in nodes/mainnet/Cargo.toml (see the
+        # comment there). This fails if the binary links a library the .deb does not depend on or
+        # the .rpm does not require, or if a .deb minimum is older than the library the binary was
+        # linked against in this container. Both dependency lists are printed into the log.
+        shell: bash
         run: |
-          zip PolkadexNodeUbuntu.zip --junk-paths target/release/polkadex-node extras/customSpecRaw.json extras/polkadex.service
-          zip PolkadexParachainNode.zip --junk-paths target/release/parachain-polkadex-node
+          set -euo pipefail
+          bin=target/release/polkadex-node
+          deb=$(ls "$PWD"/dist/*.deb)
+          rpm=$(ls "$PWD"/dist/*.rpm)
+          ctl=$(mktemp -d)
+          (cd "$ctl" && ar x "$deb" "$(ar t "$deb" | grep '^control\.tar')" && tar -xf control.tar.*)
+          depends=$(sed -n 's/^Depends: //p' "$ctl/control")
+          echo "deb Depends: $depends"
+          echo "rpm Requires:"; rpm -qpR "$rpm"
+          # minimum declared for a Debian package, empty if the package is not in Depends
+          floor() { printf '%s\n' "$depends" | tr ',' '\n' | sed -n "s/^ *$1 (>= \([^)]*\))\$/\1/p"; }
+          for lib in $(objdump -p "$bin" | awk '$1 == "NEEDED" {print $2}'); do
+            case "$lib" in
+              libc.so.6|libm.so.6|libdl.so.2|libpthread.so.0|librt.so.1|ld-linux-x86-64.so.2) pkg=libc6 ;;
+              libgcc_s.so.1) pkg=libgcc-s1 ;;
+              libstdc++.so.6) pkg=libstdc++6 ;;
+              *) echo "binary links $lib, which this check has no Debian package for"; exit 1 ;;
+            esac
+            [ -n "$(floor "$pkg")" ] || { echo "binary links $lib but the .deb does not depend on $pkg"; exit 1; }
+            rpm -qpR "$rpm" | grep -qxF "$lib()(64bit)" || { echo "binary links $lib but the .rpm does not require it"; exit 1; }
+            echo "$lib: deb $pkg (>= $(floor "$pkg")), rpm $lib()(64bit)"
+          done
+          # Debian package, the library's rpm in this container, version fields compared
+          for check in "libc6 glibc 2" "libgcc-s1 libgcc 1" "libstdc++6 libstdc++ 1"; do
+            set -- $check
+            want=$(floor "$1")
+            have=$(rpm -q --qf '%{VERSION}' "$2" | cut -d. -f1-"$3")
+            echo "$1 (>= $want), linked against $2 $have"
+            [ "$(printf '%s\n' "$want" "$have" | sort -V | tail -1)" = "$want" ] || { echo "$1 minimum is older than the $2 $have the binary was linked against"; exit 1; }
+          done
 
-      - name: Release
-        uses: softprops/action-gh-release@v1
+      - name: Assemble release artifacts and checksums
+        run: |
+          set -euo pipefail
+          cp target/release/polkadex-node dist/polkadex-node
+          cp extras/customSpecRaw.json dist/customSpecRaw.json
+          cd dist
+          sha256sum polkadex-node customSpecRaw.json *.deb *.rpm > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload packages as workflow artifacts (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          files: |
-            PolkadexNodeUbuntu.zip
-            customSpecRaw.json
-            PolkadexParachainNode.zip
-          name: Release ${{ github.ref_name }}
+          name: polkadex-node-packages-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          # SECURITY (F-082): draft, not published — a human confirms the
+          # release before it goes live to validators pulling packages.
+          draft: true
           prerelease: false
-          draft: false
-
-      - name: Upload mainnet node artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: PolkadexNodeUbuntu
-          path: ./PolkadexNodeUbuntu.zip
-          if-no-files-found: error
-
-      - name: Upload parachain node artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: PolkadexParachainNode
-          path: ./PolkadexParachainNode.zip
-          if-no-files-found: error
-
-  push-to-docker-registry:
-    name: Push Docker Image To Docker Hub
-    runs-on: ubuntu-latest
-    needs: [ build-and-publish-release ]
-    steps:
-      - name: Log in to the Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
-
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Extract metadata (tags, labels) for docker
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: polkadex/mainnet
-
-      - name: Download artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: PolkadexNodeUbuntu
-
-      - name: Unzip artifact
-        run: unzip PolkadexNodeUbuntu.zip -d ${{ github.workspace }}
-
-      - name: Build and push to Docker Hub
-        uses: docker/build-push-action@v3
-        with:
-          push: true
-          file: ${{ github.workspace }}/.docker/ci/release/Dockerfile
-          context: ${{ github.workspace }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-  update-on-finality:
-    name: OnFinality Network Spec Update
-    runs-on: ubuntu-latest
-    needs: [ build-and-publish-release, push-to-docker-registry ]
-    steps:
-      - name: Update image version of the existing network spec
-        uses: OnFinality-io/action-onf-release@v1
-        with:
-          onf-access-key: ${{ secrets.ONF_ACCESS_KEY }}
-          onf-secret-key: ${{ secrets.ONF_SECRET_KEY }}
-          onf-workspace-id: ${{ secrets.ONF_WORKSPACE_ID }}
-          onf-network-key: ${{ secrets.ONF_NETWORK_KEY }}
-          onf-sub-command: image
-          onf-action: add
-          image-version: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body_path: .github/release-notes-template.md
+          generate_release_notes: true
+          files: |
+            dist/*.deb
+            dist/*.rpm
+            dist/polkadex-node
+            dist/customSpecRaw.json
+            dist/SHA256SUMS

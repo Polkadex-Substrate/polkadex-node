@@ -25,3 +25,6 @@ session-keys/
 # Local ops scripts — not for version control
 scripts/patch_silo_council.py
 scripts/reset_testnet_state.py
+# Package build outputs
+dist/*.deb
+dist/*.rpm
