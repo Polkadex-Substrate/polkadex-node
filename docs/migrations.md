@@ -14,7 +14,7 @@
 | `UpgradeSessionKeys` | ✅ Applied (spec 379) | ✅ Yes (if mainnet < spec 379) | Yes, after first run |
 | `StakingStorageVersionMigration` | ✅ Applied | ✅ Yes | Yes |
 | `SessionStorageVersionMigration` | ✅ Applied | ✅ Yes | Yes |
-| `GrandpaStorageVersionMigration` | ✅ Applied | ✅ Yes | Yes |
+| `pallet_grandpa::migrations::MigrateV4ToV5` | No-op, testnet is already at v5 | ✅ Yes, mainnet is at v4 | Yes |
 | `IdentityStorageVersionMigration` | ✅ Applied | ✅ Yes | Yes |
 | `ChildBountiesStorageVersionMigration` | ✅ Applied | ✅ Yes | Yes |
 | `StorageVersionMigration<*>` × 12 | ✅ Applied | ✅ Yes | Yes |
@@ -59,7 +59,6 @@ These all follow the same pattern: compare on-chain storage version with in-code
 |---|---|
 | `StakingStorageVersionMigration` | `pallet_staking` |
 | `SessionStorageVersionMigration` | `pallet_session` |
-| `GrandpaStorageVersionMigration` | `pallet_grandpa` |
 | `IdentityStorageVersionMigration` | `pallet_identity` |
 | `ChildBountiesStorageVersionMigration` | `pallet_child_bounties` |
 | `StorageVersionMigration<pallet_balances>` | Balances |
@@ -75,6 +74,8 @@ These all follow the same pattern: compare on-chain storage version with in-code
 | `StorageVersionMigration<pallet_democracy>` | Democracy |
 | `StorageVersionMigration<pallet_preimage>` | Preimage |
 | `StorageVersionMigration<pallet_assets::Instance1>` | Assets |
+
+`pallet_grandpa::migrations::MigrateV4ToV5` is not a bump. It moves the authority list from the well-known key `:grandpa_authorities` into `Grandpa::Authorities`, removes the old key, and only runs at on-chain version 4. Mainnet is at v4, so it runs there.
 
 - **Mainnet:** All required to sync on-chain storage version markers with the upgraded in-code versions. Without these, pallets may refuse to run their own internal migrations.
 - **After first run:** Remove from the tuple.
