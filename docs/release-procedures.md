@@ -64,6 +64,7 @@ BEEFY must not start until more than two thirds of the active validators, counte
 Points 1 to 3 go into the release notes and the validator announcement (section 6). Point 4 is for whoever uploads the runtime.
 
 1. **Session keys.** From 392 on, session keys belong to the account that signs `session.setKeys`. `ValidatorIdOf` is `ConvertInto`, because `StashOf`, which mapped a controller to its stash, no longer exists in the SDK. To rotate, run `author_rotateKeys` on the node, then sign `session.setKeys` with the stash account. Pass the `author_rotateKeys` output as `keys` and `0x` as `proof`. A `setKeys` signed by a controller account succeeds but stores the keys on the controller, so nothing changes for the validator. Many validators have a separate controller, so the announcement must say this plainly.
+   - New keys become active two session boundaries after `setKeys`, 4 to 8 hours on mainnet. Keep the old keys on the node until then (see the C7 steps in security-audit-fixes.md).
    - Keys set before the upgrade keep working. Rotating after it replaces the placeholder BEEFY and mixnet keys from the migration (procedure 5).
    - In Polkadot.js Apps, the Session Key button under Staking > Account Actions signs with the controller. With a separate controller, use Developer > Extrinsics and select the stash as the signing account.
    - A validator who already signed with the controller runs `author_rotateKeys` again and signs with the stash. The same keys sent from the stash fail with `DuplicatedKey`, because the controller now holds them.
