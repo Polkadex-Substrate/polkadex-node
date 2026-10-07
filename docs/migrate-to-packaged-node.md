@@ -1,11 +1,11 @@
 # Migrating an Existing Validator to the .deb/.rpm Package
 
-For validators currently running `polkadex-node` from a source build or the
-release zip (the setup in `docs/run-a-validator.md`), moving to the packaged
-install (`packaging/`) changes three things: the binary's location, who owns
-the process, and where chain data lives. This doc covers moving your existing
-node — keystore and database included — without losing your session keys or
-re-syncing from genesis.
+For validators currently running `polkadex-node` from a source build, the
+release zip (the setup in `docs/run-a-validator.md`) or the Docker image,
+moving to the packaged install (`packaging/`) changes three things: the
+binary's location, who owns the process, and where chain data lives. This
+doc covers moving your existing node — keystore and database included —
+without losing your session keys or re-syncing from genesis.
 
 **Do this during low-risk maintenance time.** A validator that's offline
 for the swap can miss blocks; there's no way around a short gap.
@@ -16,7 +16,7 @@ for the swap can miss blocks; there's no way around a short gap.
 |---|---|---|
 | Binary | wherever you put it (e.g. `$HOME/polkadex-node`) | `/usr/bin/polkadex-node` |
 | Runs as | your own user | dedicated `polkadex` system user |
-| Base path | `--base-path` if you set one, otherwise the Substrate default (`$HOME/.local/share/polkadex-node`) | `/var/lib/polkadex` |
+| Base path | `--base-path` if you set one, otherwise the Substrate default (`$HOME/.local/share/polkadex-node`); for the Docker image, the host directory mounted at `/data` | `/var/lib/polkadex` |
 | Config | flags hardcoded in your own systemd unit | `/etc/polkadex/node.env` |
 | Chain spec | wherever you downloaded it | `/etc/polkadex/customSpecRaw.json` |
 
@@ -42,12 +42,18 @@ at the end of this doc.
    touching the data directory — copying a live RocksDB directory can
    corrupt it.
 
+   Keep it stopped from here on. The old and the new node must never run at
+   the same time: they hold the same session keys, so both would author blocks
+   and sign GRANDPA votes, and double-signing is slashed.
+
 3. **Install the package.** This creates the `polkadex` user and
    `/var/lib/polkadex` (empty) via the postinstall script, but does **not**
    start the service yet.
    ```bash
-   sudo dpkg -i polkadex-node_*.deb      # or: sudo rpm -i polkadex-node-*.rpm
+   sudo apt install ./polkadex-node_*.deb      # or: sudo dnf install ./polkadex-node-*.rpm
    ```
+   apt and dnf also install anything the package needs that is missing. The
+   package needs glibc 2.34 or newer: Ubuntu 22.04, Debian 12, Rocky 9 or later.
 
 4. **Copy your existing chain data into the new location.**
    ```bash
@@ -59,15 +65,29 @@ at the end of this doc.
    use it because `/var/lib/polkadex` is freshly created and has nothing
    worth keeping yet.
 
+   On a server with SELinux enforcing (Rocky, RHEL), reset the file labels
+   after copying:
+   ```bash
+   sudo restorecon -R /var/lib/polkadex /etc/polkadex
+   ```
+
+   Moving to a different server works the same way: copy `<old-base-path>`
+   across (for example with `rsync -a` over ssh) once the old node is stopped
+   and disabled, then continue with the steps below. The database, the
+   keystore and the `network` directory (your node key, which keeps your peer
+   ID) all live under `chains/<chain-id>/` and move together.
+
 5. **Configure the service.**
    ```bash
-   sudo cp /usr/share/polkadex-node/node.env.example /etc/polkadex/node.env
    sudo $EDITOR /etc/polkadex/node.env
    ```
+   The package creates this file from
+   `/usr/share/polkadex-node/node.env.example` when it is installed.
    Set `NODE_NAME` to match what you had before (keeps your telemetry
    history recognizable), and set `VALIDATOR_FLAG="--validator"` — this is
    not the default, and if you skip it the node comes up as a full node
-   instead of a validator.
+   instead of a validator. Leave the flags the service unit already sets out
+   of `EXTRA_FLAGS`; the comments in `node.env` list them.
 
 6. **Start and verify.**
    ```bash
@@ -75,6 +95,9 @@ at the end of this doc.
    journalctl -u polkadex-node -f
    ```
    Confirm:
+   - The log shows `Role: AUTHORITY` and `Starting BABE Authorship worker` at
+     startup, then `Pre-sealed block for proposal` whenever the node authors
+     a block.
    - The node reports the same highest block you left off at (no resync
      from genesis — if it's resyncing, the data copy didn't take).
    - The genesis hash matches mainnet's:
@@ -97,8 +120,9 @@ at the end of this doc.
 
 The spec 392 upgrade adds two new session key types (BEEFY and mixnet). The
 upgrade migration fills them with placeholder values for every validator, so
-after it enacts you must rotate your keys once, even though the package move
-above did not require it:
+every validator rotates its keys once after the upgrade enacts. The existing
+BABE and GRANDPA keys keep working until the new ones are active, so the
+rotation causes no gap:
 
 1. Wait until the runtime upgrade has enacted (the node logs the new spec
    version, or `state_getRuntimeVersion` shows 392).
@@ -108,10 +132,13 @@ above did not require it:
      -d '{"id":1,"jsonrpc":"2.0","method":"author_rotateKeys","params":[]}' \
      http://127.0.0.1:9944
    ```
-3. Submit the returned hex with `session.setKeys` from your controller
-   account (polkadot.js apps, Developer > Extrinsics).
+3. Submit the returned hex with `session.setKeys`, signed by your **stash**
+   account (polkadot.js apps, Developer > Extrinsics), with `0x` as `proof`.
+   From 392 a `setKeys` signed by a separate controller account succeeds but
+   does not set your validator's keys.
 4. The new keys become active from the session after next. Until then the
    node validates with its existing BABE and GRANDPA keys, nothing is lost.
+   Keep the old keys on the node until then.
 
 Rotating before the upgrade enacts produces keys in the old format, which the
 upgrade then pads with placeholders, so you would have to rotate again. Wait
@@ -119,7 +146,8 @@ for enactment.
 
 ## Rollback
 
-If something's wrong after step 6, stop the new service
-(`sudo systemctl stop polkadex-node`) and restart your old setup — the old
-base path is untouched by this process (steps 4 only copies *from* it), so
-nothing about the migration is destructive to your original data.
+If something's wrong after step 6, stop the new service (`sudo systemctl
+stop polkadex-node`) and only then restart your old setup, never both at
+once (see step 2). The old base path is untouched by this process (steps 4
+only copies *from* it), so nothing about the migration is destructive to
+your original data.
