@@ -51,8 +51,9 @@ use frame_support::{
 	parameter_types,
 	traits::{
 		fungible::{HoldConsideration, Inspect}, AsEnsureOriginWithArg, EitherOfDiverse, EnsureOrigin,
+		EnsureOriginWithArg,
 		EqualPrivilegeOnly, Get, InstanceFilter, KeyOwnerProofSystem, LockIdentifier,
-		tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId}, ConstU64, ConstU32, ConstU16, ConstBool,
+		tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId}, ConstU32, ConstU16, ConstBool,
 		VariantCountOf, tokens::imbalance::{ResolveAssetTo, ResolveTo, OnUnbalanced}, Imbalance, Nothing, InsideBoth,
 		Contains
 	},
@@ -97,7 +98,7 @@ pub use sp_runtime::BuildStorage;
 use sp_runtime::{
     curve::PiecewiseLinear, generic, impl_opaque_keys,
     transaction_validity::{TransactionPriority, TransactionSource, TransactionValidity},
-    ApplyExtrinsicResult, FixedPointNumber, Perbill, Percent, Permill, Perquintill, FixedU128, // DispatchError unused after ismp removal
+    ApplyExtrinsicResult, FixedPointNumber, Perbill, Percent, Permill, Perquintill, // DispatchError unused after ismp removal
     traits::{
         self, AccountIdConversion, BlakeTwo256, Block as BlockT, BlockNumberProvider, NumberFor,
         OpaqueKeys, SaturatedConversion, StaticLookup, Keccak256,
@@ -110,7 +111,6 @@ use sp_version::RuntimeVersion;
 use static_assertions::const_assert;
 use scale_info::TypeInfo;
 use sp_npos_elections::ExtendedBalance;
-use pallet_revive::evm::runtime::EthExtra;
 //pub use pallet_transaction_payment::{FungibleAdapter, Multiplier, TargetedFeeAdjustment};
 #[allow(deprecated)]
 pub use pallet_transaction_payment::{CurrencyAdapter, Multiplier, TargetedFeeAdjustment};
@@ -359,9 +359,6 @@ parameter_types! {
     pub const TechnicalMotionDuration: BlockNumber = 7 * DAYS;
     pub const TechnicalMaxProposals: u32 = 100;
     pub const TechnicalMaxMembers: u32 = 100;
-    pub const OrderbookMotionDuration: BlockNumber = DAYS;
-    pub const OrderbookMaxProposals: u32 = 100;
-    pub const OrderbookMaxMembers: u32 = 3;
     pub const ProposalBond: Permill = Permill::from_percent(5);
     pub const ProposalBondMinimum: Balance = 100 * PDEX;
     pub const SpendPeriod: BlockNumber = 24 * DAYS;
@@ -470,14 +467,6 @@ parameter_types! {
     pub const MinAllowedBytes: u32 = 1024;
     pub const MaxAllowedBytes: u32 = 4096;
     pub const ProposalHoldReason: RuntimeHoldReason = RuntimeHoldReason::Council(pallet_collective::HoldReason::ProposalSubmission);
-    pub const DepositPerItem: Balance = deposit(1, 0);
-	  pub const DepositPerByte: Balance = deposit(0, 1);
-    pub const DefaultDepositLimit: Balance = deposit(1024, 1024 * 1024);
-    pub Schedule: pallet_contracts::Schedule<Runtime> = Default::default();
-    pub CodeHashLockupDepositPercent: Perbill = Perbill::from_percent(30);
-    pub const ReviveDepositPerChildTrieItem: Balance = deposit(1, 0) / 100;
-    pub const ReviveMaxEthExtrinsicWeight: FixedU128 = FixedU128::from_rational(9, 10);
-    pub const ReviveGasScale: u32 = 10u32;
     pub const AllianceMotionDuration: BlockNumber = ALLIANCE_MOTION_DURATION_IN_BLOCKS;
     pub const AllianceMaxProposals: u32 = 100;
     pub const AllianceMaxMembers: u32 = 100;
@@ -491,9 +480,7 @@ parameter_types! {
     pub const DelegatedStakingPalletId: PalletId = PalletId(*b"py/dlstk");
 	  pub const SlashRewardFraction: Perbill = Perbill::from_percent(1);
     pub const EnterDuration: BlockNumber = 4 * HOURS;
-    pub const EnterDepositAmount: Balance = 2_000_000 * DOLLARS;
     pub const ExtendDuration: BlockNumber = 2 * HOURS;
-    pub const ExtendDepositAmount: Balance = 1_000_000 * DOLLARS;
     pub const ReleaseDelay: u32 = 2 * DAYS;
 	  pub MbmServiceWeight: Weight = Perbill::from_percent(80) * RuntimeBlockWeights::get().max_block;
     pub const BeefySetIdSessionEntries: u32 = BondingDuration::get() * SessionsPerEra::get();
@@ -738,11 +725,14 @@ impl pallet_safe_mode::Config for Runtime {
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type WhitelistedCalls = SafeModeWhitelistedCalls;
 	type EnterDuration = EnterDuration;
-	type EnterDepositAmount = EnterDepositAmount;
+	// F-064: no permissionless entry into SafeMode. Only ForceEnterOrigin (Root) can enter or extend.
+	type EnterDepositAmount = ();
 	type ExtendDuration = ExtendDuration;
-	type ExtendDepositAmount = ExtendDepositAmount;
-	type ForceEnterOrigin = EnsureRootWithSuccess<AccountId, ConstU32<9>>;
-	type ForceExtendOrigin = EnsureRootWithSuccess<AccountId, ConstU32<11>>;
+	type ExtendDepositAmount = ();
+	// F-064: success value is the halt duration (see force_enter/force_extend in
+	// pallet_safe_mode) — must match EnterDuration/ExtendDuration, not leftover demo values.
+	type ForceEnterOrigin = EnsureRootWithSuccess<AccountId, EnterDuration>;
+	type ForceExtendOrigin = EnsureRootWithSuccess<AccountId, ExtendDuration>;
 	type ForceExitOrigin = EnsureRoot<AccountId>;
 	type ForceDepositOrigin = EnsureRoot<AccountId>;
 	type ReleaseDelay = ReleaseDelay;
@@ -871,10 +861,34 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 	fn filter(&self, c: &RuntimeCall) -> bool {
 		match self {
 			ProxyType::Any => true,
+			// F-065: NonTransfer previously only blocked native-currency transfer paths
+			// (Balances, Indices::transfer). Assets, PoolAssets, and AssetConversion are
+			// all live pallets that can move value between accounts (transfer, swaps,
+			// liquidity operations) — a "NonTransfer" proxy could move funds through any
+			// of them.
+			//
+			// Contracts and Revive are no longer in construct_runtime at all (removed —
+			// neither existed on mainnet, Contracts failed the runtime integrity test,
+			// Revive's fee adapter was a placeholder), so RuntimeCall::Contracts/::Revive
+			// aren't valid variants any more and don't need an entry here.
+			//
+			// A01 (audit, 2026-09-25): Recovery was not blocked either. create_recovery
+			// doesn't move value directly, but it lets a NonTransfer delegate configure the
+			// real account's recovery friends/threshold — set itself as the sole friend with
+			// a zero delay, then initiate_recovery/vouch_recovery/claim_recovery from its own
+			// (unrestricted) origin and call as_recovered, which dispatches with a fresh
+			// Signed origin for the real account with no proxy filter attached at all. That's
+			// full account takeover through a call that superficially "moves no value."
+			// Recovery is inherently an authority-escalation mechanism, so it's blocked
+			// wholesale for NonTransfer rather than picking apart which of its calls are safe.
 			ProxyType::NonTransfer => !matches!(
 				c,
 				RuntimeCall::Balances(..)
 					| RuntimeCall::Indices(pallet_indices::Call::transfer { .. })
+					| RuntimeCall::Assets(..)
+					| RuntimeCall::PoolAssets(..)
+					| RuntimeCall::AssetConversion(..)
+					| RuntimeCall::Recovery(..)
 			),
 			ProxyType::Governance => matches!(
 				c,
@@ -882,7 +896,7 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 					| RuntimeCall::TechnicalCommittee(..)
 					| RuntimeCall::Elections(..)
 					| RuntimeCall::Treasury(..)
-					| RuntimeCall::OrderbookCommittee(..)
+				// F-029: OrderbookCommittee removed — no longer a valid RuntimeCall variant
 			),
 			ProxyType::Staking => matches!(c, RuntimeCall::Staking(..)),
 		}
@@ -967,7 +981,13 @@ impl pallet_babe::Config for Runtime {
 
 impl pallet_beefy::Config for Runtime {
 	type BeefyId = BeefyId;
-	type MaxAuthorities = ConstU32<10>;
+	// A04 (audit, 2026-09-25): was ConstU32<10>, while every other consensus pallet
+	// (Babe, Grandpa, AuthorityDiscovery) uses the shared MaxAuthorities = 200. pallet-beefy
+	// truncates both active and queued authority lists to this bound in on_new_session, so
+	// with more than 10 validators the BEEFY set silently became a strict subset of the real
+	// session set — narrowing BEEFY's security and making readiness measurements against the
+	// full validator population misleading. Aligned to the shared bound.
+	type MaxAuthorities = MaxAuthorities;
 	type MaxNominators = ConstU32<0>;
 	type MaxSetIdSessionEntries = BeefySetIdSessionEntries;
 	type OnNewValidatorSet = MmrLeaf;
@@ -1484,25 +1504,8 @@ impl pallet_collective::Config<TechnicalCollective> for Runtime {
 	type Consideration = ();
 }
 
-type OrderbookCollective = pallet_collective::Instance4;
-impl pallet_collective::Config<OrderbookCollective> for Runtime {
-	type RuntimeOrigin = RuntimeOrigin;
-	type Proposal = RuntimeCall;
-	type RuntimeEvent = RuntimeEvent;
-	type MotionDuration = OrderbookMotionDuration;
-	type MaxProposals = OrderbookMaxProposals;
-	type MaxMembers = OrderbookMaxMembers;
-	type DefaultVote = pallet_collective::PrimeDefaultVote;
-	type WeightInfo = pallet_collective::weights::SubstrateWeight<Runtime>;
-	type SetMembersOrigin = EitherOfDiverse<
-		EnsureRoot<AccountId>,
-		pallet_collective::EnsureProportionMoreThan<AccountId, TechnicalCollective, 1, 2>,
-	>;
-	type MaxProposalWeight = MaxCollectivesProposalWeight;
-	type DisapproveOrigin = EnsureRoot<AccountId>;
-	type KillOrigin = EnsureRoot<AccountId>;
-	type Consideration = ();
-}
+// F-029: OrderbookCollective / OrderbookCommittee removed — it governed OCEX,
+// which no longer exists in construct_runtime. See migrations::ClearOrderbookCommittee.
 
 type EnsureRootOrHalfCouncil = EitherOfDiverse<
 	EnsureRoot<AccountId>,
@@ -1649,12 +1652,6 @@ impl pallet_democracy::Config for Runtime {
 	type VetoOrigin = pallet_collective::EnsureMember<AccountId, TechnicalCollective>;
 	type PalletsOrigin = OriginCaller;
 	type Slash = Treasury;
-}
-
-impl pallet_sudo::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type RuntimeCall = RuntimeCall;
-	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
 
 impl<LocalCall> frame_system::offchain::CreateTransaction<LocalCall> for Runtime
@@ -1821,8 +1818,12 @@ use sp_staking::currency_to_vote::U128CurrencyToVote;
 
 #[cfg(feature = "runtime-benchmarks")]
 impl BenchmarkHelper<parity_scale_codec::Compact<u128>, ()> for AssetU128 {
+	// F-066: id 0 is reserved (Instance1's AssetsCreateOrigin rejects it for signed
+	// origins). Offset by 1 so generated benchmark ids never collide with it. Instance2
+	// (PoolAssets) also uses this helper but has no such restriction, so the offset is
+	// harmless there.
 	fn create_asset_id_parameter(id: u32) -> parity_scale_codec::Compact<u128> {
-		parity_scale_codec::Compact::from(id as u128)
+		parity_scale_codec::Compact::from(id as u128 + 1)
 	}
 	fn create_reserve_id_parameter(_id: u32) -> () {
 		()
@@ -2157,13 +2158,34 @@ impl pallet_beefy_mmr::Config for Runtime {
 
 // pallet_assets: Instance1 config implementation
 // https://github.com/paritytech/polkadot-sdk/blob/1530a8826416514c3326597338b3511a55040663/substrate/bin/node/runtime/src/lib.rs#L1784
+/// F-066: asset id 0 is reserved. `AsEnsureOriginWithArg<EnsureSigned<_>>` let any
+/// signed account claim any id, including 0. Any signed account may still create
+/// non-zero ids; only Root/ForceOrigin can create id 0, via `force_create`.
+pub struct AssetsCreateOrigin;
+impl EnsureOriginWithArg<RuntimeOrigin, u128> for AssetsCreateOrigin {
+	type Success = AccountId;
+	fn try_origin(o: RuntimeOrigin, asset_id: &u128) -> Result<Self::Success, RuntimeOrigin> {
+		if *asset_id == 0 {
+			return Err(o);
+		}
+		<EnsureSigned<AccountId> as EnsureOrigin<RuntimeOrigin>>::try_origin(o)
+	}
+	#[cfg(feature = "runtime-benchmarks")]
+	fn try_successful_origin(asset_id: &u128) -> Result<RuntimeOrigin, ()> {
+		if *asset_id == 0 {
+			return Err(());
+		}
+		<EnsureSigned<AccountId> as EnsureOrigin<RuntimeOrigin>>::try_successful_origin()
+	}
+}
+
 impl pallet_assets::Config<Instance1> for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Balance = u128;
     type AssetId = u128;
     type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
-    type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
+    type CreateOrigin = AssetsCreateOrigin;
     type ForceOrigin = EnsureRootOrHalfCouncil;
     type AssetDeposit = AssetDeposit;
     type AssetAccountDeposit = AssetAccountDeposit;
@@ -2191,7 +2213,10 @@ impl pallet_assets::Config<Instance2> for Runtime {
     type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
     type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
-    type ForceOrigin = EnsureRootOrHalfCouncil;
+    // F-072: PoolAssets force-operations (force_create/force_asset_status/etc.) are
+    // Root-only, not Root-or-HalfCouncil — pool asset lifecycle shouldn't be
+    // council-gated the same way general user-created assets are.
+    type ForceOrigin = EnsureRoot<AccountId>;
     type AssetDeposit = AssetDeposit;
     type AssetAccountDeposit = AssetAccountDeposit;
     type MetadataDepositBase = MetadataDepositBase;
@@ -2245,48 +2270,6 @@ impl pallet_asset_conversion::Config for Runtime {
     type MintMinLiquidity = MintMinLiquidity;
     #[cfg(feature = "runtime-benchmarks")]
     type BenchmarkHelper = pallet_asset_conversion::NativeOrWithIdFactory<u128>;
-}
-
-impl pallet_contracts::Config for Runtime {
-	type Time = Timestamp;
-	type Randomness = RandomnessCollectiveFlip;
-	type Currency = Balances;
-	type RuntimeEvent = RuntimeEvent;
-	type RuntimeCall = RuntimeCall;
-	/// The safest default is to allow no calls at all.
-	///
-	/// Runtimes should whitelist dispatchables that are allowed to be called from contracts
-	/// and make sure they are stable. Dispatchables exposed to contracts are not allowed to
-	/// change because that would break already deployed contracts. The `Call` structure itself
-	/// is not allowed to change the indices of existing pallets, too.
-	type CallFilter = Nothing;
-	type DepositPerItem = DepositPerItem;
-	type DepositPerByte = DepositPerByte;
-	type DefaultDepositLimit = DefaultDepositLimit;
-	type CallStack = [pallet_contracts::Frame<Self>; 5];
-	type WeightPrice = pallet_transaction_payment::Pallet<Self>;
-	type WeightInfo = pallet_contracts::weights::SubstrateWeight<Self>;
-	type ChainExtension = ();
-	type Schedule = Schedule;
-	type AddressGenerator = pallet_contracts::DefaultAddressGenerator;
-	type MaxCodeLen = ConstU32<{ 123 * 1024 }>;
-	type MaxStorageKeyLen = ConstU32<128>;
-	type UnsafeUnstableInterface = ConstBool<false>;
-	type UploadOrigin = EnsureSigned<Self::AccountId>;
-	type InstantiateOrigin = EnsureSigned<Self::AccountId>;
-	type MaxDebugBufferLen = ConstU32<{ 2 * 1024 * 1024 }>;
-	type MaxTransientStorageSize = ConstU32<{ 1 * 1024 * 1024 }>;
-	type RuntimeHoldReason = RuntimeHoldReason;
-	#[cfg(not(feature = "runtime-benchmarks"))]
-	type Migrations = ();
-	#[cfg(feature = "runtime-benchmarks")]
-	type Migrations = pallet_contracts::migration::codegen::BenchMigrations;
-	type MaxDelegateDependencies = ConstU32<32>;
-	type CodeHashLockupDepositPercent = CodeHashLockupDepositPercent;
-	type Debug = ();
-	type Environment = ();
-	type ApiVersion = ();
-	type Xcm = ();
 }
 
 impl pallet_collective::Config<AllianceCollective> for Runtime {
@@ -2385,47 +2368,6 @@ impl pallet_delegated_staking::Config for Runtime {
     type SlashRewardFraction = SlashRewardFraction;
     type RuntimeHoldReason = RuntimeHoldReason;
     type CoreStaking = Staking;
-}
-
-impl pallet_revive::Config for Runtime {
-	type Time = Timestamp;
-	type Balance = Balance;
-	type Currency = Balances;
-	type RuntimeEvent = RuntimeEvent;
-	type RuntimeCall = RuntimeCall;
-	type RuntimeOrigin = RuntimeOrigin;
-	type DepositPerItem = DepositPerItem;
-	type DepositPerByte = DepositPerByte;
-	type DepositPerChildTrieItem = ReviveDepositPerChildTrieItem;
-	type WeightInfo = pallet_revive::weights::SubstrateWeight<Self>;
-	type AddressMapper = pallet_revive::AccountId32Mapper<Self>;
-	type RuntimeMemory = ConstU32<{ 128 * 1024 * 1024 }>;
-	type PVFMemory = ConstU32<{ 512 * 1024 * 1024 }>;
-	type UnsafeUnstableInterface = ConstBool<false>;
-	type AllowEVMBytecode = ConstBool<false>;
-	type UploadOrigin = EnsureSigned<Self::AccountId>;
-	type InstantiateOrigin = EnsureSigned<Self::AccountId>;
-	type RuntimeHoldReason = RuntimeHoldReason;
-	type CodeHashLockupDepositPercent = CodeHashLockupDepositPercent;
-	type ChainId = ConstU64<420_420_420>;
-	type NativeToEthRatio = ConstU32<1_000_000>; // 10^(18 - 12) Eth is 10^18, Native is 10^12.
-	type FindAuthor = <Runtime as pallet_authorship::Config>::FindAuthor;
-	type Precompiles = ();
-	type FeeInfo = ();
-	type MaxEthExtrinsicWeight = ReviveMaxEthExtrinsicWeight;
-	type DebugEnabled = ConstBool<false>;
-	type GasScale = ReviveGasScale;
-}
-
-impl TryFrom<RuntimeCall> for pallet_revive::Call<Runtime> {
-    type Error = ();
-
-    fn try_from(value: RuntimeCall) -> Result<Self, Self::Error> {
-        match value {
-            RuntimeCall::Revive(call) => Ok(call),
-            _ => Err(()),
-        }
-    }
 }
 
 impl pallet_skip_feeless_payment::Config for Runtime {
@@ -2580,8 +2522,9 @@ mod runtime {
     // #[runtime::pallet_index(35)]
     // pub type OCEX = pallet_ocex_lmp::Pallet<Runtime>;
 
-    #[runtime::pallet_index(36)]
-    pub type OrderbookCommittee = pallet_collective::Pallet<Runtime, Instance4>;
+    // #36 was OrderbookCommittee - REMOVED (F-029: governed OCEX, which no longer
+    // exists in construct_runtime — an orphaned permission surface with nothing left
+    // to govern. See migrations::ClearOrderbookCommittee.)
 
     // #39 was Thea - REMOVED
 
@@ -2590,8 +2533,10 @@ mod runtime {
 
     // #44 was TheaExecutor - REMOVED
 
-    #[runtime::pallet_index(45)]
-    pub type Sudo = pallet_sudo::Pallet<Runtime>;
+    // #45 was Sudo - REMOVED (F-002: Sudo::Key storage slot on mainnet still holds
+    // the 2021 genesis root key from before sudo was first removed years ago. Re-adding
+    // pallet_sudo under the same name with no migration touching that slot would hand
+    // Root over mainnet to whoever holds that key at enactment. See migrations::ClearLegacySudoKey.)
 
     #[runtime::pallet_index(46)]
     pub type AssetConversion = pallet_asset_conversion::Pallet<Runtime>;
@@ -2612,14 +2557,18 @@ mod runtime {
     #[runtime::pallet_index(51)]
     pub type PoolAssets = pallet_assets::Pallet<Runtime, Instance2>;
 
-    #[runtime::pallet_index(52)]
-    pub type Revive = pallet_revive::Pallet<Runtime>;
+    // #52 was Revive - REMOVED (never on mainnet, placeholder fee adapter, no migration
+    // needed — no storage exists for it on mainnet). Do not reuse this index.
+    // #[runtime::pallet_index(52)]
+    // pub type Revive = pallet_revive::Pallet<Runtime>;
 
     #[runtime::pallet_index(53)]
     pub type SkipFeelessPayment = pallet_skip_feeless_payment::Pallet<Runtime>;
 
-    #[runtime::pallet_index(54)]
-    pub type Contracts = pallet_contracts::Pallet<Runtime>;
+    // #54 was Contracts - REMOVED (never on mainnet, failed the runtime integrity test,
+    // no migration needed — no storage exists for it on mainnet). Do not reuse this index.
+    // #[runtime::pallet_index(54)]
+    // pub type Contracts = pallet_contracts::Pallet<Runtime>;
 
     #[runtime::pallet_index(55)]
     pub type Alliance = pallet_alliance::Pallet<Runtime>;
@@ -2903,41 +2852,15 @@ pub type TxExtension = (
 	frame_system::WeightReclaim<Runtime>,
 );
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct EthExtraImpl;
-
-impl EthExtra for EthExtraImpl {
-	type Config = Runtime;
-	type Extension = TxExtension;
-
-	fn get_eth_extension(nonce: u32, tip: Balance) -> Self::Extension {
-		(
-			frame_system::CheckNonZeroSender::<Runtime>::new(),
-			frame_system::CheckSpecVersion::<Runtime>::new(),
-			frame_system::CheckTxVersion::<Runtime>::new(),
-			frame_system::CheckGenesis::<Runtime>::new(),
-			frame_system::CheckEra::from(crate::generic::Era::Immortal),
-			frame_system::CheckNonce::<Runtime>::from(nonce),
-			frame_system::CheckWeight::<Runtime>::new(),
-			pallet_asset_conversion_tx_payment::ChargeAssetTxPayment::<Runtime>::from(tip, None)
-				.into(),
-			frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
-			frame_system::WeightReclaim::<Runtime>::new(),
-		)
-	}
-}
-
-// RuntimeCall must implement SetWeightLimit for pallet_revive::evm::runtime::UncheckedExtrinsic
-// Revive is not included in construct_runtime, so this is a no-op impl.
-impl pallet_revive::evm::runtime::SetWeightLimit for RuntimeCall {
-	fn set_weight_limit(&mut self, _: Weight) -> Weight {
-		Weight::zero()
-	}
-}
-
 /// Unchecked extrinsic type as expected by this runtime.
-//pub type UncheckedExtrinsic = generic::UncheckedExtrinsic<Address, RuntimeCall, Signature, TxExtension>;
-pub type UncheckedExtrinsic = pallet_revive::evm::runtime::UncheckedExtrinsic<Address, Signature, EthExtraImpl>;
+///
+/// Removed pallet_revive (2026-09-28, see security-audit-fixes.md F-065/A07): mainnet at spec
+/// 373 has no Revive and never used the Ethereum-compatible extrinsic wrapper, so this reverts
+/// to the plain type the chain and every existing wallet already use — not dropping a live
+/// capability. Raw Ethereum transaction support (pallet_revive::evm::runtime::UncheckedExtrinsic
+/// + EthExtraImpl, removed here) can come back in a later spec alongside a real fee adapter and
+/// an actual Ethereum RPC service, neither of which exist in this node today.
+pub type UncheckedExtrinsic = generic::UncheckedExtrinsic<Address, RuntimeCall, Signature, TxExtension>;
 /// Unchecked signature payload type as expected by this runtime.
 pub type UncheckedSignaturePayload = generic::UncheckedSignaturePayload<Address, Signature, TxExtension>;
 /// The payload being signed in transactions.
@@ -2963,10 +2886,15 @@ pub type Executive = frame_executive::Executive<
 type Migrations = (
 	// migrations::InitOcexFeeConfig<Runtime>, // OCEX removed from runtime
 	migrations::UpgradeSessionKeys,
+    // F-002: wipe dangling Sudo::Key before pallet_sudo is re-introduced without it
+    migrations::ClearLegacySudoKey,
+    // F-029: wipe orphaned OrderbookCommittee storage — governed OCEX, now removed
+    migrations::ClearOrderbookCommittee,
     // Pallet storage version migrations
     migrations::StakingStorageVersionMigration<Runtime>,
     migrations::SessionStorageVersionMigration<Runtime>,
-    migrations::GrandpaStorageVersionMigration<Runtime>,
+    // pallet-grandpa v4 -> v5: moves the authority list from :grandpa_authorities into Authorities
+    pallet_grandpa::migrations::MigrateV4ToV5<Runtime>,
     migrations::IdentityStorageVersionMigration<Runtime>,
     migrations::ChildBountiesStorageVersionMigration<Runtime>,
     // Storage version bumps for pallets missing on-chain version markers
@@ -2997,15 +2925,9 @@ type Migrations = (
     migrations::ClearOrmlVestingLocks<Runtime>,
     // Existing migrations
     pallet_alliance::migration::Migration<Runtime>,
-    pallet_contracts::Migration<Runtime>,
     // pallet_identity::migration::versioned::V0ToV1<Runtime, IDENTITY_MIGRATION_KEY_LIMIT>,
     // ^ Removed: try-runtime confirmed on-chain identity storage already at v2; V0→V1 is a stale no-op.
 );
-
-type EventRecord = frame_system::EventRecord<
-	<Runtime as frame_system::Config>::RuntimeEvent,
-	<Runtime as frame_system::Config>::Hash,
->;
 
 //use crate::impls::CreditToBlockAuthor;
 
@@ -3289,245 +3211,6 @@ impl_runtime_apis! {
 	// 		Assets::account_balances(account)
 	// 	}
 	// }
-
-	impl pallet_contracts::ContractsApi<Block, AccountId, Balance, BlockNumber, Hash, EventRecord> for Runtime
-	{
-		fn call(
-			origin: AccountId,
-			dest: AccountId,
-			value: Balance,
-			gas_limit: Option<Weight>,
-			storage_deposit_limit: Option<Balance>,
-			input_data: Vec<u8>,
-		) -> pallet_contracts::ContractExecResult<Balance, EventRecord> {
-			let gas_limit = gas_limit.unwrap_or(RuntimeBlockWeights::get().max_block);
-			Contracts::bare_call(
-				origin,
-				dest,
-				value,
-				gas_limit,
-				storage_deposit_limit,
-				input_data,
-				pallet_contracts::DebugInfo::UnsafeDebug,
-				pallet_contracts::CollectEvents::UnsafeCollect,
-				pallet_contracts::Determinism::Enforced,
-			)
-		}
-
-		fn instantiate(
-			origin: AccountId,
-			value: Balance,
-			gas_limit: Option<Weight>,
-			storage_deposit_limit: Option<Balance>,
-			code: pallet_contracts::Code<Hash>,
-			data: Vec<u8>,
-			salt: Vec<u8>,
-		) -> pallet_contracts::ContractInstantiateResult<AccountId, Balance, EventRecord>
-		{
-			let gas_limit = gas_limit.unwrap_or(RuntimeBlockWeights::get().max_block);
-			Contracts::bare_instantiate(
-				origin,
-				value,
-				gas_limit,
-				storage_deposit_limit,
-				code,
-				data,
-				salt,
-				pallet_contracts::DebugInfo::UnsafeDebug,
-				pallet_contracts::CollectEvents::UnsafeCollect,
-			)
-		}
-
-		fn upload_code(
-			origin: AccountId,
-			code: Vec<u8>,
-			storage_deposit_limit: Option<Balance>,
-			determinism: pallet_contracts::Determinism,
-		) -> pallet_contracts::CodeUploadResult<Hash, Balance>
-		{
-			Contracts::bare_upload_code(
-				origin,
-				code,
-				storage_deposit_limit,
-				determinism,
-			)
-		}
-
-		fn get_storage(
-			address: AccountId,
-			key: Vec<u8>,
-		) -> pallet_contracts::GetStorageResult {
-			Contracts::get_storage(
-				address,
-				key
-			)
-		}
-	}
-
-	//impl pallet_revive::ReviveApi<Block, AccountId, Balance, Nonce, BlockNumber> for Runtime
-	//{
-	//	fn balance(address: H160) -> primitive_types::U256 {
-	//		Revive::evm_balance(&address)
-	//	}
-	//
-	//	fn block_gas_limit() -> primitive_types::U256 {
-	//		Revive::evm_block_gas_limit()
-	//	}
-	//
-	//	fn gas_price() -> primitive_types::U256 {
-	//		Revive::evm_gas_price()
-	//	}
-	//
-	//	fn nonce(address: H160) -> Nonce {
-	//		let account = <Runtime as pallet_revive::Config>::AddressMapper::to_account_id(&address);
-	//		System::account_nonce(account)
-	//	}
-	//
-	//	fn eth_transact(tx: pallet_revive::evm::GenericTransaction) -> Result<pallet_revive::EthTransactInfo<Balance>, pallet_revive::EthTransactError>
-	//	{
-	//		let blockweights: BlockWeights = <Runtime as frame_system::Config>::BlockWeights::get();
-	//		let tx_fee = |pallet_call, mut dispatch_info: DispatchInfo| {
-	//			let call = RuntimeCall::Revive(pallet_call);
-	//			dispatch_info.extension_weight = EthExtraImpl::get_eth_extension(0, 0u32.into()).weight(&call);
-	//			let uxt: UncheckedExtrinsic = sp_runtime::generic::UncheckedExtrinsic::new_bare(call).into();
-	//
-	//			pallet_transaction_payment::Pallet::<Runtime>::compute_fee(
-	//				uxt.encoded_size() as u32,
-	//				&dispatch_info,
-	//				0u32.into(),
-	//			)
-	//		};
-	//
-	//		Revive::bare_eth_transact(tx, blockweights.max_block, tx_fee)
-	//	}
-	//
-	//	fn call(
-	//		origin: AccountId,
-	//		dest: H160,
-	//		value: Balance,
-	//		gas_limit: Option<Weight>,
-	//		storage_deposit_limit: Option<Balance>,
-	//		input_data: Vec<u8>,
-	//	) -> pallet_revive::ContractResult<pallet_revive::ExecReturnValue, Balance> {
-	//		Revive::bare_call(
-	//			RuntimeOrigin::signed(origin),
-	//			dest,
-	//			value,
-	//			gas_limit.unwrap_or(RuntimeBlockWeights::get().max_block),
-	//			pallet_revive::DepositLimit::Balance(storage_deposit_limit.unwrap_or(u128::MAX)),
-	//			input_data,
-	//		)
-	//	}
-	//
-	//	fn instantiate(
-	//		origin: AccountId,
-	//		value: Balance,
-	//		gas_limit: Option<Weight>,
-	//		storage_deposit_limit: Option<Balance>,
-	//		code: pallet_revive::Code,
-	//		data: Vec<u8>,
-	//		salt: Option<[u8; 32]>,
-	//	) -> pallet_revive::ContractResult<pallet_revive::InstantiateReturnValue, Balance>
-	//	{
-	//		Revive::bare_instantiate(
-	//			RuntimeOrigin::signed(origin),
-	//			value,
-	//			gas_limit.unwrap_or(RuntimeBlockWeights::get().max_block),
-	//			pallet_revive::DepositLimit::Balance(storage_deposit_limit.unwrap_or(u128::MAX)),
-	//			code,
-	//			data,
-	//			salt,
-	//		)
-	//	}
-	//
-	//	fn upload_code(
-	//		origin: AccountId,
-	//		code: Vec<u8>,
-	//		storage_deposit_limit: Option<Balance>,
-	//	) -> pallet_revive::CodeUploadResult<Balance>
-	//	{
-	//		Revive::bare_upload_code(
-	//			RuntimeOrigin::signed(origin),
-	//			code,
-	//			storage_deposit_limit.unwrap_or(u128::MAX),
-	//		)
-	//	}
-	//
-	//	fn get_storage(
-	//		address: H160,
-	//		key: [u8; 32],
-	//	) -> pallet_revive::GetStorageResult {
-	//		Revive::get_storage(
-	//			address,
-	//			key
-	//		)
-	//	}
-	//
-	//	fn trace_block(
-	//		block: Block,
-	//		tracer_type: pallet_revive::evm::TracerType,
-	//	) -> Vec<(u32, pallet_revive::evm::Trace)> {
-	//		use pallet_revive::tracing::trace;
-	//		let mut tracer = Revive::evm_tracer(tracer_type);
-	//		let mut traces = vec![];
-	//		let (header, extrinsics) = block.deconstruct();
-	//		Executive::initialize_block(&header);
-	//		for (index, ext) in extrinsics.into_iter().enumerate() {
-	//			trace(tracer.as_tracing(), || {
-	//				let _ = Executive::apply_extrinsic(ext);
-	//			});
-	//
-	//			if let Some(tx_trace) = tracer.collect_trace() {
-	//				traces.push((index as u32, tx_trace));
-	//			}
-	//		}
-	//
-	//		traces
-	//	}
-	//
-	//	fn trace_tx(
-	//		block: Block,
-	//		tx_index: u32,
-	//		tracer_type: pallet_revive::evm::TracerType,
-	//	) -> Option<pallet_revive::evm::Trace> {
-	//		use pallet_revive::tracing::trace;
-	//		let mut tracer = Revive::evm_tracer(tracer_type);
-	//		let (header, extrinsics) = block.deconstruct();
-	//
-	//		Executive::initialize_block(&header);
-	//		for (index, ext) in extrinsics.into_iter().enumerate() {
-	//			if index as u32 == tx_index {
-	//			trace(tracer.as_tracing(), || {
-	//					let _ = Executive::apply_extrinsic(ext);
-	//				});
-	//				break;
-	//			} else {
-	//				let _ = Executive::apply_extrinsic(ext);
-	//			}
-	//		}
-	//
-	//		tracer.collect_trace()
-	//	}
-	//
-	//	fn trace_call(
-	//		tx: pallet_revive::evm::GenericTransaction,
-	//		tracer_type: pallet_revive::evm::TracerType,
-	//		)
-	//		-> Result<pallet_revive::evm::Trace, pallet_revive::EthTransactError>
-	//	{
-	//		use pallet_revive::tracing::trace;
-	//		let mut tracer = Revive::evm_tracer(tracer_type);
-	//		let result = trace(tracer.as_tracing(), || Self::eth_transact(tx));
-	//
-	//		if let Some(trace) = tracer.collect_trace() {
-	//			Ok(trace)
-	//		} else if let Err(err) = result {
-	//			Err(err)
-	//		} else {
-	//			Ok(tracer.empty_trace())
-	//		}
-	//	}
-	//}
 
 	impl pallet_transaction_payment_rpc_runtime_api::TransactionPaymentApi<
 		Block,
@@ -3893,18 +3576,263 @@ impl_runtime_apis! {
 
 #[cfg(test)]
 mod tests {
-	use frame_system::offchain::CreateSignedTransaction;
+    use frame_system::offchain::CreateSignedTransaction;
 
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn validate_transaction_submitter_bounds() {
-		fn is_submit_signed_transaction<T>()
-		where
-			T: CreateSignedTransaction<RuntimeCall>,
-		{
-		}
+    #[test]
+    fn validate_transaction_submitter_bounds() {
+        fn is_submit_signed_transaction<T>()
+        where
+            T: CreateSignedTransaction<RuntimeCall>,
+        {
+        }
 
-		is_submit_signed_transaction::<Runtime>();
-	}
+        is_submit_signed_transaction::<Runtime>();
+    }
+
+    fn new_test_ext() -> sp_io::TestExternalities {
+        frame_system::GenesisConfig::<Runtime>::default()
+            .build_storage()
+            .unwrap()
+            .into()
+    }
+
+    // F-064: no permissionless entry into SafeMode. EnterDepositAmount/ExtendDepositAmount
+    // are () (i.e. Get<Option<_>>::get() == None), so enter()/extend() must fail with
+    // NotConfigured for any signed account, regardless of balance.
+    #[test]
+    fn f064_safe_mode_permissionless_enter_is_disabled() {
+        new_test_ext().execute_with(|| {
+            let caller = AccountId::from([1u8; 32]);
+            assert_eq!(
+                pallet_safe_mode::Pallet::<Runtime>::enter(RuntimeOrigin::signed(caller.clone())),
+                Err(pallet_safe_mode::Error::<Runtime>::NotConfigured.into()),
+            );
+
+            // extend() checks "are we currently entered?" before the deposit — force safe
+            // mode on via the Root-gated path first so the deposit check is actually reached.
+            assert!(
+                pallet_safe_mode::Pallet::<Runtime>::force_enter(RuntimeOrigin::root()).is_ok()
+            );
+            assert_eq!(
+                pallet_safe_mode::Pallet::<Runtime>::extend(RuntimeOrigin::signed(caller)),
+                Err(pallet_safe_mode::Error::<Runtime>::NotConfigured.into()),
+            );
+        });
+    }
+
+    // F-064: ForceEnterOrigin/ForceExtendOrigin's EnsureRootWithSuccess value IS the halt
+    // duration (pallet_safe_mode::force_enter/force_extend pass it straight to do_enter/
+    // do_extend) — it must be EnterDuration/ExtendDuration (4h/2h), not a leftover demo
+    // ConstU32<9>/ConstU32<11> that would let a Root-forced halt lapse in under two minutes.
+    #[test]
+    fn f064_force_enter_duration_matches_config() {
+        new_test_ext().execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(1);
+            assert!(
+                pallet_safe_mode::Pallet::<Runtime>::force_enter(RuntimeOrigin::root()).is_ok()
+            );
+            assert_eq!(
+                pallet_safe_mode::EnteredUntil::<Runtime>::get(),
+                Some(1 + EnterDuration::get()),
+            );
+
+            assert!(
+                pallet_safe_mode::Pallet::<Runtime>::force_extend(RuntimeOrigin::root()).is_ok()
+            );
+            assert_eq!(
+                pallet_safe_mode::EnteredUntil::<Runtime>::get(),
+                Some(1 + EnterDuration::get() + ExtendDuration::get()),
+            );
+        });
+    }
+
+    // A04 (audit, 2026-09-25): pallet_beefy::on_new_session truncates the authority list to
+    // Config::MaxAuthorities. With the old ConstU32<10>, any session with more than 10
+    // validators silently lost the rest from the BEEFY set. Drive on_new_session directly
+    // with 11 dummy validators (one more than the old cap, comfortably under the new shared
+    // MaxAuthorities = 200) and confirm none get truncated.
+    #[test]
+    fn a04_beefy_authorities_not_truncated_past_ten() {
+        use sp_consensus_beefy::ecdsa_crypto::AuthorityId as BeefyId;
+        use sp_core::crypto::UncheckedFrom;
+        use frame_support::traits::OneSessionHandler;
+
+        new_test_ext().execute_with(|| {
+            let validators: Vec<(AccountId, BeefyId)> = (0u8..11)
+                .map(|i| (AccountId::from([i; 32]), BeefyId::unchecked_from([i; 33])))
+                .collect();
+
+            let pairs: Vec<(&AccountId, BeefyId)> =
+                validators.iter().map(|(a, k)| (a, k.clone())).collect();
+            <pallet_beefy::Pallet<Runtime> as OneSessionHandler<AccountId>>::on_new_session(
+                false,
+                pairs.clone().into_iter(),
+                pairs.into_iter(),
+            );
+
+            assert_eq!(
+                pallet_beefy::Authorities::<Runtime>::get().len(),
+                11,
+                "A04: BEEFY authority list must not be truncated below the shared MaxAuthorities bound",
+            );
+        });
+    }
+
+    // A01 (audit, 2026-09-25): end-to-end reproduction of the Recovery escalation path,
+    // through the actual Proxy::proxy extrinsic (not just ProxyType::filter() in isolation
+    // — pallet_proxy's do_proxy() attaches the filter as a call-level origin filter, so the
+    // outer proxy() extrinsic always returns Ok(()) regardless of whether the inner call was
+    // filtered; the only observable signal is whether the inner call's storage effect
+    // actually happened). A NonTransfer delegate dispatches create_recovery naming itself as
+    // the sole friend with a zero delay — before the fix this would succeed, letting the
+    // delegate immediately initiate/vouch/claim recovery and gain a fresh Signed origin over
+    // the real account via as_recovered, with no proxy restriction at all attached to it.
+    #[test]
+    fn a01_nontransfer_proxy_cannot_install_recovery() {
+        new_test_ext().execute_with(|| {
+            let real = AccountId::from([10u8; 32]);
+            let attacker = AccountId::from([11u8; 32]);
+            let _ = pallet_balances::Pallet::<Runtime>::force_set_balance(
+                RuntimeOrigin::root(),
+                sp_runtime::MultiAddress::Id(real.clone()),
+                1_000 * crate::constants::currency::PDEX,
+            );
+
+            assert!(pallet_proxy::Pallet::<Runtime>::add_proxy(
+                RuntimeOrigin::signed(real.clone()),
+                sp_runtime::MultiAddress::Id(attacker.clone()),
+                ProxyType::NonTransfer,
+                0,
+            )
+            .is_ok());
+
+            let create_recovery = RuntimeCall::Recovery(pallet_recovery::Call::<Runtime>::create_recovery {
+                friends: vec![attacker.clone()],
+                threshold: 1,
+                delay_period: 0,
+            });
+            // The outer proxy() call itself always returns Ok(()) — do_proxy() swallows the
+            // inner dispatch's filtered-call error into a ProxyExecuted event rather than
+            // propagating it. What must be checked is whether create_recovery actually ran.
+            assert!(pallet_proxy::Pallet::<Runtime>::proxy(
+                RuntimeOrigin::signed(attacker),
+                sp_runtime::MultiAddress::Id(real.clone()),
+                Some(ProxyType::NonTransfer),
+                Box::new(create_recovery),
+            )
+            .is_ok());
+
+            assert!(
+                pallet_recovery::Recoverable::<Runtime>::get(&real).is_none(),
+                "A01: NonTransfer proxy must not be able to install a Recovery config on the real account",
+            );
+        });
+    }
+
+    // F-002: pallet_sudo was removed from construct_runtime because a leftover Sudo::Key
+    // slot handed Root over mainnet to an unknown keyholder. pallet-sudo stays in the
+    // workspace (pdex-migration depends on it), so re-adding it to construct_runtime is a
+    // two-line change — this makes that regression a red test instead of a silent repeat.
+    #[test]
+    fn f002_no_sudo_pallet_in_runtime() {
+        use frame_support::traits::PalletsInfoAccess;
+        assert!(
+            AllPalletsWithSystem::infos().iter().all(|p| p.name != "Sudo"),
+            "pallet_sudo must not be present in construct_runtime! (F-002)",
+        );
+    }
+
+    // F-065: NonTransfer proxy must block Contracts and Revive calls, since a contract
+    // call can carry value and would otherwise bypass the Balances/Assets/PoolAssets/
+    // AssetConversion block entirely.
+    #[test]
+    fn f065_non_transfer_proxy_blocks_asset_and_recovery_paths() {
+        new_test_ext().execute_with(|| {
+            let target = sp_runtime::MultiAddress::Id(AccountId::from([9u8; 32]));
+            let assets_call = RuntimeCall::Assets(pallet_assets::Call::<Runtime, Instance1>::transfer {
+                id: parity_scale_codec::Compact(1u128),
+                target: target.clone(),
+                amount: 1,
+            });
+            let pool_assets_call = RuntimeCall::PoolAssets(pallet_assets::Call::<Runtime, Instance2>::transfer {
+                id: parity_scale_codec::Compact(1u128),
+                target,
+                amount: 1,
+            });
+            let asset_conversion_call = RuntimeCall::AssetConversion(
+                pallet_asset_conversion::Call::<Runtime>::swap_exact_tokens_for_tokens {
+                    path: vec![
+                        Box::new(NativeOrWithId::Native),
+                        Box::new(NativeOrWithId::WithId(1u128)),
+                    ],
+                    amount_in: 1,
+                    amount_out_min: 0,
+                    send_to: AccountId::from([9u8; 32]),
+                    keep_alive: false,
+                },
+            );
+            // A01: create_recovery doesn't move value directly, but it's an authority
+            // escalation path — see the NonTransfer filter's comment for the full chain.
+            let recovery_call = RuntimeCall::Recovery(pallet_recovery::Call::<Runtime>::create_recovery {
+                friends: vec![AccountId::from([9u8; 32])],
+                threshold: 1,
+                delay_period: 0,
+            });
+
+            assert!(!ProxyType::NonTransfer.filter(&assets_call));
+            assert!(!ProxyType::NonTransfer.filter(&pool_assets_call));
+            assert!(!ProxyType::NonTransfer.filter(&asset_conversion_call));
+            assert!(!ProxyType::NonTransfer.filter(&recovery_call));
+            // Any proxy still allows everything.
+            assert!(ProxyType::Any.filter(&assets_call));
+            assert!(ProxyType::Any.filter(&pool_assets_call));
+            assert!(ProxyType::Any.filter(&asset_conversion_call));
+            assert!(ProxyType::Any.filter(&recovery_call));
+        });
+    }
+
+    // F-066: asset id 0 is reserved. A signed origin must be rejected for id 0 and
+    // accepted for any non-zero id.
+    #[test]
+    fn f066_asset_id_zero_is_reserved() {
+        new_test_ext().execute_with(|| {
+            let caller = AccountId::from([2u8; 32]);
+            assert!(AssetsCreateOrigin::try_origin(RuntimeOrigin::signed(caller.clone()), &0u128)
+                .is_err());
+            assert!(AssetsCreateOrigin::try_origin(RuntimeOrigin::signed(caller), &1u128).is_ok());
+
+            // Id 0 is reserved from signed CreateOrigin, but Root must still be able to
+            // create it via force_create (separate ForceOrigin check, untouched by F-066).
+            assert!(pallet_assets::Pallet::<Runtime, Instance1>::force_create(
+                RuntimeOrigin::root(),
+                parity_scale_codec::Compact(0u128),
+                sp_runtime::MultiAddress::Id(AccountId::from([3u8; 32])),
+                true,
+                1,
+            )
+            .is_ok());
+        });
+    }
+
+    // F-072: PoolAssets ForceOrigin is Root-only, not Root-or-HalfCouncil. A synthetic
+    // "2 of 3 council members" origin — which the old EnsureRootOrHalfCouncil would have
+    // accepted — must now be rejected; only genuine Root may pass.
+    #[test]
+    fn f072_pool_assets_force_origin_is_root_only() {
+        new_test_ext().execute_with(|| {
+            type ForceOrigin = <Runtime as pallet_assets::Config<Instance2>>::ForceOrigin;
+
+            let council_majority: RuntimeOrigin =
+                pallet_collective::RawOrigin::<AccountId, CouncilCollective>::Members(2, 3).into();
+            assert!(
+                <ForceOrigin as EnsureOrigin<RuntimeOrigin>>::try_origin(council_majority).is_err()
+            );
+            assert!(
+                <ForceOrigin as EnsureOrigin<RuntimeOrigin>>::try_origin(RuntimeOrigin::root())
+                    .is_ok()
+            );
+        });
+    }
 }

@@ -1,10 +1,10 @@
 # Security Audit — Fix Log
 
-Tracking all changes applied from the 14 August 2026 security audit.  
+Tracking all changes applied from the 14 August 2026 security audit (@charanks030).  
 Audit covered `polkadex-substrate/Polkadex` and `Polkadex-Substrate/matching-engine`.  
 This document covers fixes applied to **this repo only**.
 
-**Totals:** 65 findings in this repo · 18 fixed (as of last update) · 47 open  
+**Totals:** 65 findings in this repo · 18 fixed (as of last update) · 43 open (corrected 2026-09-30: C7, H4, R2-H1, R4-A were double-listed here despite being fully fixed and written up above — removed)  
 See [`polkadex-audit-findings.md`](../polkadex-audit-findings.md) on the Desktop for the full findings table.
 
 ---
@@ -194,18 +194,17 @@ curl -H "Content-Type: application/json" -d '{"id":1,"jsonrpc":"2.0","method":"a
 ```
 
 **Step 2 — Submit set_keys on-chain**  
-Each validator's controller account calls:
+Which account signs depends on the runtime. On 373 the validator's controller account signs, as before. From 392 on, session keys belong to the account that signs, so the stash account signs: a call from a separate controller account succeeds but does not set the validator's keys. Where the stash is its own controller, it is the same account either way.
 ```
 session::set_keys(keys: <0x hex from step 1>, proof: 0x)
 ```
 via Polkadot.js Apps → Extrinsics → session → setKeys.
 
 **Step 3 — Wait for activation**  
-New keys become active at the next session boundary (≈ 1 era on mainnet). Verify with:  
-`session::nextKeys(validatorAccountId)` — should return the new pubkeys.
+Keys set during session N are queued at the start of session N+1 and become active at the start of session N+2. A mainnet session is 4 hours (6 sessions per 24 hour era), so activation comes 4 to 8 hours after set_keys. `session::nextKeys(<stash>)` returns the new pubkeys as soon as set_keys executes, so it confirms the submission, not activation. Note `session::currentIndex` when you submit. Once it has advanced by 2, confirm the new pubkeys are in the active sets: BABE (`babe::authorities`), GRANDPA (the `GrandpaApi_grandpa_authorities` runtime API), im-online (`imOnline::keys`), authority discovery (`authorityDiscovery::keys`), and any other key type the node signs with.
 
 **Step 4 — Confirm and purge old keystores**  
-On each validator node, verify the old BABE/GRANDPA/OB/THEA/BEEFY/mixnet pubkeys derived from the committed seeds are no longer present in the node's keystore directory. Remove any stale keystore files that correspond to the old pubkeys.
+Only after Step 3 shows the new keys active. Until then the old keys are the active ones: the node signs with whichever of its keys is in the active set, so removing them early stops it authoring and voting, and if many validators do so at once, block production and finality can stall. Then, on each validator node, verify the old BABE/GRANDPA/OB/THEA/BEEFY/mixnet pubkeys derived from the committed seeds are no longer present in the node's keystore directory. Remove any stale keystore files that correspond to the old pubkeys.
 
 **Step 5 — THEA bridge authority set**  
 The new THEA ECDSA pubkey must be registered with the bridge authority set. Depending on how THEA's validator set rotation is managed, this may require a governance call or a direct `change_authorities` dispatch from the governance origin.
@@ -573,18 +572,178 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 
 ---
 
+### F-002 — Sudo::Key storage slot survives pallet_sudo re-addition (WORSE than August audit found)
+**Severity:** Critical — priority 1, before spec 392 can ship
+**Location:** `runtimes/mainnet/src/lib.rs`, `runtimes/mainnet/src/migrations.rs`, `runtimes/mainnet/src/configs/mod.rs` (dead code, not compiled), `runtimes/mainnet/src/benchmarks.rs`, `runtimes/mainnet/Cargo.toml`, `runtimes/mainnet/src/genesis_config_presets.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** Live mainnet (spec 373, confirmed via RPC) has no active `pallet_sudo`, but the `Sudo::Key` storage slot was never wiped when sudo was originally removed years ago. It still holds the 2021 genesis root key (confirmed live and unchanged since block 0). Spec 392 re-added `pallet_sudo` under the same pallet name at `pallet_index(45)` with no migration touching that slot. At enactment, the leftover value would have become live Root over mainnet with no `set_key` call needed — to an account not held by the current team.
+
+**Changes made:**
+- `runtimes/mainnet/src/lib.rs`: removed `impl pallet_sudo::Config for Runtime`; replaced `#[runtime::pallet_index(45)] pub type Sudo = ...` with a removal comment
+- `runtimes/mainnet/src/benchmarks.rs`: removed `[pallet_sudo, Sudo]`
+- `runtimes/mainnet/Cargo.toml`: removed the `pallet-sudo` dependency and its `std`/`try-runtime` feature entries (root workspace `Cargo.toml` dependency left in place — `pallets/pdex-migration` still needs it)
+- `runtimes/mainnet/src/genesis_config_presets.rs`: removed `SudoConfig` import and `sudo: SudoConfig { .. }` genesis field; `root_key` param renamed to `_root_key` (no longer consumed)
+- `runtimes/mainnet/src/migrations.rs`: added `ClearLegacySudoKey` — a guarded, one-shot migration with `try-runtime` pre/post checks confirming the slot is empty after upgrade. Guarded against re-execution on any future upgrade. **Updated per PR review (visiondream3):** clears the entire `Sudo` pallet storage prefix via `sp_io::hashing::twox_128(b"Sudo")` + `frame_support::storage::unhashed::clear_prefix`, rather than only the `Key` item — mainnet also has a `:__STORAGE_VERSION__:` marker under the same prefix, and clearing the whole thing leaves nothing behind under a pallet name that no longer exists.
+- Wired `migrations::ClearLegacySudoKey` into the `Migrations` tuple in `lib.rs`
+
+**Note:** `runtimes/mainnet/src/configs/mod.rs` also had a `pallet_sudo::Config` impl, but that file was dead code — `configs` was never declared as a module anywhere in `lib.rs`, so it was never compiled and was not a live risk. **Update (2026-09-25):** deleted outright rather than left in place, for the same reason `benchmarks.rs` was deleted — dead code with a stale pallet impl in it is exactly the kind of thing that gets copy-pasted back to life by accident.
+
+**Verification (2026-09-21):** ran `try-runtime on-runtime-upgrade live` against `wss://so.polkadex.ee` with no `--pallet` scoping (the first scoped run never loaded `Sudo` storage into its sandbox, since the pallet doesn't exist in the new runtime's metadata — that run's `removed=0` result was a fetch-scope artifact, not a real finding). Unfiltered run against the full live state: `🔑 Cleared legacy Sudo storage prefix (removed=2)` — both the `Key` value and the `:__STORAGE_VERSION__:` marker, confirmed on the very first pass against genuinely populated data. Second pass confirms `Skipping ClearLegacySudoKey: already applied` and storage roots match before/after — idempotency holds. No panics, no errors, across the full run.
+
+---
+
+### F-029 — OrderbookCommittee orphaned governance pallet
+**Severity:** Medium — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`, `runtimes/mainnet/src/migrations.rs`, `runtimes/mainnet/src/genesis_config_presets.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `OrderbookCommittee` (`pallet_collective::Instance4`, `pallet_index(36)`) governed `OCEX`, which was removed from `construct_runtime!`. The committee remained fully active — a live governance body with proposal/voting/membership storage and no pallet left to govern. An orphaned permission surface.
+
+**Changes made:**
+- `runtimes/mainnet/src/lib.rs`: removed the `OrderbookCollective` type alias and its `pallet_collective::Config<OrderbookCollective>` impl; removed the now-unused `OrderbookMotionDuration`/`OrderbookMaxProposals`/`OrderbookMaxMembers` parameter_types; replaced `#[runtime::pallet_index(36)] pub type OrderbookCommittee = ...` with a removal comment; removed `RuntimeCall::OrderbookCommittee(..)` from the `ProxyType::Governance` filter (no longer a valid call variant)
+- `runtimes/mainnet/src/genesis_config_presets.rs`: commented out the `orderbook_committee: Default::default()` genesis field
+- `runtimes/mainnet/src/migrations.rs`: added `ClearOrderbookCommittee` using the framework's own `frame_support::migrations::RemovePallet<P, DbWeight>` — wipes all storage under the `"OrderbookCommittee"` prefix (members, proposals, votes)
+- Wired `migrations::ClearOrderbookCommittee` into the `Migrations` tuple
+
+---
+
+### F-030 — Unguarded one-shot migrations re-execute on every future upgrade
+**Severity:** High — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/migrations.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `FixBalancesFrozen`, `FixCouncilPrime`, and `ClearOffenceReports` were wired directly into the `Migrations` tuple used by `Executive` with no "already applied" guard, unlike `UpgradeSessionKeys` which correctly checks `System::last_runtime_upgrade_spec_version()`. Since this tuple runs on every future runtime upgrade forever, `ClearOffenceReports` in particular would wipe legitimate future offence reports on the *next* upgrade after 392, not just the historical undecodable entries it was written for. `FixBalancesFrozen` would also re-scan every account with a lock on every future upgrade indefinitely.
+
+**Changes made:**
+- Added spec-version guards (`last_runtime_upgrade_spec_version() > 391`, mirroring the existing `UpgradeSessionKeys` pattern) to `FixBalancesFrozen`, `FixCouncilPrime`, and `ClearOffenceReports`. Each now skips with a log message if already applied.
+- **Per PR review (visiondream3):** `ClearOrmlVestingLocks` was also unguarded and got the same treatment — added the identical spec-version guard to its `on_runtime_upgrade`. It's naturally idempotent once the prefix is empty, but there's no reason to leave it as the one ungated exception when every other one-shot migration in this set follows the same pattern.
+
+**Verification (2026-09-21):** unfiltered `try-runtime on-runtime-upgrade live` against `wss://so.polkadex.ee` confirmed all four migrations fire against genuinely populated real data on the first pass, then correctly skip on the second (idempotency) pass: `Fixed frozen field for 1 accounts with stale locks`, `🧹 Cleared 3629 Offences::Reports entries`, `ClearOrmlVestingLocks: unlocked 12 accounts, ran 13 clear_prefix iterations`. All real, nonzero counts — not scoping artifacts.
+
+---
+
+### Contracts and Revive removed from the runtime (independent audit findings A02, A07)
+
+**Severity:** High (A02) / Medium (A07) — release blockers on PR 14
+**Location:** `runtimes/mainnet/src/lib.rs`, `runtimes/mainnet/Cargo.toml`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-28
+
+**Findings:** an independent audit (2026-09-25, polkadexaj + visiondream3) found `pallet_contracts` failing the runtime's own `__construct_runtime_integrity_test` invariant (A02: the max per-block Contracts storage-write workload this runtime's block weights admit exceeded the pallet's memory allocation model), and `pallet_revive`'s Ethereum fee adapter still a placeholder — `FeeInfo = ()` returns zero fees and zero fee-to-weight conversion for Ethereum calls (A07).
+
+**Decision:** rather than tune Contracts' Schedule to pass the integrity test (tried first, reverted — see PR 14 history), the client decided to remove both pallets outright. Neither exists on mainnet today (spec 373 has never had either), nothing calls into either pallet's own extrinsics, and there's no storage to migrate for either on mainnet.
+
+**One real dependency found and resolved:** the runtime's `UncheckedExtrinsic` type was `pallet_revive::evm::runtime::UncheckedExtrinsic<Address, Signature, EthExtraImpl>` — Revive's Ethereum-compatible extrinsic wrapper, which lets a chain accept raw Ethereum-signed transactions directly. Removing `pallet_revive::Config` broke this immediately (its `Encode`/`Decode` impls require `Runtime: pallet_revive::Config`). Reverted to the plain `generic::UncheckedExtrinsic<Address, RuntimeCall, Signature, TxExtension>` — which is what mainnet at spec 373 already uses, so this is a return to the live format, not a removal of one. Confirmed no impact on the Ethereum↔Polkadex bridge (Hyperbridge/ISMP + `pallet-hyper-fungible-token`): traced both call paths — outbound `send()` authenticates via plain `ensure_signed(origin)`, and inbound messages arrive through `pallet-ismp` verifying a proof and calling the bridge pallet's `IsmpModule` callbacks internally, never through a user-submitted extrinsic. Neither touches the Ethereum-compatible extrinsic envelope. Also confirmed there's no Ethereum JSON-RPC service anywhere in this node, so raw Ethereum transaction submission wasn't reachable today regardless.
+
+**Changes made:**
+- Removed `impl pallet_contracts::Config`, `impl pallet_revive::Config`, and `impl TryFrom<RuntimeCall> for pallet_revive::Call<Runtime>`
+- Removed both `#[runtime::pallet_index]` bindings (52 = Revive, 54 = Contracts), following the same commented-out-with-reason pattern already used for other removed pallets
+- Removed the active `ContractsApi` runtime-API impl and the already-dead, commented-out `ReviveApi` impl
+- Removed `pallet_contracts::Migration<Runtime>` from the `Migrations` tuple
+- Removed `EthExtraImpl`/`EthExtra` and the `SetWeightLimit for RuntimeCall` impl (both existed only to support the Revive-based extrinsic type)
+- Removed the `pallet-revive`/`pallet-contracts` dependency lines and all `std`/`runtime-benchmarks`/`try-runtime` feature entries from `runtimes/mainnet/Cargo.toml` (left the root workspace `Cargo.toml` definitions alone)
+- See F-065 below for the `NonTransfer` proxy filter and test updates
+- Marked the freed pallet indices 52 and 54 "do not reuse" in the commented-out bindings, so nobody assigns a new pallet to either without a deliberate decision
+
+**Update (2026-09-30, polkadexaj PR 14 review):**
+- `pallets/ocex/Cargo.toml`'s unused `pallet-revive` dependency line (flagged above as a "separate cleanup") is now removed — it was never called from OCEX's source, but per polkadexaj it's what pulled `pallet-revive-fixtures`/`solc` into the benchmark build in the first place. Removal is complete now, not partial.
+- **Testnet extrinsic format:** reverting `UncheckedExtrinsic` to the generic type is a no-op for mainnet (spec 373 never had Revive), but **testnet's branch currently uses the Revive-wrapped type** (confirmed by reading `origin/testnet`'s `lib.rs` directly) — so this genuinely changes testnet's extrinsic envelope and metadata, not just mainnet's. OFE and wallet flows need a smoke test after this lands on testnet. On `transaction_version`: it's a single value in this one runtime crate's `RuntimeVersion`, shared by both networks since they run the identical compiled WASM — there's no mechanism for a testnet-only bump without forking into a separate runtime, which is out of scope. The existing `transaction_version: 3` bump (already done for spec 392) covers this extrinsic-format change too, since testnet's move to spec 392 is the single event that introduces both.
+
+---
+
+### BEEFY MaxAuthorities aligned to the shared consensus bound (independent audit finding A04)
+
+**Severity:** High — release blocker on PR 14
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-28
+
+**Finding:** an independent audit (2026-09-25, polkadexaj + visiondream3) found `pallet_beefy::Config::MaxAuthorities` hardcoded to `ConstU32<10>`, while every other consensus pallet (Babe, Grandpa, AuthorityDiscovery) uses the shared `MaxAuthorities = 200`. `pallet-beefy`'s `on_new_session` truncates both active and queued authority lists to this bound — with more than 10 validators, the BEEFY set silently became a strict subset of the real session set, narrowing BEEFY's security margin and making readiness measurements against the full validator population misleading.
+
+**Changes made:**
+- Aligned `pallet_beefy::Config::MaxAuthorities` to the shared `MaxAuthorities` constant
+
+**Verification:** added `a04_beefy_authorities_not_truncated_past_ten`, which drives `on_new_session` directly (via `OneSessionHandler`) with 11 dummy validators and confirms none get truncated. Verified the test fails at exactly 10 authorities with the old `ConstU32<10>` and passes with the fix.
+
+---
+
+### F-065 — NonTransfer proxy filter only blocked native-currency paths
+**Severity:** High — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `ProxyType::NonTransfer` only excluded `RuntimeCall::Balances(..)` and `RuntimeCall::Indices(pallet_indices::Call::transfer)`. `Assets`, `PoolAssets`, and `AssetConversion` are all live pallets that can move value between accounts (transfer, swaps, liquidity operations) — a proxy delegated as "NonTransfer" could still move funds through any of the three. **Per PR review (visiondream3):** `Contracts` and `Revive` calls can also carry value — a trivial contract forwarding a transfer would bypass the restriction entirely.
+
+**Changes made:**
+- Added `RuntimeCall::Assets(..)`, `RuntimeCall::PoolAssets(..)`, `RuntimeCall::AssetConversion(..)`, `RuntimeCall::Contracts(..)`, `RuntimeCall::Revive(..)` to the `NonTransfer` filter's exclusion match
+
+**Update (2026-09-25, independent audit finding A01, polkadexaj + visiondream3):** `Contracts`/`Revive` in the filter didn't cover everything — `Recovery` was missed. `create_recovery` moves no value directly, but it lets a NonTransfer delegate configure the real account's recovery friends/threshold (itself, as sole friend, zero delay), then `initiate_recovery`/`vouch_recovery`/`claim_recovery` from its own unrestricted origin and call `as_recovered`, which dispatches with a fresh Signed origin carrying no proxy restriction at all — full account takeover through a call that superficially "moves no value." Added `RuntimeCall::Recovery(..)` to the exclusion match. Verified with an end-to-end regression through the actual `Proxy::proxy` extrinsic (not just `ProxyType::filter()` in isolation, which can't observe whether the inner call was actually filtered — `do_proxy()` swallows that into a `ProxyExecuted` event rather than the outer call's return value).
+
+**Update (2026-09-28):** `Contracts` and `Revive` are no longer in `construct_runtime` at all (see the new entry above on their removal) — `RuntimeCall::Contracts`/`::Revive` aren't valid variants any more, so those two arms were dropped from the filter and its test. Nothing to block if the calls don't exist.
+
+---
+
+### F-066 — Asset id 0 not reserved
+**Severity:** Medium — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `pallet_assets::Config<Instance1>::CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>` let any signed account create an asset with any id, including 0.
+
+**Changes made:**
+- Added `AssetsCreateOrigin`, a custom `EnsureOriginWithArg<RuntimeOrigin, u128>` impl that rejects asset id 0 for any signed origin, delegating to `EnsureSigned` otherwise. Root/`ForceOrigin` can still create id 0 via `force_create`. Wired in as `Instance1`'s `CreateOrigin`. `PoolAssets` (Instance2) left unchanged — the finding didn't target it and LP-token ids don't carry the same special meaning.
+
+---
+
+### F-072 — PoolAssets ForceOrigin was Root-or-HalfCouncil, not Root-only
+**Severity:** Medium — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-18
+
+**Vulnerability:** `pallet_assets::Config<Instance2>::ForceOrigin` (PoolAssets) was `EnsureRootOrHalfCouncil`, wider than the audit's "Root-only" finding. Pool asset lifecycle force-operations shouldn't be council-gated the same way general user-created assets are.
+
+**Changes made:**
+- Changed `PoolAssets`' `ForceOrigin` to `EnsureRoot<AccountId>`. `Assets` (Instance1) `ForceOrigin` left as `EnsureRootOrHalfCouncil` — not targeted by this finding.
+
+**Resolved (2026-09-25, visiondream3):** `Assets` (Instance1) `ForceOrigin` stays `EnsureRootOrHalfCouncil` deliberately. At this stage of the network a recovery path that doesn't require a two-month referendum is needed, and the audit itself called this the usual governance tradeoff rather than a finding — not in scope for this fix.
+
+---
+
+### F-064 — Permissionless SafeMode entry priced too cheap (correction — not actually fixed on first pass)
+**Severity:** High — part of priority-1 "small live fixes" bucket for spec 392
+**Location:** `runtimes/mainnet/src/lib.rs`
+**Branch:** `fix/spec-392-blockers`
+**Date:** 2026-09-21
+
+**Vulnerability:** Originally checked only `ForceEnterOrigin`/`ForceExitOrigin`/`ForceDepositOrigin` (all correctly `EnsureRoot`-based) and wrongly logged this as already resolved. **Per PR review (visiondream3):** missed that `pallet_safe_mode` also exposes permissionless `enter()`/`extend()` calls, gated only by a deposit amount, not an origin check — `EnterDepositAmount` was `2,000,000 * DOLLARS` and `ExtendDepositAmount` was `1,000,000 * DOLLARS`. Any signed account with that much PDEX could unilaterally halt the chain (SafeMode restricts dispatch to `SafeModeWhitelistedCalls` — System/SafeMode/TxPause only) without needing Root at all. This is the actual "permissionless halt" the August audit flagged.
+
+**Changes made:**
+- Removed the `EnterDepositAmount`/`ExtendDepositAmount` constants entirely (kept `EnterDuration`/`ExtendDuration`)
+- Set `type EnterDepositAmount = ();` and `type ExtendDepositAmount = ();` in `pallet_safe_mode::Config` — `pallet_safe_mode`'s `enter()`/`extend()` calls `Config::EnterDepositAmount::get().ok_or(Error::NotConfigured)?`, so `()` (returning `None`) disables the permissionless path entirely. Only the Root-gated `Force*Origin` calls can now enter/extend/exit SafeMode.
+
+**Unit tests added for F-064/F-065/F-066/F-072 (2026-09-21):** `try-runtime on-runtime-upgrade` only exercises storage migrations (F-002/F-029/F-030) — it never dispatches an extrinsic, so it can't verify these four `Config`/filter-level access-control changes at all. Added dedicated tests in `runtimes/mainnet/src/lib.rs`'s `#[cfg(test)] mod tests`, all passing:
+- `f064_safe_mode_permissionless_enter_is_disabled` — calls `enter()`/`extend()` from a signed origin, asserts `Error::NotConfigured`. (`extend()` requires forcing SafeMode on first via `force_enter(Root)`, since `do_extend` checks "are we entered?" before the deposit.)
+- `f065_non_transfer_proxy_blocks_contracts_and_revive` — calls `ProxyType::NonTransfer.filter(...)` directly against `Contracts`/`Revive` calls, asserts `false`; confirms `ProxyType::Any` still allows them.
+- `f066_asset_id_zero_is_reserved` — calls `AssetsCreateOrigin::try_origin` directly with asset id `0` (rejected) and `1` (accepted).
+- `f072_pool_assets_force_origin_is_root_only` — constructs a synthetic "2 of 3 council members" origin (`pallet_collective::RawOrigin::Members(2, 3)`, what the old `EnsureRootOrHalfCouncil` would have accepted) and confirms `PoolAssets`' `ForceOrigin` now rejects it while genuine Root still passes.
+
+---
+
 ## Open — Pending
 
 | ID | Severity | Location | Finding |
 |---|---|---|---|
-| C7 | 🔴 Critical | nodes/, session-keys/ | Master BIP39 seed committed in repo — rotate all session keys |
-| H4 | 🟠 High | pallets/ocex | UserActionBatch.signature never verified |
-| R2-H1 | 🟠 High | pallets/ocex | process_egress_msg routes funds to caller-chosen account |
 | R3-H2 | 🟠 High | pallets/ocex | OCW mutex released on failed acquisition; unsafe RPC namespaces |
 | R3-H3 | 🟠 High | pallets/ocex | Aggregator HTTP response uncapped |
 | R3-H12 | 🟠 High | pallets/ocex | LMP config metrics write-only; epoch budget over-issued |
 | R3-H13 | 🟠 High | pallets/ocex | close_auction non-transactional; place_bid commented out |
-| R4-A | 🟠 High | pallets/ocex | claim_withdraw benchmarked wrong; empty key re-inserted |
 | R3-H6 | 🟠 High | pallets/liquidity-mining | Pools keyed by market_maker, callbacks look up by pool_id |
 | R3-H7 | 🟠 High | pallets/liquidity-mining | remove_liquidity_failed mints 10¹²× shares |
 | R3-H8 | 🟠 High | pallets/liquidity-mining | force_close_pool sends funds to personal account |
@@ -597,6 +756,8 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 | H2 | 🟠 High | pallets/pdex-migration | Third approver's beneficiary used for mint |
 | H9 | 🟠 High | pallets/xcm-helper | XCM fee whitelist commented out; zero fee hardcoded |
 | R3-H4 | 🟠 High | CI config | Fork PRs run as root on IAM-bearing runner |
-| R3-H5 | 🟠 High | Cargo.toml | WASM builder on mutable fork branch; no rev pin |
 | M1–M16 | 🟡 Medium | various | See full findings table |
 | L1–L14 | ⚪ Low | various | See full findings table |
+
+**Verified already resolved, no action taken (2026-09-18):**
+- **R3-H5** (WASM builder on mutable fork branch) — `substrate-wasm-builder = { version = "31.1.0" }` in root `Cargo.toml` is a plain crates.io pin on all of `mainnet`, `testnet`, `security/audit-fixes`, `feature/node-packaging`. No `[patch]` override. Not a git dependency anywhere.
