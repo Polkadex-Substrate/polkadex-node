@@ -58,7 +58,7 @@ Roles: **Dev** writes the code and opens PRs. **Reviewers** are two people who a
 - [ ] The chill call for validators on placeholder keys has an owner and an issue before any BEEFY start date is announced (procedure 5).
 - [ ] The `set_code` proposal goes through governance. The uploading account holds the preimage fee and deposit (procedure 6). The runtime test that no pallet named `Sudo` exists passed on the tagged commit.
 - [ ] At enactment: Ops watches block production and finality for two sessions. A stall escalates immediately.
-- [ ] After enactment: validators rotate keys if required, signing with the stash (procedure 6). Ops confirms the new session key set on the team's validators.
+- [ ] After enactment: every validator rotates its keys once, signing with the stash (procedure 6). Ops confirms the new session key set on the team's validators.
 
 ## 8. After
 

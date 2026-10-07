@@ -119,9 +119,10 @@ at the end of this doc.
 ## After the runtime upgrade (spec 392)
 
 The spec 392 upgrade adds two new session key types (BEEFY and mixnet). The
-upgrade migration fills them with placeholder values for every validator. Your
-existing BABE and GRANDPA keys keep working, but rotate once after the upgrade
-so those two entries hold real keys:
+upgrade migration fills them with placeholder values for every validator, so
+every validator rotates its keys once after the upgrade enacts. The existing
+BABE and GRANDPA keys keep working until the new ones are active, so the
+rotation causes no gap:
 
 1. Wait until the runtime upgrade has enacted (the node logs the new spec
    version, or `state_getRuntimeVersion` shows 392).
