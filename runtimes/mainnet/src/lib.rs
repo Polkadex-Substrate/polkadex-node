@@ -2959,6 +2959,7 @@ mod benches {
 	frame_benchmarking::define_benchmarks!(
 		[frame_benchmarking, BaselineBench::<Runtime>]
 		[frame_system, SystemBench::<Runtime>]
+		[frame_system_extensions, SystemExtensionsBench::<Runtime>]
 		[pallet_balances, Balances]
 		[pallet_timestamp, Timestamp]
 		[pallet_assets, Assets]
@@ -3543,7 +3544,7 @@ impl_runtime_apis! {
 		) {
 			use frame_benchmarking::{baseline::Pallet as BaselineBench, BenchmarkList};
 			use frame_support::traits::StorageInfoTrait;
-			use frame_system_benchmarking::Pallet as SystemBench;
+			use frame_system_benchmarking::{extensions::Pallet as SystemExtensionsBench, Pallet as SystemBench};
 
 			let mut list = Vec::<BenchmarkList>::new();
 			list_benchmarks!(list, extra);
@@ -3559,7 +3560,7 @@ impl_runtime_apis! {
 			use frame_benchmarking::{baseline, baseline::Pallet as BaselineBench, BenchmarkBatch};
 			use sp_storage::TrackedStorageKey;
 			use frame_support::traits::WhitelistedStorageKeys;
-			use frame_system_benchmarking::Pallet as SystemBench;
+			use frame_system_benchmarking::{extensions::Pallet as SystemExtensionsBench, Pallet as SystemBench};
 
 			impl frame_system_benchmarking::Config for Runtime {}
 			impl baseline::Config for Runtime {}
