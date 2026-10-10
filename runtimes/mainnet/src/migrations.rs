@@ -929,6 +929,12 @@ const CLEAR_REWARDS_AND_MIGRATION_LOCKS_FROM_SPEC: u32 = 391; // Runs once, upgr
 /// remaining locks and freezes. Only accounts that hold the lock are touched; the old pallets'
 /// storage is read, never written. At mainnet block 13,204,429 all 1,686 locks meet their rule.
 ///
+/// Balances counts one consumer ref for an account whose frozen or reserved balance is non-zero,
+/// and releases it when both reach zero. An account that holds a lock without that ref (on mainnet
+/// one reaped account, no providers, whose pdexlock lock outlived it) would make the release
+/// underflow and log an error. Such an account gets the ref right before its lock is removed, so
+/// the count ends where Balances would leave it and nothing is logged as an error.
+///
 /// Guarded to run once, upgrading into spec 392, like the other one-shot migrations here.
 pub struct ClearRewardsAndMigrationLocks;
 
@@ -945,6 +951,41 @@ pub struct ReleasableLocks {
 impl ClearRewardsAndMigrationLocks {
     fn has_lock(who: &AccountId, id: LockIdentifier) -> bool {
         pallet_balances::Locks::<Runtime>::get(who).iter().any(|lock| lock.id == id)
+    }
+
+    /// Gives `who` the consumer ref Balances expects for a non-zero frozen or reserved balance,
+    /// if it has none. Returns whether one was added.
+    ///
+    /// Without it, the remove_lock that brings frozen and reserved to zero releases a ref the
+    /// account does not hold (an underflow, logged as an error), and one that leaves them
+    /// non-zero has Balances add the ref itself, also with an error log. An account with no
+    /// providers (reaped, only its lock left) cannot take a ref through inc_consumers_without_limit;
+    /// its count is set directly, and Balances removes that account entry again in the same
+    /// remove_lock call.
+    pub fn add_consumer_ref_if_missing(who: &AccountId) -> bool {
+        let account = frame_system::Account::<Runtime>::get(who);
+        if account.consumers > 0 || (account.data.frozen == 0 && account.data.reserved == 0) {
+            return false;
+        }
+        if frame_system::Pallet::<Runtime>::inc_consumers_without_limit(who).is_err() {
+            frame_system::Account::<Runtime>::mutate(who, |account| account.consumers = 1);
+        }
+        log::info!(
+            target: "runtime::migration",
+            "ClearRewardsAndMigrationLocks: {:?} (providers {}) held a lock without a consumer ref; \
+             added one before removing the lock",
+            who,
+            account.providers,
+        );
+        true
+    }
+
+    /// Removes lock `id` from `who` with `LockableCurrency::remove_lock`, after making sure the
+    /// account's consumer ref is in place. Returns whether a ref was added.
+    pub fn remove(who: &AccountId, id: LockIdentifier) -> bool {
+        let added = Self::add_consumer_ref_if_missing(who);
+        <pallet_balances::Pallet<Runtime> as LockableCurrency<AccountId>>::remove_lock(id, who);
+        added
     }
 
     /// Applies the old unlock rules at block `now` to every record in the old storage.
@@ -1004,28 +1045,26 @@ impl OnRuntimeUpgrade for ClearRewardsAndMigrationLocks {
         }
 
         let found = Self::releasable(frame_system::Pallet::<Runtime>::block_number());
+        let mut refs_added: u64 = 0;
         for who in found.rewards.iter() {
-            <pallet_balances::Pallet<Runtime> as LockableCurrency<AccountId>>::remove_lock(
-                REWARDS_LOCK_ID,
-                who,
-            );
+            refs_added += Self::remove(who, REWARDS_LOCK_ID) as u64;
         }
         for who in found.pdex_migration.iter() {
-            <pallet_balances::Pallet<Runtime> as LockableCurrency<AccountId>>::remove_lock(
-                PDEX_MIGRATION_LOCK_ID,
-                who,
-            );
+            refs_added += Self::remove(who, PDEX_MIGRATION_LOCK_ID) as u64;
         }
         log::info!(
             target: "runtime::migration",
-            "ClearRewardsAndMigrationLocks: removed {} REWARDID locks and {} pdexlock locks",
+            "ClearRewardsAndMigrationLocks: removed {} REWARDID locks and {} pdexlock locks; added {} \
+             missing consumer refs first",
             found.rewards.len(),
             found.pdex_migration.len(),
+            refs_added,
         );
 
-        // Each remove_lock reads Locks, Freezes and the account, and writes the account and Locks.
+        // Per removal: the account read for the consumer check, then remove_lock reads Locks,
+        // Freezes and the account and writes the account and Locks. Plus one write per ref added.
         let removed = (found.rewards.len() + found.pdex_migration.len()) as u64;
-        db.reads_writes(1 + found.reads + 3 * removed, 2 * removed)
+        db.reads_writes(1 + found.reads + 4 * removed, 2 * removed + refs_added)
     }
 
     #[cfg(feature = "try-runtime")]
@@ -1078,26 +1117,41 @@ impl OnRuntimeUpgrade for ClearRewardsAndMigrationLocks {
             "ClearRewardsAndMigrationLocks: a lock with another id changed"
         );
         // Accounts that lost a lock: free and reserved unchanged, frozen recomputed from what is
-        // left.
-        for (who, free, reserved) in pre.balances.iter() {
-            let data = frame_system::Account::<Runtime>::get(who).data;
+        // left, and the consumer count where Balances leaves it.
+        for touched in pre.touched.iter() {
+            let account = frame_system::Account::<Runtime>::get(&touched.who);
             ensure!(
-                data.free == *free && data.reserved == *reserved,
+                account.data.free == touched.free && account.data.reserved == touched.reserved,
                 "ClearRewardsAndMigrationLocks: free or reserved balance changed"
             );
-            let locked = pallet_balances::Locks::<Runtime>::get(who)
-                .iter()
-                .map(|lock| lock.amount)
-                .max()
-                .unwrap_or_default();
-            let frozen = pallet_balances::Freezes::<Runtime>::get(who)
+            let locks = pallet_balances::Locks::<Runtime>::get(&touched.who);
+            let locked = locks.iter().map(|lock| lock.amount).max().unwrap_or_default();
+            let frozen = pallet_balances::Freezes::<Runtime>::get(&touched.who)
                 .iter()
                 .map(|freeze| freeze.amount)
                 .max()
                 .unwrap_or_default();
             ensure!(
-                data.frozen == locked.max(frozen),
+                account.data.frozen == locked.max(frozen),
                 "ClearRewardsAndMigrationLocks: frozen does not match the remaining locks"
+            );
+            // Balances holds one consumer ref while frozen or reserved is non-zero and releases it
+            // when both reach zero; an account without providers is reaped in the same call.
+            let expected = if !touched.exists {
+                0
+            } else if touched.consumes_after {
+                touched.consumers.max(1)
+            } else {
+                touched.consumers.saturating_sub(1)
+            };
+            ensure!(
+                account.consumers == expected,
+                "ClearRewardsAndMigrationLocks: consumer count is not what Balances leaves"
+            );
+            // No account that still holds a lock ends without a consumer ref.
+            ensure!(
+                locks.is_empty() || account.consumers >= 1 || !touched.exists,
+                "ClearRewardsAndMigrationLocks: an account that still holds a lock has no consumer ref"
             );
         }
         // The old pallets' storage and the total issuance are untouched.
@@ -1165,6 +1219,19 @@ mod try_runtime_checks {
         }
     }
 
+    /// An account that loses a lock, as it was before the migration.
+    #[derive(Encode, Decode)]
+    pub struct Touched {
+        pub who: AccountId,
+        pub free: Balance,
+        pub reserved: Balance,
+        pub consumers: u32,
+        /// It has providers or sufficients, so Balances keeps its account entry.
+        pub exists: bool,
+        /// Its reserved balance or a remaining lock or freeze keeps it consuming afterwards.
+        pub consumes_after: bool,
+    }
+
     #[derive(Encode, Decode)]
     pub struct LocksSnapshot {
         pub rewards_released: Vec<AccountId>,
@@ -1175,8 +1242,8 @@ mod try_runtime_checks {
         pub rewards_total: Balance,
         pub pdex_migration_total: Balance,
         pub other_locks: [u8; 32],
-        /// (account, free, reserved) of every account that loses a lock.
-        pub balances: Vec<(AccountId, Balance, Balance)>,
+        /// Every account that loses a lock, as it was before.
+        pub touched: Vec<Touched>,
         /// Keys under the Rewards and PDEXMigration prefixes.
         pub legacy_keys: (u32, u32),
         pub total_issuance: Balance,
@@ -1188,12 +1255,33 @@ mod try_runtime_checks {
                 locks.iter().filter(|(who, _)| !released.contains(who)).cloned().collect::<Vec<_>>()
             };
             let total = |locks: &[(AccountId, Balance)]| locks.iter().map(|l| l.1).sum::<Balance>();
-            let balances = found
+            let touched = found
                 .rewards
                 .union(&found.pdex_migration)
                 .map(|who| {
-                    let data = frame_system::Account::<Runtime>::get(who).data;
-                    (who.clone(), data.free, data.reserved)
+                    let account = frame_system::Account::<Runtime>::get(who);
+                    let mut released = Vec::new();
+                    if found.rewards.contains(who) {
+                        released.push(REWARDS_LOCK_ID);
+                    }
+                    if found.pdex_migration.contains(who) {
+                        released.push(PDEX_MIGRATION_LOCK_ID);
+                    }
+                    let left = pallet_balances::Locks::<Runtime>::get(who)
+                        .iter()
+                        .filter(|lock| !released.contains(&lock.id))
+                        .map(|lock| lock.amount)
+                        .chain(pallet_balances::Freezes::<Runtime>::get(who).iter().map(|f| f.amount))
+                        .max()
+                        .unwrap_or_default();
+                    Touched {
+                        who: who.clone(),
+                        free: account.data.free,
+                        reserved: account.data.reserved,
+                        consumers: account.consumers,
+                        exists: account.providers > 0 || account.sufficients > 0,
+                        consumes_after: account.data.reserved != 0 || left != 0,
+                    }
                 })
                 .collect();
             LocksSnapshot {
@@ -1204,7 +1292,7 @@ mod try_runtime_checks {
                 rewards_total: total(&scan.rewards),
                 pdex_migration_total: total(&scan.pdex_migration),
                 other_locks: scan.other_locks,
-                balances,
+                touched,
                 legacy_keys: legacy_key_counts(),
                 total_issuance: pallet_balances::TotalIssuance::<Runtime>::get(),
             }
@@ -1436,6 +1524,55 @@ mod tests {
             // The REWARDID rule does not depend on it.
             assert_eq!(lock_of(&account(1), REWARDS_LOCK_ID), None);
             assert_eq!(lock_of(&account(8), REWARDS_LOCK_ID), None);
+        });
+    }
+
+    /// A lock can sit on an account without the consumer ref Balances counts for it. On mainnet
+    /// that is one reaped account (no providers) whose pdexlock lock outlived it. The ref is added
+    /// right before the lock goes, so Balances' release lands on zero instead of underflowing.
+    #[test]
+    fn locks_on_accounts_without_a_consumer_ref() {
+        new_test_ext().execute_with(|| {
+            seed();
+            let consumers = |n: u8| frame_system::Pallet::<Runtime>::consumers(&account(n));
+            // Account 1 (no other lock) and account 8 (keeps a staking lock) lost their ref.
+            frame_system::Account::<Runtime>::mutate(account(1), |a| a.consumers = 0);
+            frame_system::Account::<Runtime>::mutate(account(8), |a| a.consumers = 0);
+            // Account 12 was reaped: no providers and no balance, only its lock and the frozen
+            // amount FixBalancesFrozen writes for it.
+            let reaped = account(12);
+            lock(&reaped, PDEX_MIGRATION_LOCK_ID, 5 * PDEX);
+            LockedTokenHolders::insert(&reaped, 624_538);
+            frame_system::Account::<Runtime>::mutate(&reaped, |a| {
+                a.providers = 0;
+                a.consumers = 0;
+                a.data.free = 0;
+            });
+
+            // Without providers inc_consumers_without_limit refuses, so the count is set directly.
+            assert!(ClearRewardsAndMigrationLocks::add_consumer_ref_if_missing(&reaped));
+            assert_eq!(consumers(12), 1);
+            assert!(!ClearRewardsAndMigrationLocks::add_consumer_ref_if_missing(&reaped));
+            frame_system::Account::<Runtime>::mutate(&reaped, |a| a.consumers = 0);
+
+            let _ = ClearRewardsAndMigrationLocks::on_runtime_upgrade();
+
+            // Account 1: lock gone and the added ref released again; the account stays.
+            assert_eq!(lock_of(&account(1), REWARDS_LOCK_ID), None);
+            assert_eq!(consumers(1), 0);
+            assert_eq!(frozen(&account(1)), 0);
+            assert_eq!(frame_system::Account::<Runtime>::get(account(1)).data.free, 10_000 * PDEX);
+            // Account 8 keeps its staking lock and now holds the ref it should have had.
+            assert_eq!(lock_of(&account(8), REWARDS_LOCK_ID), None);
+            assert_eq!(lock_of(&account(8), PDEX_MIGRATION_LOCK_ID), None);
+            assert_eq!(lock_of(&account(8), STAKING_LOCK_ID), Some(200 * PDEX));
+            assert_eq!(consumers(8), 1);
+            // The reaped account is gone entirely: lock and account entry.
+            assert!(pallet_balances::Locks::<Runtime>::get(&reaped).is_empty());
+            assert!(!frame_system::Account::<Runtime>::contains_key(&reaped));
+            // Accounts that had their ref are unaffected by the extra step.
+            assert_eq!(consumers(5), 0);
+            assert_eq!(lock_of(&account(5), PDEX_MIGRATION_LOCK_ID), None);
         });
     }
 
