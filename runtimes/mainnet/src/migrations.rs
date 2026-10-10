@@ -1254,7 +1254,15 @@ mod tests {
             .build_storage()
             .unwrap()
             .into();
-        ext.execute_with(|| frame_system::Pallet::<Runtime>::set_block_number(NOW));
+        ext.execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(NOW);
+            // The system genesis records this runtime (392) as the last upgrade, so the guard
+            // would skip the migration. Mainnet's last upgrade is 373.
+            frame_system::LastRuntimeUpgrade::<Runtime>::put(frame_system::LastRuntimeUpgradeInfo {
+                spec_version: 373u32.into(),
+                spec_name: "node".into(),
+            });
+        });
         ext
     }
 
