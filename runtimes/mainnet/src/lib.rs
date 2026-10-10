@@ -2846,6 +2846,10 @@ type Migrations = (
     // This removes the "ormlvest" Currency lock from all 13 affected accounts so their
     // tokens are not permanently frozen, then wipes the orphaned storage.
     migrations::ClearOrmlVestingLocks<Runtime>,
+    // Rewards and PDEXMigration were removed the same way. This removes their REWARDID and
+    // pdexlock locks wherever the old pallet's own unlock rule is met (on mainnet today: all 732
+    // REWARDID and all 954 pdexlock locks) and leaves every other lock in place. Runs once.
+    migrations::ClearRewardsAndMigrationLocks,
     // SDK cleanup (polkadot-sdk PR #5892): releases the bonds of legacy treasury proposals that
     // were never approved and removes them. Mainnet: #62, #69, #72, #81, 14,893.14 PDEX of bonds.
     // Approved proposals are left alone. Idempotent: a second run finds nothing to release.
