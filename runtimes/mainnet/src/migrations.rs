@@ -479,6 +479,17 @@ parameter_types! {
 /// `RemovePallet` migration.
 pub type ClearOrderbookCommittee = RemovePallet<OrderbookCommitteeStr, RocksDbWeight>;
 
+parameter_types! {
+    pub const RandomnessCollectiveFlipStr: &'static str = "RandomnessCollectiveFlip";
+}
+
+/// ClearRandomnessCollectiveFlip
+///
+/// Mainnet still holds one `RandomnessCollectiveFlip::RandomMaterial` key (2,594 bytes) left by a
+/// runtime older than 373; no runtime since has had the pallet. Wipes it with the framework's
+/// `RemovePallet` migration. Idempotent: a second run finds nothing under the prefix.
+pub type ClearRandomnessCollectiveFlip = RemovePallet<RandomnessCollectiveFlipStr, RocksDbWeight>;
+
 /// C6 Migration — RebuildLmpPoolIdIndex
 ///
 /// Adds a reverse index `pool_id → (market, market_maker)` to the LMP pallet

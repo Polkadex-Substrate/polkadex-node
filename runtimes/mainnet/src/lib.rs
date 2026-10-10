@@ -2813,6 +2813,8 @@ type Migrations = (
     migrations::ClearLegacySudoKey,
     // F-029: wipe orphaned OrderbookCommittee storage — governed OCEX, now removed
     migrations::ClearOrderbookCommittee,
+    // Orphaned RandomMaterial key from a pre-373 runtime (the pallet is not in this runtime).
+    migrations::ClearRandomnessCollectiveFlip,
     // Pallet storage version migrations
     migrations::StakingStorageVersionMigration<Runtime>,
     migrations::SessionStorageVersionMigration<Runtime>,
