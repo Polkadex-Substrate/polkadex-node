@@ -134,7 +134,7 @@ use ismp::host::StateMachine; // still referenced by some type bounds
 pub mod impls;
 #[cfg(not(feature = "runtime-benchmarks"))]
 use impls::AllianceIdentityVerifier;
-use impls::{AllianceProposalProvider, Author};
+use impls::AllianceProposalProvider;
 
 /// Constant values used within the runtime.
 pub mod constants;
@@ -671,18 +671,16 @@ impl Get<AccountId> for AssetAdmin {
 //     }
 // }
 
+/// Native transaction fees and tips go entirely to the Treasury, as on mainnet spec 373.
+/// (The SDK template this runtime started from gave 20% of both to the block author.)
 pub struct DealWithFees;
 impl OnUnbalanced<NegativeImbalance> for DealWithFees {
 	fn on_unbalanceds(mut fees_then_tips: impl Iterator<Item = NegativeImbalance>) {
-		if let Some(fees) = fees_then_tips.next() {
-			// for fees, 80% to treasury, 20% to author
-			let mut split = fees.ration(80, 20);
-			if let Some(tips) = fees_then_tips.next() {
-				// for tips, if any, 80% to treasury, 20% to author (though this can be anything)
-				tips.ration_merge_into(80, 20, &mut split);
+		if let Some(mut fees) = fees_then_tips.next() {
+			for tips in fees_then_tips {
+				tips.merge_into(&mut fees);
 			}
-			Treasury::on_unbalanced(split.0);
-			Author::on_unbalanced(split.1);
+			Treasury::on_unbalanced(fees);
 		}
 	}
 }
@@ -3841,5 +3839,37 @@ mod tests {
     #[test]
     fn council_elections_fill_five_seats() {
         assert_eq!(<Runtime as pallet_elections_phragmen::Config>::DesiredMembers::get(), 5);
+    }
+
+    // Native fees and tips go entirely to the Treasury, as on mainnet spec 373. The SDK template
+    // gave 20% of both to the block author. Transaction payment hands DealWithFees the fee, then
+    // the tip; the whole sum must land in the Treasury account and nothing may be burned.
+    #[test]
+    #[allow(deprecated)]
+    fn fees_and_tips_go_entirely_to_treasury() {
+        use frame_support::traits::Currency;
+
+        assert_eq!(
+            core::any::TypeId::of::<<Runtime as pallet_transaction_payment::Config>::OnChargeTransaction>(),
+            core::any::TypeId::of::<CurrencyAdapter<Balances, DealWithFees>>(),
+        );
+        new_test_ext().execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(1);
+            let treasury = Treasury::account_id();
+            let issuance = pallet_balances::TotalIssuance::<Runtime>::get();
+
+            let fee = <Balances as Currency<AccountId>>::issue(3 * crate::constants::currency::PDEX);
+            let tip = <Balances as Currency<AccountId>>::issue(2 * crate::constants::currency::PDEX);
+            DealWithFees::on_unbalanceds([fee, tip].into_iter());
+
+            assert_eq!(
+                frame_system::Account::<Runtime>::get(&treasury).data.free,
+                5 * crate::constants::currency::PDEX,
+            );
+            assert_eq!(
+                pallet_balances::TotalIssuance::<Runtime>::get(),
+                issuance + 5 * crate::constants::currency::PDEX,
+            );
+        });
     }
 }
