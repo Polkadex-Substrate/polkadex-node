@@ -350,7 +350,8 @@ parameter_types! {
     // additional data per vote is 32 bytes (account id).
     pub const VotingBondFactor: Balance = deposit(0, 32);
     pub const TermDuration: BlockNumber = 7 * DAYS;
-    pub const DesiredMembers: u32 = 13;
+    // Council seats filled by each election: 5, as on mainnet spec 373 (the SDK template has 13).
+    pub const DesiredMembers: u32 = 5;
     pub const DesiredRunnersUp: u32 = 5;
     pub const ElectionsPhragmenPalletId: LockIdentifier = *b"phrelect";
     pub const MaxCandidates: u32 = 1000;
@@ -3834,5 +3835,11 @@ mod tests {
                     .is_ok()
             );
         });
+    }
+
+    // Each council election fills 5 seats, as on mainnet spec 373. The SDK template value is 13.
+    #[test]
+    fn council_elections_fill_five_seats() {
+        assert_eq!(<Runtime as pallet_elections_phragmen::Config>::DesiredMembers::get(), 5);
     }
 }
