@@ -132,9 +132,6 @@ use ismp::host::StateMachine; // still referenced by some type bounds
 
 /// Implementations of some helper traits passed into runtime modules as associated types.
 pub mod impls;
-#[cfg(not(feature = "runtime-benchmarks"))]
-use impls::AllianceIdentityVerifier;
-use impls::AllianceProposalProvider;
 
 /// Constant values used within the runtime.
 pub mod constants;
@@ -217,10 +214,6 @@ const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
 
 /// We allow for 4 seconds of compute with a 12 second average block time.
 const MAXIMUM_BLOCK_WEIGHT: Weight = Weight::from_parts(WEIGHT_REF_TIME_PER_SECOND.saturating_mul(4), u64::MAX);
-
-type AllianceCollective = pallet_collective::Instance3;
-
-const ALLIANCE_MOTION_DURATION_IN_BLOCKS: BlockNumber = 5 * DAYS;
 // --------------- constants ends
 
 
@@ -472,13 +465,6 @@ parameter_types! {
     pub const MinAllowedBytes: u32 = 1024;
     pub const MaxAllowedBytes: u32 = 4096;
     pub const ProposalHoldReason: RuntimeHoldReason = RuntimeHoldReason::Council(pallet_collective::HoldReason::ProposalSubmission);
-    pub const AllianceMotionDuration: BlockNumber = ALLIANCE_MOTION_DURATION_IN_BLOCKS;
-    pub const AllianceMaxProposals: u32 = 100;
-    pub const AllianceMaxMembers: u32 = 100;
-    pub const MaxFellows: u32 = AllianceMaxMembers::get();
-    pub const MaxAllies: u32 = 100;
-    pub const AllyDeposit: Balance = 10 * DOLLARS;
-    pub const RetirementPeriod: BlockNumber = ALLIANCE_MOTION_DURATION_IN_BLOCKS + (1 * DAYS);
     pub const PostUnbondPoolsWindow: u32 = 4;
 	  pub const NominationPoolsPalletId: PalletId = PalletId(*b"py/nopls");
 	  pub const MaxPointsToBalance: u8 = 10;
@@ -497,15 +483,6 @@ parameter_types! {
     pub const MixnetNumRegisterStartSlackBlocks: BlockNumber = 3;
     pub const MixnetNumRegisterEndSlackBlocks: BlockNumber = 3;
     pub const MixnetRegistrationPriority: TransactionPriority = ImOnlineUnsignedPriority::get() - 1;
-    pub const GraceStrikes: u32 = 10;
-    pub const SocietyVotingPeriod: BlockNumber = 80 * HOURS;
-    pub const ClaimPeriod: BlockNumber = 80 * HOURS;
-    pub const PeriodSpend: Balance = 500 * DOLLARS;
-    pub const MaxLockDuration: BlockNumber = 36 * 30 * DAYS;
-    pub const ChallengePeriod: BlockNumber = 7 * DAYS;
-    pub const MaxPayouts: u32 = 10;
-    pub const MaxBids: u32 = 10;
-    pub const SocietyPalletId: PalletId = PalletId(*b"py/socie");
     // The hyperbridge parachain on Polkadot
     pub const Coprocessor: Option<StateMachine> = Some(StateMachine::Kusama(4009));
     // The host state machine of this pallet
@@ -777,8 +754,6 @@ impl frame_system::Config for Runtime {
     type MaxConsumers = ConstU32<64>;
     type MultiBlockMigrator = MultiBlockMigrations;
 }
-
-impl pallet_insecure_randomness_collective_flip::Config for Runtime {}
 
 //impl frame_system::Config for Runtime {
 //    type RuntimeEvent = RuntimeEvent;
@@ -1898,24 +1873,6 @@ impl pallet_recovery::Config for Runtime {
 	type RecoveryDeposit = RecoveryDeposit;
 }
 
-impl pallet_society::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type PalletId = SocietyPalletId;
-	type Currency = Balances;
-	type Randomness = RandomnessCollectiveFlip;
-	type GraceStrikes = GraceStrikes;
-	type PeriodSpend = PeriodSpend;
-	type VotingPeriod = SocietyVotingPeriod;
-	type ClaimPeriod = ClaimPeriod;
-	type MaxLockDuration = MaxLockDuration;
-	type FounderSetOrigin = pallet_collective::EnsureProportionMoreThan<AccountId, CouncilCollective, 1, 2>;
-	type ChallengePeriod = ChallengePeriod;
-	type MaxPayouts = MaxPayouts;
-	type MaxBids = MaxBids;
-	type BlockNumberProvider = System;
-	type WeightInfo = pallet_society::weights::SubstrateWeight<Runtime>;
-}
-
 pub struct SubstrateBlockNumberProvider;
 impl BlockNumberProvider for SubstrateBlockNumberProvider {
 	type BlockNumber = BlockNumber;
@@ -2285,58 +2242,6 @@ impl pallet_asset_conversion::Config for Runtime {
     type BenchmarkHelper = pallet_asset_conversion::NativeOrWithIdFactory<u128>;
 }
 
-impl pallet_collective::Config<AllianceCollective> for Runtime {
-    type RuntimeOrigin = RuntimeOrigin;
-    type Proposal = RuntimeCall;
-    type RuntimeEvent = RuntimeEvent;
-    type MotionDuration = AllianceMotionDuration;
-    type MaxProposals = AllianceMaxProposals;
-    type MaxMembers = AllianceMaxMembers;
-    type DefaultVote = pallet_collective::PrimeDefaultVote;
-    type WeightInfo = pallet_collective::weights::SubstrateWeight<Runtime>;
-    type SetMembersOrigin = EnsureRoot<Self::AccountId>;
-    type MaxProposalWeight = MaxCollectivesProposalWeight;
-    type DisapproveOrigin = EnsureRoot<Self::AccountId>;
-    type KillOrigin = EnsureRoot<Self::AccountId>;
-    type Consideration = ();
-}
-
-impl pallet_alliance::Config for Runtime {
-    type RuntimeEvent = RuntimeEvent;
-    type Proposal = RuntimeCall;
-    type AdminOrigin = EitherOfDiverse<
-        EnsureRoot<AccountId>,
-        pallet_collective::EnsureProportionMoreThan<AccountId, AllianceCollective, 2, 3>,
-    >;
-    type MembershipManager = EitherOfDiverse<
-        EnsureRoot<AccountId>,
-        pallet_collective::EnsureProportionMoreThan<AccountId, AllianceCollective, 2, 3>,
-    >;
-    type AnnouncementOrigin = EitherOfDiverse<
-        EnsureRoot<AccountId>,
-        pallet_collective::EnsureProportionMoreThan<AccountId, AllianceCollective, 2, 3>,
-    >;
-    type Currency = Balances;
-    type Slashed = Treasury;
-    type InitializeMembers = AllianceMotion;
-    type MembershipChanged = AllianceMotion;
-    #[cfg(not(feature = "runtime-benchmarks"))]
-    type IdentityVerifier = AllianceIdentityVerifier;
-    #[cfg(feature = "runtime-benchmarks")]
-    type IdentityVerifier = ();
-    type ProposalProvider = AllianceProposalProvider;
-    type MaxProposals = AllianceMaxProposals;
-    type MaxFellows = MaxFellows;
-    type MaxAllies = MaxAllies;
-    type MaxUnscrupulousItems = ConstU32<100>;
-    type MaxWebsiteUrlLength = ConstU32<255>;
-    type MaxAnnouncementsCount = ConstU32<100>;
-    type MaxMembersCount = AllianceMaxMembers;
-    type AllyDeposit = AllyDeposit;
-    type WeightInfo = pallet_alliance::weights::SubstrateWeight<Runtime>;
-    type RetirementPeriod = RetirementPeriod;
-}
-
 //pub struct BalanceToU256;
 //impl Convert<Balance, primitive_types::U256> for BalanceToU256 {
 //    fn convert(balance: Balance) -> primitive_types::U256 {
@@ -2583,11 +2488,8 @@ mod runtime {
     // #[runtime::pallet_index(54)]
     // pub type Contracts = pallet_contracts::Pallet<Runtime>;
 
-    #[runtime::pallet_index(55)]
-    pub type Alliance = pallet_alliance::Pallet<Runtime>;
-
-    #[runtime::pallet_index(56)]
-    pub type AllianceMotion = pallet_collective::Pallet<Runtime, Instance3>;
+    // #55 was Alliance and #56 AllianceMotion - REMOVED (SDK template pallets, never on
+    // mainnet; mainnet has no storage under either prefix). Do not reuse these indices.
 
     // #[runtime::pallet_index(57)]
     // pub type NominationPools = pallet_nomination_pools::Pallet<Runtime>;
@@ -2595,8 +2497,9 @@ mod runtime {
     #[runtime::pallet_index(58)]
     pub type DelegatedStaking = pallet_delegated_staking::Pallet<Runtime>;
 
-    #[runtime::pallet_index(59)]
-    pub type RandomnessCollectiveFlip = pallet_insecure_randomness_collective_flip::Pallet<Runtime>;
+    // #59 was RandomnessCollectiveFlip - REMOVED (SDK template pallet; its only user was
+    // Society). Mainnet still holds one RandomMaterial key under this name, left by a runtime
+    // older than 373; nothing reads it. Do not reuse this index.
 
     #[runtime::pallet_index(60)]
     pub type SafeMode = pallet_safe_mode::Pallet<Runtime>;
@@ -2619,8 +2522,8 @@ mod runtime {
     #[runtime::pallet_index(66)]
     pub type Mixnet = pallet_mixnet::Pallet<Runtime>;
 
-    #[runtime::pallet_index(67)]
-    pub type Society = pallet_society::Pallet<Runtime>;
+    // #67 was Society - REMOVED (SDK template pallet, never on mainnet; mainnet has no storage
+    // under its prefix). Do not reuse this index.
 
     // #[runtime::pallet_index(68)]
     // pub type Ismp = pallet_ismp::Pallet<Runtime>;
@@ -2946,8 +2849,6 @@ type Migrations = (
     // were never approved and removes them. Mainnet: #62, #69, #72, #81, 14,893.14 PDEX of bonds.
     // Approved proposals are left alone. Idempotent: a second run finds nothing to release.
     pallet_treasury::migration::cleanup_proposals::Migration<Runtime, (), BalanceUnreserveWeight>,
-    // Existing migrations
-    pallet_alliance::migration::Migration<Runtime>,
     // pallet_identity::migration::versioned::V0ToV1<Runtime, IDENTITY_MIGRATION_KEY_LIMIT>,
     // ^ Removed: try-runtime confirmed on-chain identity storage already at v2; V0→V1 is a stale no-op.
 );
@@ -4011,5 +3912,38 @@ mod tests {
             assert_eq!(account.reserved, 50 * PDEX);
             assert_eq!(account.free, 950 * PDEX);
         });
+    }
+
+    // Alliance, AllianceMotion, Society and RandomnessCollectiveFlip were SDK template pallets.
+    // They are out of the runtime, and no other pallet index moved.
+    #[test]
+    fn template_pallets_removed_and_indices_kept() {
+        use frame_support::traits::PalletsInfoAccess;
+        let infos = AllPalletsWithSystem::infos();
+        for removed in ["Alliance", "AllianceMotion", "Society", "RandomnessCollectiveFlip"] {
+            assert!(infos.iter().all(|p| p.name != removed), "{removed} must not be in the runtime");
+        }
+        for (name, index) in [
+            ("Treasury", 16),
+            ("Bounties", 27),
+            ("Democracy", 30),
+            ("AssetConversion", 46),
+            ("PoolAssets", 51),
+            ("SkipFeelessPayment", 53),
+            ("DelegatedStaking", 58),
+            ("SafeMode", 60),
+            ("TxPause", 61),
+            ("MultiBlockMigrations", 62),
+            ("Beefy", 63),
+            ("Mmr", 64),
+            ("MmrLeaf", 65),
+            ("Mixnet", 66),
+        ] {
+            assert_eq!(
+                infos.iter().find(|p| p.name == name).map(|p| p.index),
+                Some(index),
+                "{name} keeps index {index}",
+            );
+        }
     }
 }

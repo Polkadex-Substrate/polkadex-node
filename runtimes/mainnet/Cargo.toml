@@ -66,12 +66,9 @@ pallet-authority-discovery = { workspace = true }
 pallet-child-bounties = { workspace = true }
 pallet-statement = { workspace = true }
 pallet-asset-tx-payment = { workspace = true }
-pallet-society = { workspace = true }
 xcm = { workspace = true }
 pallet-skip-feeless-payment = { workspace = true }
-pallet-alliance = { workspace = true }
 pallet-delegated-staking = { workspace = true }
-pallet-insecure-randomness-collective-flip = { workspace = true }
 pallet-safe-mode = { workspace = true }
 pallet-tx-pause = { workspace = true }
 pallet-migrations = { workspace = true }
@@ -221,9 +218,7 @@ std = [
 	"sp-storage?/std",
 	"xcm/std",
 	"pallet-skip-feeless-payment/std",
-	"pallet-alliance/std",
 	"pallet-delegated-staking/std",
-	"pallet-insecure-randomness-collective-flip/std",
 	"pallet-safe-mode/std",
 	"pallet-tx-pause/std",
 	"pallet-migrations/std",
@@ -237,7 +232,6 @@ std = [
 	"sp-genesis-builder/std",
 	"sp-consensus-aura/std",
 	"sp-keyring/std",
-	"pallet-society/std",
 	"ismp/std",
 	"pallet-ismp/std",
 	"ismp-parachain/std",
@@ -280,7 +274,6 @@ runtime-benchmarks = [
 	"pallet-safe-mode/runtime-benchmarks",
 	"pallet-scheduler/runtime-benchmarks",
 	"pallet-session/runtime-benchmarks",
-	"pallet-society/runtime-benchmarks",
 	"pallet-staking/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"pallet-hyper-fungible-token/runtime-benchmarks",

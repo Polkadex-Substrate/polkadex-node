@@ -197,7 +197,6 @@ sp-mixnet = { workspace = true }
 sp-mmr-primitives = { workspace = true }
 sp-genesis-builder = { workspace = true }
 pallet-beefy = { workspace = true }
-pallet-society = { workspace = true }
 pallet-skip-feeless-payment = { workspace = true }
 pallet-asset-conversion = { workspace = true }
 pallet-asset-conversion-tx-payment = { workspace = true }
