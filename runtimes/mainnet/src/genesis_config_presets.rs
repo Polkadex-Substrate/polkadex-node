@@ -22,7 +22,7 @@
 use crate::{
 	constants::currency::*, AccountId, AssetsConfig,
 	BabeConfig, Balance, BalancesConfig, ElectionsConfig, /* NominationPoolsConfig, */
-	RuntimeGenesisConfig, SessionConfig, SessionKeys, SocietyConfig, StakingConfig,
+	RuntimeGenesisConfig, SessionConfig, SessionKeys, StakingConfig,
 	TechnicalCommitteeConfig, BABE_GENESIS_EPOCH_CONFIG,
 	// PDEXMigrationConfig, // pallet removed from construct_runtime
 	// SudoConfig, // F-002: pallet_sudo removed from construct_runtime
@@ -112,7 +112,6 @@ pub fn kitchensink_genesis(
 		},
 		technical_committee: TechnicalCommitteeConfig { members: collective },
 		babe: BabeConfig { epoch_config: BABE_GENESIS_EPOCH_CONFIG },
-		society: SocietyConfig { pot: 0 },
 		assets: AssetsConfig {
 			// This asset is used by the NIS pallet as counterpart currency.
 			assets: vec![(9, Sr25519Keyring::Alice.to_account_id(), true, 1)],

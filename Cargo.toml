@@ -88,7 +88,6 @@ pallet-assets = { version = "48.1.0", default-features = false }
 pallet-staking = { version = "45.1.0", default-features = false }
 pallet-grandpa = { version = "45.0.0", default-features = false }
 pallet-indices = { version = "45.0.0", default-features = false }
-pallet-society = { version = "45.1.0", default-features = false }
 pallet-session = { version = "45.2.0", default-features = false }
 pallet-utility = { version = "45.0.0", default-features = false }
 pallet-treasury = { version = "44.0.0", default-features = false }
@@ -120,9 +119,7 @@ pallet-transaction-payment-rpc-runtime-api = { version = "45.0.0", default-featu
 pallet-statement = { version = "27.0.0", default-features = false }
 pallet-revive = { version = "0.12.2", default-features = false }
 pallet-skip-feeless-payment = { version = "20.0.0", default-features = false }
-pallet-alliance = { version = "44.0.0", default-features = false }
 pallet-delegated-staking = { version = "12.0.0", default-features = false }
-pallet-insecure-randomness-collective-flip = { version = "33.0.0", default-features = false }
 pallet-safe-mode = { version = "26.0.0", default-features = false }
 pallet-tx-pause = { version = "26.0.0", default-features = false }
 pallet-migrations = { version = "15.0.0", default-features = false }
