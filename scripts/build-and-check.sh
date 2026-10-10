@@ -13,6 +13,12 @@
 #   6. runs `on-runtime-upgrade --checks all --disable-mbm-checks` live against mainnet, and
 #      against a snapshot taken from the same endpoint if the live run fails
 #
+# SNAPSHOT_FILE=... (optional) saves the live state download: a `try-runtime create-snapshot`
+# started separately, before this script, writes the snapshot there and its exit code to
+# "$SNAPSHOT_FILE.exit" when it finishes. The on-runtime-upgrade step waits for that and runs
+# against the snapshot, falling back to the live run if the snapshot failed. The separate run must
+# use its own copy of the try-runtime binary, since the download step rewrites ~/tools/try-runtime.
+#
 # Every step writes <step>.log and <step>.exit to ~/results (override with RESULTS=...). A step
 # that fails does not stop the steps that do not depend on it, so one run reports everything.
 # The run ends with ~/results/SUMMARY.txt (step results, wasm hashes, test and try-runtime
@@ -41,6 +47,7 @@ RELEASE_WASM="$RESULTS/node_polkadex_runtime-392.compact.compressed.wasm"
 TRY_WASM="$RESULTS/node_polkadex_runtime-392-tryruntime.compact.compressed.wasm"
 TOOLS="$HOME/tools"
 SNAPSHOT="$HOME/snapshot/mainnet.snap"
+SNAPSHOT_FILE="${SNAPSHOT_FILE:-}"
 LOCKED="--locked"
 
 export PATH="$HOME/.cargo/bin:$TOOLS:$PATH"
@@ -187,6 +194,23 @@ upgrade_live() {
 		live --uri "$URI"
 }
 
+upgrade_prepared_snapshot() {
+	local waited=0
+	echo "== waiting for $SNAPSHOT_FILE.exit"
+	while [ ! -f "$SNAPSHOT_FILE.exit" ] && [ "$waited" -lt 5400 ]; do
+		sleep 30
+		waited=$((waited + 30))
+	done
+	[ "$(cat "$SNAPSHOT_FILE.exit" 2>/dev/null)" = "0" ] && [ -s "$SNAPSHOT_FILE" ] || {
+		echo "no usable snapshot after ${waited}s"
+		return 1
+	}
+	ls -l "$SNAPSHOT_FILE"
+	RUST_LOG=info,runtime=info try-runtime --runtime "$TRY_WASM" \
+		on-runtime-upgrade --blocktime 12000 --checks all --disable-mbm-checks \
+		snap --path "$SNAPSHOT_FILE"
+}
+
 upgrade_snapshot() {
 	local attempt
 	mkdir -p "$(dirname "$SNAPSHOT")"
@@ -269,7 +293,9 @@ else
 fi
 
 if ok 06-try-runtime-wasm && ok 07-try-runtime-cli; then
-	if ! step 08-try-runtime-live upgrade_live; then
+	if [ -n "$SNAPSHOT_FILE" ] && step 08-try-runtime-snapshot upgrade_prepared_snapshot; then
+		:
+	elif ! step 08-try-runtime-live upgrade_live; then
 		step 08b-try-runtime-snapshot upgrade_snapshot
 	fi
 else
