@@ -376,6 +376,10 @@ parameter_types! {
     pub const BountyCuratorDeposit: Permill = Permill::from_percent(50);
     pub const BountyValueMinimum: Balance = 10 * PDEX;
     pub const MaxApprovals: u32 = 100;
+    // Treasury SpendOrigin: the most one spend may move. Root has no cap; at least 3/5 of the
+    // Council may spend up to 50,000 PDEX per call.
+    pub const MaxBalance: Balance = Balance::MAX;
+    pub const CouncilSpendCap: Balance = 50_000 * PDEX;
     pub const MaxActiveChildBountyCount: u32 = 5;
     pub const ChildBountyValueMinimum: Balance = PDEX;
     pub const CuratorDepositMax: Balance = 100 * PDEX;
@@ -1567,7 +1571,17 @@ impl pallet_treasury::Config for Runtime {
 	type WeightInfo = pallet_treasury::weights::SubstrateWeight<Runtime>;
 	type SpendFunds = Bounties;
 	type MaxApprovals = MaxApprovals;
-	type SpendOrigin = frame_support::traits::NeverEnsureOrigin<u128>;
+	// Root with no cap, or at least 3/5 of the Council with a cap of 50,000 PDEX per spend. The
+	// success value is the cap that spend_local, spend and the Bounties calls approve_bounty,
+	// approve_bounty_with_curator and propose_curator check the amount against.
+	type SpendOrigin = frame_support::traits::EitherOf<
+		EnsureRootWithSuccess<AccountId, MaxBalance>,
+		frame_system::EnsureWithSuccess<
+			pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 3, 5>,
+			AccountId,
+			CouncilSpendCap,
+		>,
+	>;
 	type AssetKind = ();
 	type Beneficiary = AccountId;
 	type BeneficiaryLookup = Indices;
@@ -2879,6 +2893,12 @@ pub type Executive = frame_executive::Executive<
 // We don't have a limit in the Relay Chain.
 // const IDENTITY_MIGRATION_KEY_LIMIT: u64 = u64::MAX; // unused — V0ToV1 migration removed
 
+parameter_types! {
+	/// Weight of one `unreserve`, charged by the treasury cleanup for each bond it releases.
+	pub BalanceUnreserveWeight: Weight =
+		<<Runtime as pallet_balances::Config>::WeightInfo as pallet_balances::WeightInfo>::force_unreserve();
+}
+
 // All migrations executed on runtime upgrade as a nested tuple of types implementing
 // `OnRuntimeUpgrade`. Note: These are examples and do not need to be run directly
 // after the genesis block.
@@ -2922,6 +2942,10 @@ type Migrations = (
     // This removes the "ormlvest" Currency lock from all 13 affected accounts so their
     // tokens are not permanently frozen, then wipes the orphaned storage.
     migrations::ClearOrmlVestingLocks<Runtime>,
+    // SDK cleanup (polkadot-sdk PR #5892): releases the bonds of legacy treasury proposals that
+    // were never approved and removes them. Mainnet: #62, #69, #72, #81, 14,893.14 PDEX of bonds.
+    // Approved proposals are left alone. Idempotent: a second run finds nothing to release.
+    pallet_treasury::migration::cleanup_proposals::Migration<Runtime, (), BalanceUnreserveWeight>,
     // Existing migrations
     pallet_alliance::migration::Migration<Runtime>,
     // pallet_identity::migration::versioned::V0ToV1<Runtime, IDENTITY_MIGRATION_KEY_LIMIT>,
@@ -3576,6 +3600,7 @@ impl_runtime_apis! {
 #[cfg(test)]
 mod tests {
     use frame_system::offchain::CreateSignedTransaction;
+    use frame_support::{assert_noop, assert_ok};
 
     use super::*;
 
@@ -3870,6 +3895,121 @@ mod tests {
                 pallet_balances::TotalIssuance::<Runtime>::get(),
                 issuance + 5 * crate::constants::currency::PDEX,
             );
+        });
+    }
+
+    // Treasury SpendOrigin: Root with no cap, or at least 3/5 of the Council with a cap of
+    // 50,000 PDEX per spend. Checked on the origin itself, on spend_local and spend, and on
+    // Bounties::approve_bounty, which uses the same origin and cap.
+    #[test]
+    #[allow(deprecated)]
+    fn treasury_spend_origin_is_root_or_capped_council_three_fifths() {
+        use frame_support::traits::Currency;
+        type SpendOrigin = <Runtime as pallet_treasury::Config>::SpendOrigin;
+        const PDEX: Balance = crate::constants::currency::PDEX;
+        let cap: Balance = 50_000 * PDEX;
+        let council = |ayes: u32| -> RuntimeOrigin {
+            pallet_collective::RawOrigin::<AccountId, CouncilCollective>::Members(ayes, 5).into()
+        };
+
+        new_test_ext().execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(1);
+            let beneficiary = AccountId::from([31u8; 32]);
+            let to = || sp_runtime::MultiAddress::Id(beneficiary.clone());
+
+            // The origin and the cap it grants.
+            let max =
+                |o: RuntimeOrigin| <SpendOrigin as EnsureOrigin<RuntimeOrigin>>::try_origin(o).ok();
+            assert_eq!(max(RuntimeOrigin::root()), Some(Balance::MAX));
+            assert_eq!(max(council(3)), Some(cap));
+            assert_eq!(max(council(5)), Some(cap));
+            assert_eq!(max(council(2)), None);
+            assert_eq!(max(RuntimeOrigin::signed(beneficiary.clone())), None);
+
+            // spend_local: approved now, paid at the next spend period.
+            assert_ok!(Treasury::spend_local(council(3), cap, to()));
+            assert_noop!(
+                Treasury::spend_local(council(3), cap + 1, to()),
+                pallet_treasury::Error::<Runtime>::InsufficientPermission,
+            );
+            assert_noop!(
+                Treasury::spend_local(council(2), PDEX, to()),
+                sp_runtime::DispatchError::BadOrigin,
+            );
+            assert_ok!(Treasury::spend_local(RuntimeOrigin::root(), 1_000_000 * PDEX, to()));
+
+            // spend: the native asset (AssetKind = ()), paid by `payout` within PayoutPeriod.
+            assert_ok!(Treasury::spend(council(3), Box::new(()), cap, Box::new(to()), None));
+            assert_noop!(
+                Treasury::spend(council(3), Box::new(()), cap + 1, Box::new(to()), None),
+                pallet_treasury::Error::<Runtime>::InsufficientPermission,
+            );
+            assert_ok!(Treasury::spend(
+                RuntimeOrigin::root(),
+                Box::new(()),
+                1_000_000 * PDEX,
+                Box::new(to()),
+                None,
+            ));
+
+            // Bounties: approving a bounty takes the same origin and the bounty value must be
+            // within its cap.
+            let proposer = AccountId::from([32u8; 32]);
+            let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&proposer, 1_000 * PDEX);
+            assert_ok!(Bounties::propose_bounty(
+                RuntimeOrigin::signed(proposer.clone()),
+                cap,
+                b"within the cap".to_vec(),
+            ));
+            assert_ok!(Bounties::propose_bounty(
+                RuntimeOrigin::signed(proposer),
+                cap + 1,
+                b"over the cap".to_vec(),
+            ));
+            assert_ok!(Bounties::approve_bounty(council(3), 0));
+            assert_noop!(
+                Bounties::approve_bounty(council(3), 1),
+                pallet_treasury::Error::<Runtime>::InsufficientPermission,
+            );
+            assert_ok!(Bounties::approve_bounty(RuntimeOrigin::root(), 1));
+        });
+    }
+
+    // The Migrations tuple includes the SDK treasury cleanup (polkadot-sdk PR #5892): legacy
+    // proposals that were never approved are removed and their bonds unreserved (mainnet: #62,
+    // #69, #72, #81). A proposal in Approvals keeps its record and its bond.
+    #[test]
+    #[allow(deprecated)]
+    fn migrations_release_legacy_treasury_proposal_bonds() {
+        use frame_support::traits::{Currency, OnRuntimeUpgrade, ReservableCurrency};
+        const PDEX: Balance = crate::constants::currency::PDEX;
+
+        new_test_ext().execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(1);
+            let proposer = AccountId::from([51u8; 32]);
+            let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&proposer, 1_000 * PDEX);
+            assert_ok!(<Balances as ReservableCurrency<AccountId>>::reserve(&proposer, 300 * PDEX));
+            let proposal = |bond: Balance| pallet_treasury::Proposal {
+                proposer: proposer.clone(),
+                value: 10 * bond,
+                beneficiary: proposer.clone(),
+                bond,
+            };
+            pallet_treasury::Proposals::<Runtime>::insert(62, proposal(100 * PDEX));
+            pallet_treasury::Proposals::<Runtime>::insert(69, proposal(150 * PDEX));
+            pallet_treasury::Proposals::<Runtime>::insert(70, proposal(50 * PDEX));
+            assert_ok!(pallet_treasury::Approvals::<Runtime>::try_append(70));
+            pallet_treasury::ProposalCount::<Runtime>::put(71);
+
+            let _ = <Migrations as OnRuntimeUpgrade>::on_runtime_upgrade();
+
+            assert!(pallet_treasury::Proposals::<Runtime>::get(62).is_none());
+            assert!(pallet_treasury::Proposals::<Runtime>::get(69).is_none());
+            assert!(pallet_treasury::Proposals::<Runtime>::get(70).is_some());
+            assert_eq!(pallet_treasury::Approvals::<Runtime>::get().into_inner(), vec![70]);
+            let account = frame_system::Account::<Runtime>::get(&proposer).data;
+            assert_eq!(account.reserved, 50 * PDEX);
+            assert_eq!(account.free, 950 * PDEX);
         });
     }
 }
