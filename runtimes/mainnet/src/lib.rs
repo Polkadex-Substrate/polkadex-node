@@ -71,7 +71,7 @@ genesis_builder_helper::{build_state, get_preset},
 pub use frame_system::Call as SystemCall;
 use frame_system::{
 	limits::{BlockLength, BlockWeights},
-	EnsureRoot, EnsureSigned, RawOrigin, EnsureRootWithSuccess
+	EnsureRoot, EnsureSigned, EnsureSignedBy, RawOrigin, EnsureRootWithSuccess
 };
 
 // use orderbook_primitives::types::TradingPair; // unused after OCEX removal
@@ -2089,7 +2089,6 @@ impl pallet_asset_conversion_tx_payment::Config for Runtime {
 //    type AssetId = u32;
 //    type AssetIdParameter = parity_scale_codec::Compact<u32>;
 //    type Currency = Balances;
-//	  type CreateOrigin = AsEnsureOriginWithArg<EnsureSignedBy<AssetConversionOrigin, AccountId>>;
 //    type ForceOrigin = EnsureRoot<AccountId>;
 //    type AssetDeposit = AssetDeposit;
 //    type AssetAccountDeposit = ConstU128<DOLLARS>;
@@ -2182,7 +2181,9 @@ impl pallet_assets::Config<Instance2> for Runtime {
     type AssetId = u128;
     type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
-    type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
+    // Users cannot create pool assets: LP token ids are sequential and public, so a
+    // user-created asset at the next id would block `create_pool` with `InUse`.
+    type CreateOrigin = AsEnsureOriginWithArg<EnsureSignedBy<AssetConversionOrigin, AccountId>>;
     // F-072: PoolAssets force-operations (force_create/force_asset_status/etc.) are
     // Root-only, not Root-or-HalfCouncil — pool asset lifecycle shouldn't be
     // council-gated the same way general user-created assets are.
@@ -3945,5 +3946,37 @@ mod tests {
                 "{name} keeps index {index}",
             );
         }
+    }
+
+    // PoolAssets ids are created only by the asset-conversion pallet, for LP tokens. A signed
+    // account, even a funded one, is refused, so nobody can squat the next LP token id and make
+    // create_pool fail. The pallet's own account passes the origin check.
+    #[test]
+    fn pool_assets_create_is_refused_for_signed_accounts() {
+        use frame_support::traits::Currency;
+        new_test_ext().execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(1);
+            let user = AccountId::from([41u8; 32]);
+            let _ = <Balances as Currency<AccountId>>::make_free_balance_be(
+                &user,
+                1_000 * crate::constants::currency::PDEX,
+            );
+            assert_noop!(
+                PoolAssets::create(
+                    RuntimeOrigin::signed(user.clone()),
+                    0u128.into(),
+                    sp_runtime::MultiAddress::Id(user),
+                    1,
+                ),
+                sp_runtime::DispatchError::BadOrigin,
+            );
+
+            type CreateOrigin = <Runtime as pallet_assets::Config<Instance2>>::CreateOrigin;
+            assert!(<CreateOrigin as EnsureOriginWithArg<RuntimeOrigin, u128>>::try_origin(
+                RuntimeOrigin::signed(AssetConversionOrigin::get()),
+                &0u128,
+            )
+            .is_ok());
+        });
     }
 }
