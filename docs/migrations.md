@@ -21,9 +21,11 @@
 | `FixBalancesFrozen` | ✅ Applied | ✅ Yes | Yes |
 | `FixCouncilPrime` | ✅ Applied | ✅ Yes | Yes |
 | `ClearOffenceReports` | ✅ Applied | ✅ Yes | Yes |
+| `ClearRandomnessCollectiveFlip` | New in 392; ran in try-runtime and on the mainnet-state soak | ✅ Yes | Yes |
+| `ClearRewardsAndMigrationLocks` | New in 392; ran in try-runtime and on the mainnet-state soak | ✅ Yes | Yes |
+| `pallet_treasury::migration::cleanup_proposals::Migration` | New in 392; ran in try-runtime and on the mainnet-state soak | ✅ Yes | Yes |
 | `TestnetOcexStateReset` | ✅ Applied (spec 387) | ❌ **Testnet only** | **Must remove before mainnet** |
 | `ResetTestnetAssetSupply` | ✅ Applied (spec 389) | ❌ **Testnet only** | **Must remove before mainnet** |
-| `pallet_alliance::migration::Migration` | ✅ Applied | ✅ Yes | Yes |
 | `pallet_contracts::Migration` | ✅ Applied | ✅ Yes | Yes |
 | `pallet_identity::migration::versioned::V0ToV1` | ✅ Applied | ✅ Yes | Yes |
 
@@ -106,9 +108,26 @@ These all follow the same pattern: compare on-chain storage version with in-code
 
 ---
 
-#### `pallet_alliance::migration::Migration<Runtime>`
-- **What it does:** Standard Alliance pallet upstream migration. Idempotent — checks storage version internally.
-- **Mainnet:** Required.
+#### `ClearRandomnessCollectiveFlip`
+- **What it does:** `RemovePallet` for the `RandomnessCollectiveFlip` prefix. Mainnet still holds one `RandomnessCollectiveFlip::RandomMaterial` key (2,594 bytes) left by a runtime older than 373; no runtime since has had the pallet, and 392 does not either.
+- **Guard:** None needed. A second run finds nothing under the prefix.
+- **Mainnet:** Required. try-runtime at block 13,204,927 removed the one key and found none left.
+- **After first run:** Remove from the tuple.
+
+---
+
+#### `ClearRewardsAndMigrationLocks`
+- **What it does:** Rewards and PDEXMigration were removed from `construct_runtime!` without a cleanup migration, so their locks stay with no call left that can release them: `REWARDID` on 732 accounts (319,287.14 PDEX) and `pdexlock` on 954 accounts (404,434.83 PDEX). It removes each lock that the old pallet would release at the current block under mainnet spec 373's rules: `REWARDID` when `Rewards::claim` would succeed (no block condition), `pdexlock` when `PDEXMigration::Operational` is set and `LockedTokenHolders(who) + 201,600 <= now`. Any other lock stays. An account that holds such a lock without the consumer ref Balances expects (one reaped account on mainnet) gets the ref first, so the removal does not underflow.
+- **Guard:** `last_runtime_upgrade_spec_version() <= 391`: runs once, upgrading into 392.
+- **Mainnet:** Required. try-runtime at block 13,204,927 removed all 732 `REWARDID` and all 954 `pdexlock` locks and added the one missing consumer ref. On a fork of mainnet state, block numbers restart at 0, so the `pdexlock` rule is not met there and those locks stay; that is a fork artifact.
+- **After first run:** Remove from the tuple.
+
+---
+
+#### `pallet_treasury::migration::cleanup_proposals::Migration<Runtime, (), BalanceUnreserveWeight>`
+- **What it does:** The SDK's cleanup (polkadot-sdk PR #5892). Releases the bonds of legacy treasury proposals that were never approved and removes the proposals. Approved proposals are left alone. On mainnet: proposals #62, #69, #72 and #81, 14,893.14 PDEX of bonds.
+- **Guard:** None needed. A second run finds nothing to release.
+- **Mainnet:** Required. try-runtime released the 4 bonds and left proposals and approvals at (0, 0).
 - **After first run:** Remove from the tuple.
 
 ---
