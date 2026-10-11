@@ -50,10 +50,10 @@ One line per target stash: stash, role, bonded, active, free, expected trim, act
 totals. After it, with or without `--payee`, come the stashes whose payee is still the deprecated
 `Controller`, each with its controller, and a `# payee summary` line.
 
-Then the sweep:
+Then the sweep, here with the payee pass:
 
 ```bash
-python3 migrate_currency.py --rpc ws://127.0.0.1:9944 --signer-file ~/ops-signer.secret \
+python3 migrate_currency.py --rpc ws://127.0.0.1:9944 --signer-file ~/ops-signer.secret --payee \
   --out sweep.jsonl > sweep.log 2>&1
 ```
 
