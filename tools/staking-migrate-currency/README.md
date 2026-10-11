@@ -22,7 +22,8 @@ On mainnet state of 10 Oct 2026: 1,625 of 3,410 stashes cannot hold their full b
 73 validators end below the 100 PDEX `MinValidatorBond`: 71 of them by at most 1 PDEX, 2 by about
 65.5 PDEX.
 
-The script sends only `Staking.migrate_currency` calls.
+The script sends only `Staking.migrate_currency` calls. With `--payee` it then runs a second pass that
+sends only `Staking.update_payee` calls; see [Payee pass](#payee-pass---payee).
 
 ## Requirements
 
@@ -45,8 +46,9 @@ python3 migrate_currency.py --rpc ws://127.0.0.1:9944 --dry-run > dryrun.txt
 ```
 
 One line per target stash: stash, role, bonded, active, free, expected trim, active bond after, and
-`BELOW_MIN(top_up X)` for a validator that ends below `MinValidatorBond`. The `# summary` line at the
-end has the totals.
+`BELOW_MIN(top_up X)` for a validator that ends below `MinValidatorBond`. The `# summary` line has the
+totals. After it, with or without `--payee`, come the stashes whose payee is still the deprecated
+`Controller`, each with its controller, and a `# payee summary` line.
 
 Then the sweep:
 
@@ -59,6 +61,7 @@ Options:
 
 - `--all-locked` also migrates the stashes that can hold their full bond (no trim). Payouts do not
   need it: those stashes switch by themselves at their next ledger update.
+- `--payee` runs the payee pass after the currency pass (below).
 - `--wave-size N`: calls per wave, default 50.
 - `--out FILE`: the JSONL output, default `migrate_currency-<UTC time>.jsonl`. The summary goes to
   `FILE.summary.json`.
@@ -73,10 +76,11 @@ stalls for 15 minutes. Running it again is safe: migrated stashes are no longer 
 
 ## Output
 
-One JSONL line per stash: `status` (`ok`, `error` or `skipped`), the error name, block, extrinsic
-index and hash, nonce, attempt, `fee` charged, `force_withdraw` from `CurrencyMigrated`, the expected
-trim, `free_plus_reserved_unchanged`, and the stash's ledger, free, reserved, frozen, staking lock
-and staking hold `before` (parent block) and `after` (inclusion block).
+One JSONL line per stash and pass (`pass` is `currency` or `payee`). A currency line has `status`
+(`ok`, `error` or `skipped`), the error name, block, extrinsic index and hash, nonce, attempt, `fee`
+charged, `force_withdraw` from `CurrencyMigrated`, the expected trim, `free_plus_reserved_unchanged`,
+and the stash's ledger, free, reserved, frozen, staking lock and staking hold `before` (parent block)
+and `after` (inclusion block). A payee line is described under the payee pass.
 
 The summary, printed at the end and saved to `FILE.summary.json`:
 
@@ -95,6 +99,8 @@ The summary, printed at the end and saved to `FILE.summary.json`:
   between before treating a change as a sweep problem.
 - the trimmed total matches the dry run, unless stakes changed in between
 - the list of validators below the minimum, which goes to those validators
+- with `--payee`: `payee errors: none`, `payee fees charged: 0.0000`, every destination unchanged,
+  and `Controller payees left: 0`
 
 ## Validators below the minimum
 
@@ -109,6 +115,28 @@ stash, then sign `staking.bondExtra(shortfall)` with the stash.
 `staking.migrateCurrency(stash)` from any account, for example in Polkadot.js Apps under Developer >
 Extrinsics. It is free when it succeeds and fails with `AlreadyMigrated` for a stash that has already
 switched.
+
+## Payee pass (`--payee`)
+
+Some stashes still have the deprecated `RewardDestination::Controller` as their `Staking.Payee`: 29
+on mainnet state of 10 Oct 2026, 17 of them nominators and none a validator. pallet-staking 45.1.0
+still pays them, to their controller (`Staking.Bonded(stash)`), but every payout that includes one
+makes each node log a `runtime::defensive` error: "Paying out controller as reward destination
+which is deprecated and should be migrated." 11 of the 200 era-1839 exposures include such a stash.
+
+`staking.updatePayee(controller)` changes that payee to `Account(<the same controller>)`. Rewards go
+to the same account as before, and the error line stops. The call is permissionless, and its fee is
+refunded when it succeeds.
+
+With `--payee`, after the currency pass, the script sends one `Staking.update_payee` per stash whose
+payee is `Controller`, and nothing else, the same way as the currency pass: explicit nonces, waves,
+inclusion then finality, and a dropped call sent again alone after an on-chain check that the payee
+is still `Controller`. A stash with no bond has no controller to pass and is only listed.
+
+Each payee line in the JSONL has the controller, `payee_before`, `payee_after`, `fee` and
+`destination_unchanged`: true when the payee was `Controller` and is now `Account` of that same
+controller. The summary adds the counts, errors, fees, the number of unchanged destinations and the
+`Controller` payees left, which should be none.
 
 ## Rehearsal
 
@@ -125,3 +153,13 @@ through the governance path:
 - After it, the same two payouts succeeded (96 and 7 rewards paid). On five trimmed stashes, free
   balance plus hold equalled the free balance before.
 - No call was dropped, so the resubmission path did not run.
+
+Payee pass, on the same chain on 11 Oct 2026, after the sweep:
+
+- The dry run listed 29 stashes with the `Controller` payee: 17 nominators and 12 idle stashes, 16
+  of them with a controller other than the stash.
+- `--payee` changed all 29 in one wave, one block, in 38 seconds: no errors, 0 PDEX in fees. Each one
+  now has `Account` of the controller it paid before, and no `Controller` payee is left.
+- A `payout_stakers(v, 1839)` whose exposure holds one of them then paid that nominator's reward to
+  its controller, the same account as before (its free balance rose by exactly the reward), and no
+  node logged an error or a warning.

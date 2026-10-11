@@ -15,6 +15,11 @@ This script submits only Staking.migrate_currency calls. By default it targets e
 the staking lock that cannot hold its full bond; --all-locked targets every stash still on the lock.
 Re-running it is safe: a stash that is already migrated is no longer a target.
 
+With --payee it then runs a second pass that submits only Staking.update_payee calls: every stash
+whose Staking.Payee is still the deprecated Controller gets Account(controller), the account its
+rewards already go to. Paying such a stash makes pallet-staking log a runtime::defensive error on
+every node; update_payee is permissionless and waives the fee when it succeeds.
+
 See README.md next to this file for the procedure.
 """
 import argparse
@@ -34,6 +39,12 @@ STALL_BLOCKS = 4          # blocks without a new inclusion before the pool is ch
 FINALITY_TIMEOUT = 900    # seconds to wait for finality before giving up
 MAX_ATTEMPTS = 3          # first submission plus resubmissions of a dropped call
 CHUNK = 400               # storage keys per state_queryStorageAt request
+SKIP = {  # why a stash is skipped: (before its wave, before resubmitting a dropped call)
+    "currency": ("no staking lock before submission (already migrated)",
+                 "call dropped; stash no longer on the staking lock before resubmission"),
+    "payee": ("payee no longer Controller before submission",
+              "call dropped; payee no longer Controller before resubmission"),
+}
 
 
 def utc():
@@ -240,6 +251,41 @@ def print_plan(c, rows, stats, min_bond, block_n, all_locked):
     return summary
 
 
+def payee_plan(c, block_hash, validators):
+    """Stashes whose Staking.Payee is still the deprecated Controller. RewardDestination::Controller pays
+    Staking.Bonded(stash), the controller, so Account(controller) keeps the same destination."""
+    payees = {k.value: v.value for k, v in c.s.query_map("Staking", "Payee", page_size=1000, block_hash=block_hash)}
+    stashes = sorted(st for st, v in payees.items() if v == "Controller")
+    raw = c.multi([((st, k), "Staking", item, [st]) for st in stashes
+                   for k, item in (("b", "Bonded"), ("n", "Nominators"))], block_hash)
+    ledgers = c.multi([(st, "Staking", "Ledger", [raw[(st, "b")]]) for st in stashes if raw.get((st, "b"))],
+                      block_hash)
+    rows = []
+    for st in stashes:
+        ctrl, led = raw.get((st, "b")), ledgers.get(st)
+        rows.append({"stash": st, "role": "validator" if st in validators else "nominator" if raw.get((st, "n"))
+                     else "idle", "controller": ctrl, "bonded": bool(ctrl and led and led["stash"] == st),
+                     "payee_after": {"Account": ctrl} if ctrl else None})
+    return rows
+
+
+def print_payee_plan(rows, enabled):
+    print(f"# payee pass{'' if enabled else ' (not sent without --payee)'}: stashes whose Staking.Payee is the "
+          f"deprecated Controller; update_payee sets Account(controller), the account their rewards go to now")
+    print("# stash role controller payee_after")
+    for r in rows:
+        dest = f"Account({r['controller']})" if r["bonded"] else "NOT_BONDED(update_payee cannot fix it)"
+        print(f"{r['stash']} {r['role']} {r['controller']} {dest}")
+    targets = [r for r in rows if r["bonded"]]
+    summary = {"controller_payees": len(rows), "targets": len(targets), "not_bonded": len(rows) - len(targets),
+               "validators": sum(r["role"] == "validator" for r in targets),
+               "nominators": sum(r["role"] == "nominator" for r in targets),
+               "idle": sum(r["role"] == "idle" for r in targets),
+               "controller_differs_from_stash": sum(r["controller"] != r["stash"] for r in targets)}
+    print("# payee summary " + json.dumps(summary))
+    return summary
+
+
 class Sweep:
     def __init__(self, c, kp, out_path, validators, min_bond):
         self.c, self.kp, self.validators, self.min_bond = c, kp, validators, min_bond
@@ -247,9 +293,11 @@ class Sweep:
         self.rows = []           # every row written, in order
         self.open = {}           # tx hash -> tx, submitted and not yet found in a finalized block
         self.fin_scanned = None  # last finalized block already searched for our calls
+        self.kind = "currency"   # the pass that run() works on: "currency" or "payee"
+        self.controllers = {}    # payee pass: stash -> controller
 
     def write(self, row):
-        row = {"t": utc(), **row}
+        row = {"t": utc(), "pass": self.kind, **row}
         self.rows.append(row)
         self.out.write(json.dumps(row, default=str) + "\n")
         self.out.flush()
@@ -261,7 +309,10 @@ class Sweep:
         nonce = int(self.c.rpc("system_accountNextIndex", [self.kp.ss58_address]))
         txs = []
         for st in stashes:
-            call = self.c.s.compose_call("Staking", "migrate_currency", {"stash": st})
+            if self.kind == "payee":
+                call = self.c.s.compose_call("Staking", "update_payee", {"controller": self.controllers[st]})
+            else:
+                call = self.c.s.compose_call("Staking", "migrate_currency", {"stash": st})
             xt = self.c.s.create_signed_extrinsic(call=call, keypair=self.kp, nonce=nonce,
                                                   era={"period": MORTAL_PERIOD, "current": birth})
             h = xt_hash(bytes(xt.data.data))
@@ -272,7 +323,8 @@ class Sweep:
                 err = e.args[0] if e.args else str(e)
                 if not (isinstance(err, dict) and err.get("code") == 1013):  # 1013: already in the pool
                     return txs, (st, err)
-            txs.append({"stash": st, "hash": h, "nonce": nonce, "birth": birth, "attempt": attempt})
+            txs.append({"stash": st, "hash": h, "nonce": nonce, "birth": birth, "attempt": attempt,
+                        "kind": self.kind})
             self.open[h] = txs[-1]
             nonce += 1
         return txs, None
@@ -327,6 +379,12 @@ class Sweep:
             self.record(m, h, items)
 
     def record(self, m, h, items):
+        payee = [(t, i) for t, i in items if t["kind"] == "payee"]
+        if payee:
+            self.record_payee(m, h, payee)
+        items = [(t, i) for t, i in items if t["kind"] == "currency"]
+        if not items:
+            return
         stashes = [t["stash"] for t, _ in items]
         before = self.c.snapshot(stashes, self.c.block(h)["parent"])
         after = self.c.snapshot(stashes, h)
@@ -341,7 +399,7 @@ class Sweep:
             mig = [e["attributes"] for e in evs if name(e) == "Staking.CurrencyMigrated"]
             b, a = before[t["stash"]], after[t["stash"]]
             is_val = t["stash"] in self.validators
-            self.write({"stash": t["stash"], "status": "ok" if ok else "error", "error": err,
+            self.write({"stash": t["stash"], "pass": "currency", "status": "ok" if ok else "error", "error": err,
                         "block": m, "block_hash": h, "extrinsic_index": idx, "extrinsic_hash": t["hash"],
                         "nonce": t["nonce"], "attempt": t["attempt"], "fee": fee,
                         "force_withdraw": int(mig[0]["force_withdraw"]) if mig else None,
@@ -351,6 +409,30 @@ class Sweep:
                         "free_plus_reserved_unchanged": b["free"] + b["reserved"] == a["free"] + a["reserved"],
                         "before": b, "after": a})
 
+    def record_payee(self, m, h, items):
+        """update_payee: the payee before (parent block) and after (inclusion block). The destination is
+        unchanged when Controller, which pays Staking.Bonded(stash), became Account of that controller."""
+        stashes = [t["stash"] for t, _ in items]
+        read = lambda bh: self.c.multi([((st, k), "Staking", item, [st]) for st in stashes
+                                        for k, item in (("p", "Payee"), ("b", "Bonded"))], bh)
+        before, after = read(self.c.block(h)["parent"]), read(h)
+        for t, idx in items:
+            st = t["stash"]
+            evs = self.c.xt_events(h, idx)
+            name = lambda e: f"{e['module_id']}.{e['event_id']}"
+            ok = any(name(e) == "System.ExtrinsicSuccess" for e in evs)
+            err = next((self.c.module_error(e["attributes"]["dispatch_error"]) for e in evs
+                        if name(e) == "System.ExtrinsicFailed"), None)
+            fee = sum(int(e["attributes"]["actual_fee"]) for e in evs
+                      if name(e) == "TransactionPayment.TransactionFeePaid")
+            ctrl, p0, p1 = before.get((st, "b")), before.get((st, "p")), after.get((st, "p"))
+            self.write({"stash": st, "pass": "payee", "status": "ok" if ok else "error", "error": err,
+                        "block": m, "block_hash": h, "extrinsic_index": idx, "extrinsic_hash": t["hash"],
+                        "nonce": t["nonce"], "attempt": t["attempt"], "fee": fee,
+                        "validator": st in self.validators, "controller": ctrl,
+                        "payee_before": p0, "payee_after": p1,
+                        "destination_unchanged": p0 == "Controller" and p1 == {"Account": ctrl}})
+
     def settle(self, txs, from_n):
         """Inclusion, then finality, then results. Returns the calls not found in a finalized block."""
         top = self.wait_inclusion(txs, from_n)
@@ -358,8 +440,14 @@ class Sweep:
         self.scan_finalized()
         return [t for t in txs if t["hash"] in self.open]
 
-    def still_locked(self, stashes):
-        cur = self.c.snapshot(stashes, self.c.hash_at(self.c.best()))
+    def still_needed(self, stashes):
+        """The stashes that still need this pass's call at the best block: still on the staking lock,
+        or (payee pass) payee still Controller."""
+        bh = self.c.hash_at(self.c.best())
+        if self.kind == "payee":
+            cur = self.c.multi([(st, "Staking", "Payee", [st]) for st in stashes], bh)
+            return [st for st in stashes if cur.get(st) == "Controller"]
+        cur = self.c.snapshot(stashes, bh)
         return [st for st in stashes if cur[st]["staking_lock"] > 0]
 
     def skip(self, st, why):
@@ -367,8 +455,9 @@ class Sweep:
                     "validator": st in self.validators})
 
     def resubmit(self, t):
-        """Send a dropped call again, alone, after an on-chain check that the stash is still on the lock.
-        The new call takes the next free nonce, which is the dropped call's nonce, so at most one lands."""
+        """Send a dropped call again, alone, after an on-chain check that the stash still needs it (still
+        on the lock, or payee still Controller). The new call takes the next free nonce, which is the
+        dropped call's nonce, so at most one lands."""
         st, attempt, mine = t["stash"], t["attempt"], [t["hash"]]
         try:
             while True:
@@ -376,8 +465,8 @@ class Sweep:
                 self.scan_finalized()  # a dropped call may still have landed late
                 if any(r.get("extrinsic_hash") in mine for r in self.rows):
                     return
-                if not self.still_locked([st]):
-                    self.skip(st, "call dropped; stash no longer on the staking lock before resubmission")
+                if not self.still_needed([st]):
+                    self.skip(st, SKIP[self.kind][1])
                     return
                 if attempt >= MAX_ATTEMPTS:
                     self.write({"stash": st, "status": "error", "error": f"dropped {attempt} times", "fee": 0,
@@ -405,10 +494,10 @@ class Sweep:
         while queue:
             wave, queue = queue[:wave_size], queue[wave_size:]
             w += 1
-            live = self.still_locked(wave)
+            live = self.still_needed(wave)
             for st in wave:
                 if st not in live:
-                    self.skip(st, "no staking lock before submission (already migrated)")
+                    self.skip(st, SKIP[self.kind][0])
             if not live:
                 continue
             from_n = self.c.best()
@@ -428,8 +517,10 @@ class Sweep:
             ok = sum(r["status"] == "ok" for r in new)
             trimmed = sum(r.get("force_withdraw") or 0 for r in new if r["status"] == "ok")
             blocks = sorted({r["block"] for r in new if r.get("block")})
-            log(f"wave {w}/{waves}: {len(txs)} sent, {ok} ok, {len(new) - ok} not ok, blocks {blocks}, "
-                f"trimmed {self.c.amount(trimmed)}, {time.time() - t0:.0f}s")
+            detail = (f"destination unchanged {sum(1 for r in new if r.get('destination_unchanged'))}"
+                      if self.kind == "payee" else f"trimmed {self.c.amount(trimmed)}")
+            log(f"{self.kind} wave {w}/{waves}: {len(txs)} sent, {ok} ok, {len(new) - ok} not ok, blocks {blocks}, "
+                f"{detail}, {time.time() - t0:.0f}s")
             if new and ok == 0 and all(r["status"] == "error" for r in new):
                 sys.exit(f"every call of wave {w} failed ({Counter(r['error'] for r in new)}); stopping")
 
@@ -451,8 +542,12 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="list the target stashes and expected trims; send nothing")
     ap.add_argument("--all-locked", action="store_true",
                     help="target every stash still on the staking lock, not only those that cannot hold their bond")
+    ap.add_argument("--payee", action="store_true",
+                    help="after the currency pass, give every stash whose payee is the deprecated Controller "
+                         "Account(controller) with Staking.update_payee (same destination, no defensive error)")
     ap.add_argument("--wave-size", type=int, default=50, help="calls per wave, about one block's worth (default 50)")
-    ap.add_argument("--out", help="JSONL output, one line per stash (default migrate_currency-<UTC time>.jsonl)")
+    ap.add_argument("--out", help="JSONL output, one line per stash and pass "
+                                  "(default migrate_currency-<UTC time>.jsonl)")
     args = ap.parse_args()
     if not args.dry_run and not args.signer_file:
         ap.error("--signer-file is required unless --dry-run")
@@ -466,20 +561,27 @@ def main():
 
     fin_n, fin_h = c.finalized()
     rows, stats, validators, min_bond = plan(c, fin_h, args.all_locked)
+    payees = payee_plan(c, fin_h, validators)
     if args.dry_run:
         summary = print_plan(c, rows, stats, min_bond, fin_n, args.all_locked)
+        psummary = print_payee_plan(payees, args.payee)
         if args.out:
             with open(args.out, "a") as f:
                 for r in rows:
-                    f.write(json.dumps({"t": utc(), "status": "planned", **r}) + "\n")
-                f.write(json.dumps({"t": utc(), "dry_run_summary": summary}) + "\n")
+                    f.write(json.dumps({"t": utc(), "pass": "currency", "status": "planned", **r}) + "\n")
+                for r in payees:
+                    f.write(json.dumps({"t": utc(), "pass": "payee", "status": "planned", **r}) + "\n")
+                f.write(json.dumps({"t": utc(), "dry_run_summary": summary, "payee_summary": psummary}) + "\n")
         return 0
 
     out = args.out or time.strftime("migrate_currency-%Y%m%dT%H%M%SZ.jsonl", time.gmtime())
     trims = sum(r["expected_trim"] for r in rows)
+    ptargets = [r for r in payees if r["bonded"]] if args.payee else []
     log(f"{len(rows)} targets ({sum(r['role'] == 'validator' for r in rows)} validators), expected trim "
         f"{c.amount(trims)} {c.symbol}, waves of {args.wave_size}, results in {out}")
-    if not rows:
+    if args.payee:
+        log(f"payee pass: {len(ptargets)} stashes with the deprecated Controller payee")
+    if not rows and not ptargets:
         return 0
     ti_before = int(c.query("Balances", "TotalIssuance", [], fin_h))
     signer_before = int(c.query("System", "Account", [kp.ss58_address], fin_h)["data"]["free"])
@@ -487,16 +589,24 @@ def main():
         sys.exit(f"signer free balance {c.amount(signer_before)} is too low to pay the fee of a failed call")
     t0 = time.time()
     sweep = Sweep(c, kp, out, validators, min_bond)
-    sweep.run([r["stash"] for r in rows], args.wave_size)
+    if rows:
+        sweep.run([r["stash"] for r in rows], args.wave_size)
     elapsed = time.time() - t0
+    if ptargets:
+        t1 = time.time()
+        sweep.kind = "payee"
+        sweep.controllers = {r["stash"]: r["controller"] for r in ptargets}
+        sweep.run([r["stash"] for r in ptargets], args.wave_size)
+        p_elapsed = time.time() - t1
 
     fin_n2, fin_h2 = c.finalized()
     ti_after = int(c.query("Balances", "TotalIssuance", [], fin_h2))
     signer_after = int(c.query("System", "Account", [kp.ss58_address], fin_h2)["data"]["free"])
-    final = final_rows(sweep.rows)
+    crows = [r for r in sweep.rows if r["pass"] == "currency"]
+    final = final_rows(crows)
     status = Counter(r["status"] for r in final.values())
     errors = Counter(r["error"] for r in final.values() if r["status"] == "error")
-    fees = sum(r.get("fee") or 0 for r in sweep.rows)
+    fees = sum(r.get("fee") or 0 for r in crows)
     trimmed = sum(r.get("force_withdraw") or 0 for r in final.values() if r["status"] == "ok")
     trimmed_by = {s: r.get("force_withdraw") or 0 for s, r in final.items() if r["status"] == "ok"}
     vals = sorted(c.keys("Staking", "Validators", fin_h2))
@@ -506,8 +616,8 @@ def main():
              for v in vals if snap[v]["ledger"] and snap[v]["ledger"]["active"] < min_bond]
     summary = {"finished": utc(), "elapsed_s": round(elapsed),
                "finalized_before": fin_n, "finalized_after": fin_n2, "targets": len(rows),
-               "calls_in_blocks": sum(1 for r in sweep.rows if r.get("extrinsic_hash")),
-               "resubmitted": sum(1 for r in sweep.rows if (r.get("attempt") or 1) > 1),
+               "calls_in_blocks": sum(1 for r in crows if r.get("extrinsic_hash")),
+               "resubmitted": sum(1 for r in crows if (r.get("attempt") or 1) > 1),
                "stashes": dict(status), "errors": dict(errors),
                "fees_total": fees, "signer_free_before": signer_before, "signer_free_after": signer_after,
                "trimmed_total": trimmed, "expected_trim_total": trims,
@@ -517,6 +627,25 @@ def main():
                "total_issuance_before": ti_before, "total_issuance_after": ti_after,
                "total_issuance_unchanged": ti_before == ti_after,
                "min_validator_bond": min_bond, "validators_below_min": below}
+    payee_ok = True
+    if args.payee:
+        prows = [r for r in sweep.rows if r["pass"] == "payee"]
+        pfinal = final_rows(prows)
+        left = sorted(k.value for k, v in c.s.query_map("Staking", "Payee", page_size=1000, block_hash=fin_h2)
+                      if v.value == "Controller")
+        summary["payee"] = {
+            "elapsed_s": round(p_elapsed) if ptargets else 0, "controller_payees": len(payees),
+            "targets": len(ptargets), "not_bonded": len(payees) - sum(r["bonded"] for r in payees),
+            "calls_in_blocks": sum(1 for r in prows if r.get("extrinsic_hash")),
+            "resubmitted": sum(1 for r in prows if (r.get("attempt") or 1) > 1),
+            "stashes": dict(Counter(r["status"] for r in pfinal.values())),
+            "errors": dict(Counter(r["error"] for r in pfinal.values() if r["status"] == "error")),
+            "fees_total": sum(r.get("fee") or 0 for r in prows),
+            "destination_unchanged": sum(1 for r in pfinal.values() if r["status"] == "ok" and r["destination_unchanged"]),
+            "ok": sum(1 for r in pfinal.values() if r["status"] == "ok"),
+            "controller_payees_left": left}
+        p = summary["payee"]
+        payee_ok = not p["errors"] and p["destination_unchanged"] == p["ok"] and not left
     with open(out + ".summary.json", "w") as f:
         json.dump(summary, f, indent=1)
 
@@ -533,8 +662,18 @@ def main():
     for b in sorted(below, key=lambda x: -x["top_up"]):
         print(f"  {b['stash']} active {c.amount(b['active'])} top up {c.amount(b['top_up'])}"
               f"{' (trimmed ' + c.amount(b['trimmed_by_this_run']) + ' now)' if b['trimmed_by_this_run'] else ''}")
+    if args.payee:
+        p = summary["payee"]
+        print(f"payee pass: stashes {p['stashes']}  calls in blocks: {p['calls_in_blocks']} "
+              f"(resubmitted {p['resubmitted']})  time: {p['elapsed_s'] / 60:.1f} min")
+        print(f"payee errors: {p['errors'] or 'none'}")
+        print(f"payee fees charged: {c.amount(p['fees_total'])} {c.symbol}")
+        print(f"payee destination unchanged (Controller -> Account(same controller)): "
+              f"{p['destination_unchanged']} of {p['ok']} ok; Controller payees left: {len(p['controller_payees_left'])}")
+        for st in p["controller_payees_left"]:
+            print(f"  {st}")
     print(f"results: {out}  summary: {out}.summary.json")
-    return 0 if not errors and ti_before == ti_after else 1
+    return 0 if not errors and ti_before == ti_after and payee_ok else 1
 
 
 if __name__ == "__main__":
