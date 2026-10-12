@@ -71,8 +71,14 @@ per block. It waits until the wave is in a block, then until that block is final
 results from the finalized blocks. A call the pool dropped is sent again alone, after an on-chain
 check that the stash is still on the staking lock; the new call takes the dropped call's nonce, so
 the two cannot both land. Stashes that left the lock before their wave are skipped. The script stops
-when the pool rejects the first call of a wave, when every call of a wave fails, or when finality
-stalls for 15 minutes. Running it again is safe: migrated stashes are no longer targets.
+when the pool rejects the first call of a wave, when every call of a wave fails, or when a wave is not
+in a finalized block 15 minutes after it was sent (`SETTLE_TIMEOUT`: inclusion and finality together,
+also when the node answers but its best block stops advancing). Running it again is safe: migrated
+stashes are no longer targets.
+
+When the 15 minutes run out, the script writes each call still open to the JSONL as a `pending` line
+(stash, nonce, hash, wave, best block) and exits with code 1. Check the chain, and run the script again
+once blocks advance: stashes already migrated are skipped.
 
 ## Output
 

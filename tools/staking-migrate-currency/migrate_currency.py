@@ -36,7 +36,7 @@ from substrateinterface.exceptions import SubstrateRequestException
 STAKING_LOCK = "0x" + b"staking ".hex()
 MORTAL_PERIOD = 64        # blocks a signed call stays valid; a dropped call can never land after that
 STALL_BLOCKS = 4          # blocks without a new inclusion before the pool is checked for dropped calls
-FINALITY_TIMEOUT = 900    # seconds to wait for finality before giving up
+SETTLE_TIMEOUT = 900      # seconds a wave may wait for inclusion and finality together before the script stops
 MAX_ATTEMPTS = 3          # first submission plus resubmissions of a dropped call
 CHUNK = 400               # storage keys per state_queryStorageAt request
 SKIP = {  # why a stash is skipped: (before its wave, before resubmitting a dropped call)
@@ -287,7 +287,7 @@ def print_payee_plan(rows, enabled):
 
 
 class Sweep:
-    def __init__(self, c, kp, out_path, validators, min_bond):
+    def __init__(self, c, kp, out_path, validators, min_bond, clock=None, sleep=None):
         self.c, self.kp, self.validators, self.min_bond = c, kp, validators, min_bond
         self.out = open(out_path, "a")
         self.rows = []           # every row written, in order
@@ -295,6 +295,9 @@ class Sweep:
         self.fin_scanned = None  # last finalized block already searched for our calls
         self.kind = "currency"   # the pass that run() works on: "currency" or "payee"
         self.controllers = {}    # payee pass: stash -> controller
+        self.wave = 0            # the wave that run() works on
+        self.clock = clock or time.monotonic  # deadlines; tests pass a simulated clock and sleep
+        self.sleep = sleep or time.sleep
 
     def write(self, row):
         row = {"t": utc(), "pass": self.kind, **row}
@@ -324,14 +327,17 @@ class Sweep:
                 if not (isinstance(err, dict) and err.get("code") == 1013):  # 1013: already in the pool
                     return txs, (st, err)
             txs.append({"stash": st, "hash": h, "nonce": nonce, "birth": birth, "attempt": attempt,
-                        "kind": self.kind})
+                        "kind": self.kind, "wave": self.wave})
             self.open[h] = txs[-1]
             nonce += 1
         return txs, None
 
-    def wait_inclusion(self, txs, from_n):
+    def wait_inclusion(self, txs, from_n, deadline=None):
         """Follow the best chain until every call is in a block, or the pool no longer has the missing
-        ones, or they expired. Returns the highest block number seen with one of them."""
+        ones, or they expired. Returns the highest block number seen with one of them. Stops the script
+        at the deadline (default: SETTLE_TIMEOUT from now), also when the node answers but its best block
+        no longer advances."""
+        deadline = self.clock() + SETTLE_TIMEOUT if deadline is None else deadline
         pending = {t["hash"] for t in txs}
         expire = max(t["birth"] for t in txs) + MORTAL_PERIOD
         n, top, idle = from_n, from_n, 0
@@ -351,19 +357,21 @@ class Sweep:
                 if not pending & self.c.pool():
                     break  # dropped from the pool
                 idle = 0
-            time.sleep(1.0)
+            if self.clock() >= deadline:
+                self.stop_at_deadline(f"inclusion stalled: best #{best}, {len(pending)} of {len(txs)} calls "
+                                      f"not in a block")
+            self.sleep(1.0)
         return top
 
-    def wait_finality(self, n):
-        t0 = time.time()
+    def wait_finality(self, n, deadline=None):
+        deadline = self.clock() + SETTLE_TIMEOUT if deadline is None else deadline
         while True:
             fin, _ = self.c.finalized()
             if fin >= n:
                 return fin
-            if time.time() - t0 > FINALITY_TIMEOUT:
-                sys.exit(f"finality stalled: finalized #{fin}, waiting for #{n}. Stop and check the network; "
-                         f"re-running the script later is safe")
-            time.sleep(2.0)
+            if self.clock() >= deadline:
+                self.stop_at_deadline(f"finality stalled: finalized #{fin}, waiting for #{n}")
+            self.sleep(2.0)
 
     def scan_finalized(self):
         """Search every newly finalized block for our open calls and record what each one did."""
@@ -434,11 +442,31 @@ class Sweep:
                         "destination_unchanged": p0 == "Controller" and p1 == {"Account": ctrl}})
 
     def settle(self, txs, from_n):
-        """Inclusion, then finality, then results. Returns the calls not found in a finalized block."""
-        top = self.wait_inclusion(txs, from_n)
-        self.wait_finality(top)
+        """Inclusion, then finality, then results, within one SETTLE_TIMEOUT deadline on the monotonic
+        clock. Returns the calls not found in a finalized block."""
+        deadline = self.clock() + SETTLE_TIMEOUT
+        top = self.wait_inclusion(txs, from_n, deadline)
+        self.wait_finality(top, deadline)
         self.scan_finalized()
         return [t for t in txs if t["hash"] in self.open]
+
+    def stop_at_deadline(self, why):
+        """Record the calls that reached a finalized block, write each call still open as a pending line
+        and stop. A re-run skips the stashes that are done by then, including those a late call fixed."""
+        if self.fin_scanned is not None:
+            self.scan_finalized()
+        best = self.c.best()
+        left = sorted(self.open.values(), key=lambda t: t["nonce"])
+        for t in left:
+            self.write({"stash": t["stash"], "pass": t["kind"], "status": "pending", "error": why,
+                        "extrinsic_hash": t["hash"], "nonce": t["nonce"], "attempt": t["attempt"],
+                        "wave": t["wave"], "best_block": best, "fee": None, "force_withdraw": None,
+                        "validator": t["stash"] in self.validators})
+            log(f"pending: {t['kind']} wave {t['wave']} stash {t['stash']} nonce {t['nonce']} "
+                f"hash {t['hash']} best #{best}")
+        sys.exit(f"{why}. Stopped after {SETTLE_TIMEOUT} s with {len(left)} calls pending at best #{best} "
+                 f"(status pending in {self.out.name}). Check the network; once blocks advance, re-running "
+                 f"the script is safe: stashes already done are skipped")
 
     def still_needed(self, stashes):
         """The stashes that still need this pass's call at the best block: still on the staking lock,
@@ -478,7 +506,7 @@ class Sweep:
                 txs, rejected = self.send([st], attempt)
                 if rejected:
                     log(f"the pool rejected it: {rejected[1]}")
-                    time.sleep(12)
+                    self.sleep(12)
                     continue
                 mine.append(txs[0]["hash"])
                 self.settle(txs, from_n)
@@ -494,6 +522,7 @@ class Sweep:
         while queue:
             wave, queue = queue[:wave_size], queue[wave_size:]
             w += 1
+            self.wave = w
             live = self.still_needed(wave)
             for st in wave:
                 if st not in live:
