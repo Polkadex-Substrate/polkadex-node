@@ -15,11 +15,6 @@ This upgrade implements comprehensive democracy governance and session key rotat
 - **`pallet_mixnet`** (ID: 50) - Anonymous networking layer
 - **`pallet_migrations`** (ID: 46) - Multi-block runtime migration framework
 
-### Additional Governance
-- **`pallet_alliance`** (ID: 39) - Alliance governance system
-- **`AllianceMotion`** (Instance3) - Alliance proposal management
-- **`pallet_society`** (ID: 51) - Membership society with challenges
-
 ### Security & Management
 - **`pallet_safe_mode`** (ID: 44) - Emergency safe mode functionality
 - **`pallet_tx_pause`** (ID: 45) - Transaction pausing capabilities

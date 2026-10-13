@@ -71,7 +71,7 @@ genesis_builder_helper::{build_state, get_preset},
 pub use frame_system::Call as SystemCall;
 use frame_system::{
 	limits::{BlockLength, BlockWeights},
-	EnsureRoot, EnsureSigned, RawOrigin, EnsureRootWithSuccess
+	EnsureRoot, EnsureSigned, EnsureSignedBy, RawOrigin, EnsureRootWithSuccess
 };
 
 // use orderbook_primitives::types::TradingPair; // unused after OCEX removal
@@ -132,9 +132,6 @@ use ismp::host::StateMachine; // still referenced by some type bounds
 
 /// Implementations of some helper traits passed into runtime modules as associated types.
 pub mod impls;
-#[cfg(not(feature = "runtime-benchmarks"))]
-use impls::AllianceIdentityVerifier;
-use impls::{AllianceProposalProvider, Author};
 
 /// Constant values used within the runtime.
 pub mod constants;
@@ -217,10 +214,6 @@ const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
 
 /// We allow for 4 seconds of compute with a 12 second average block time.
 const MAXIMUM_BLOCK_WEIGHT: Weight = Weight::from_parts(WEIGHT_REF_TIME_PER_SECOND.saturating_mul(4), u64::MAX);
-
-type AllianceCollective = pallet_collective::Instance3;
-
-const ALLIANCE_MOTION_DURATION_IN_BLOCKS: BlockNumber = 5 * DAYS;
 // --------------- constants ends
 
 
@@ -350,7 +343,8 @@ parameter_types! {
     // additional data per vote is 32 bytes (account id).
     pub const VotingBondFactor: Balance = deposit(0, 32);
     pub const TermDuration: BlockNumber = 7 * DAYS;
-    pub const DesiredMembers: u32 = 13;
+    // Council seats filled by each election: 5, as on mainnet spec 373 (the SDK template has 13).
+    pub const DesiredMembers: u32 = 5;
     pub const DesiredRunnersUp: u32 = 5;
     pub const ElectionsPhragmenPalletId: LockIdentifier = *b"phrelect";
     pub const MaxCandidates: u32 = 1000;
@@ -375,6 +369,10 @@ parameter_types! {
     pub const BountyCuratorDeposit: Permill = Permill::from_percent(50);
     pub const BountyValueMinimum: Balance = 10 * PDEX;
     pub const MaxApprovals: u32 = 100;
+    // Treasury SpendOrigin: the most one spend may move. Root has no cap; at least 3/5 of the
+    // Council may spend up to 50,000 PDEX per call.
+    pub const MaxBalance: Balance = Balance::MAX;
+    pub const CouncilSpendCap: Balance = 50_000 * PDEX;
     pub const MaxActiveChildBountyCount: u32 = 5;
     pub const ChildBountyValueMinimum: Balance = PDEX;
     pub const CuratorDepositMax: Balance = 100 * PDEX;
@@ -467,13 +465,6 @@ parameter_types! {
     pub const MinAllowedBytes: u32 = 1024;
     pub const MaxAllowedBytes: u32 = 4096;
     pub const ProposalHoldReason: RuntimeHoldReason = RuntimeHoldReason::Council(pallet_collective::HoldReason::ProposalSubmission);
-    pub const AllianceMotionDuration: BlockNumber = ALLIANCE_MOTION_DURATION_IN_BLOCKS;
-    pub const AllianceMaxProposals: u32 = 100;
-    pub const AllianceMaxMembers: u32 = 100;
-    pub const MaxFellows: u32 = AllianceMaxMembers::get();
-    pub const MaxAllies: u32 = 100;
-    pub const AllyDeposit: Balance = 10 * DOLLARS;
-    pub const RetirementPeriod: BlockNumber = ALLIANCE_MOTION_DURATION_IN_BLOCKS + (1 * DAYS);
     pub const PostUnbondPoolsWindow: u32 = 4;
 	  pub const NominationPoolsPalletId: PalletId = PalletId(*b"py/nopls");
 	  pub const MaxPointsToBalance: u8 = 10;
@@ -492,15 +483,6 @@ parameter_types! {
     pub const MixnetNumRegisterStartSlackBlocks: BlockNumber = 3;
     pub const MixnetNumRegisterEndSlackBlocks: BlockNumber = 3;
     pub const MixnetRegistrationPriority: TransactionPriority = ImOnlineUnsignedPriority::get() - 1;
-    pub const GraceStrikes: u32 = 10;
-    pub const SocietyVotingPeriod: BlockNumber = 80 * HOURS;
-    pub const ClaimPeriod: BlockNumber = 80 * HOURS;
-    pub const PeriodSpend: Balance = 500 * DOLLARS;
-    pub const MaxLockDuration: BlockNumber = 36 * 30 * DAYS;
-    pub const ChallengePeriod: BlockNumber = 7 * DAYS;
-    pub const MaxPayouts: u32 = 10;
-    pub const MaxBids: u32 = 10;
-    pub const SocietyPalletId: PalletId = PalletId(*b"py/socie");
     // The hyperbridge parachain on Polkadot
     pub const Coprocessor: Option<StateMachine> = Some(StateMachine::Kusama(4009));
     // The host state machine of this pallet
@@ -670,18 +652,16 @@ impl Get<AccountId> for AssetAdmin {
 //     }
 // }
 
+/// Native transaction fees and tips go entirely to the Treasury, as on mainnet spec 373.
+/// (The SDK template this runtime started from gave 20% of both to the block author.)
 pub struct DealWithFees;
 impl OnUnbalanced<NegativeImbalance> for DealWithFees {
 	fn on_unbalanceds(mut fees_then_tips: impl Iterator<Item = NegativeImbalance>) {
-		if let Some(fees) = fees_then_tips.next() {
-			// for fees, 80% to treasury, 20% to author
-			let mut split = fees.ration(80, 20);
-			if let Some(tips) = fees_then_tips.next() {
-				// for tips, if any, 80% to treasury, 20% to author (though this can be anything)
-				tips.ration_merge_into(80, 20, &mut split);
+		if let Some(mut fees) = fees_then_tips.next() {
+			for tips in fees_then_tips {
+				tips.merge_into(&mut fees);
 			}
-			Treasury::on_unbalanced(split.0);
-			Author::on_unbalanced(split.1);
+			Treasury::on_unbalanced(fees);
 		}
 	}
 }
@@ -774,8 +754,6 @@ impl frame_system::Config for Runtime {
     type MaxConsumers = ConstU32<64>;
     type MultiBlockMigrator = MultiBlockMigrations;
 }
-
-impl pallet_insecure_randomness_collective_flip::Config for Runtime {}
 
 //impl frame_system::Config for Runtime {
 //    type RuntimeEvent = RuntimeEvent;
@@ -1568,7 +1546,17 @@ impl pallet_treasury::Config for Runtime {
 	type WeightInfo = pallet_treasury::weights::SubstrateWeight<Runtime>;
 	type SpendFunds = Bounties;
 	type MaxApprovals = MaxApprovals;
-	type SpendOrigin = frame_support::traits::NeverEnsureOrigin<u128>;
+	// Root with no cap, or at least 3/5 of the Council with a cap of 50,000 PDEX per spend. The
+	// success value is the cap that spend_local, spend and the Bounties calls approve_bounty,
+	// approve_bounty_with_curator and propose_curator check the amount against.
+	type SpendOrigin = frame_support::traits::EitherOf<
+		EnsureRootWithSuccess<AccountId, MaxBalance>,
+		frame_system::EnsureWithSuccess<
+			pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 3, 5>,
+			AccountId,
+			CouncilSpendCap,
+		>,
+	>;
 	type AssetKind = ();
 	type Beneficiary = AccountId;
 	type BeneficiaryLookup = Indices;
@@ -1885,24 +1873,6 @@ impl pallet_recovery::Config for Runtime {
 	type RecoveryDeposit = RecoveryDeposit;
 }
 
-impl pallet_society::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type PalletId = SocietyPalletId;
-	type Currency = Balances;
-	type Randomness = RandomnessCollectiveFlip;
-	type GraceStrikes = GraceStrikes;
-	type PeriodSpend = PeriodSpend;
-	type VotingPeriod = SocietyVotingPeriod;
-	type ClaimPeriod = ClaimPeriod;
-	type MaxLockDuration = MaxLockDuration;
-	type FounderSetOrigin = pallet_collective::EnsureProportionMoreThan<AccountId, CouncilCollective, 1, 2>;
-	type ChallengePeriod = ChallengePeriod;
-	type MaxPayouts = MaxPayouts;
-	type MaxBids = MaxBids;
-	type BlockNumberProvider = System;
-	type WeightInfo = pallet_society::weights::SubstrateWeight<Runtime>;
-}
-
 pub struct SubstrateBlockNumberProvider;
 impl BlockNumberProvider for SubstrateBlockNumberProvider {
 	type BlockNumber = BlockNumber;
@@ -2119,7 +2089,6 @@ impl pallet_asset_conversion_tx_payment::Config for Runtime {
 //    type AssetId = u32;
 //    type AssetIdParameter = parity_scale_codec::Compact<u32>;
 //    type Currency = Balances;
-//	  type CreateOrigin = AsEnsureOriginWithArg<EnsureSignedBy<AssetConversionOrigin, AccountId>>;
 //    type ForceOrigin = EnsureRoot<AccountId>;
 //    type AssetDeposit = AssetDeposit;
 //    type AssetAccountDeposit = ConstU128<DOLLARS>;
@@ -2212,7 +2181,9 @@ impl pallet_assets::Config<Instance2> for Runtime {
     type AssetId = u128;
     type AssetIdParameter = parity_scale_codec::Compact<u128>;
     type Currency = Balances;
-    type CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>;
+    // Users cannot create pool assets: LP token ids are sequential and public, so a
+    // user-created asset at the next id would block `create_pool` with `InUse`.
+    type CreateOrigin = AsEnsureOriginWithArg<EnsureSignedBy<AssetConversionOrigin, AccountId>>;
     // F-072: PoolAssets force-operations (force_create/force_asset_status/etc.) are
     // Root-only, not Root-or-HalfCouncil — pool asset lifecycle shouldn't be
     // council-gated the same way general user-created assets are.
@@ -2270,58 +2241,6 @@ impl pallet_asset_conversion::Config for Runtime {
     type MintMinLiquidity = MintMinLiquidity;
     #[cfg(feature = "runtime-benchmarks")]
     type BenchmarkHelper = pallet_asset_conversion::NativeOrWithIdFactory<u128>;
-}
-
-impl pallet_collective::Config<AllianceCollective> for Runtime {
-    type RuntimeOrigin = RuntimeOrigin;
-    type Proposal = RuntimeCall;
-    type RuntimeEvent = RuntimeEvent;
-    type MotionDuration = AllianceMotionDuration;
-    type MaxProposals = AllianceMaxProposals;
-    type MaxMembers = AllianceMaxMembers;
-    type DefaultVote = pallet_collective::PrimeDefaultVote;
-    type WeightInfo = pallet_collective::weights::SubstrateWeight<Runtime>;
-    type SetMembersOrigin = EnsureRoot<Self::AccountId>;
-    type MaxProposalWeight = MaxCollectivesProposalWeight;
-    type DisapproveOrigin = EnsureRoot<Self::AccountId>;
-    type KillOrigin = EnsureRoot<Self::AccountId>;
-    type Consideration = ();
-}
-
-impl pallet_alliance::Config for Runtime {
-    type RuntimeEvent = RuntimeEvent;
-    type Proposal = RuntimeCall;
-    type AdminOrigin = EitherOfDiverse<
-        EnsureRoot<AccountId>,
-        pallet_collective::EnsureProportionMoreThan<AccountId, AllianceCollective, 2, 3>,
-    >;
-    type MembershipManager = EitherOfDiverse<
-        EnsureRoot<AccountId>,
-        pallet_collective::EnsureProportionMoreThan<AccountId, AllianceCollective, 2, 3>,
-    >;
-    type AnnouncementOrigin = EitherOfDiverse<
-        EnsureRoot<AccountId>,
-        pallet_collective::EnsureProportionMoreThan<AccountId, AllianceCollective, 2, 3>,
-    >;
-    type Currency = Balances;
-    type Slashed = Treasury;
-    type InitializeMembers = AllianceMotion;
-    type MembershipChanged = AllianceMotion;
-    #[cfg(not(feature = "runtime-benchmarks"))]
-    type IdentityVerifier = AllianceIdentityVerifier;
-    #[cfg(feature = "runtime-benchmarks")]
-    type IdentityVerifier = ();
-    type ProposalProvider = AllianceProposalProvider;
-    type MaxProposals = AllianceMaxProposals;
-    type MaxFellows = MaxFellows;
-    type MaxAllies = MaxAllies;
-    type MaxUnscrupulousItems = ConstU32<100>;
-    type MaxWebsiteUrlLength = ConstU32<255>;
-    type MaxAnnouncementsCount = ConstU32<100>;
-    type MaxMembersCount = AllianceMaxMembers;
-    type AllyDeposit = AllyDeposit;
-    type WeightInfo = pallet_alliance::weights::SubstrateWeight<Runtime>;
-    type RetirementPeriod = RetirementPeriod;
 }
 
 //pub struct BalanceToU256;
@@ -2570,11 +2489,8 @@ mod runtime {
     // #[runtime::pallet_index(54)]
     // pub type Contracts = pallet_contracts::Pallet<Runtime>;
 
-    #[runtime::pallet_index(55)]
-    pub type Alliance = pallet_alliance::Pallet<Runtime>;
-
-    #[runtime::pallet_index(56)]
-    pub type AllianceMotion = pallet_collective::Pallet<Runtime, Instance3>;
+    // #55 was Alliance and #56 AllianceMotion - REMOVED (SDK template pallets, never on
+    // mainnet; mainnet has no storage under either prefix). Do not reuse these indices.
 
     // #[runtime::pallet_index(57)]
     // pub type NominationPools = pallet_nomination_pools::Pallet<Runtime>;
@@ -2582,8 +2498,9 @@ mod runtime {
     #[runtime::pallet_index(58)]
     pub type DelegatedStaking = pallet_delegated_staking::Pallet<Runtime>;
 
-    #[runtime::pallet_index(59)]
-    pub type RandomnessCollectiveFlip = pallet_insecure_randomness_collective_flip::Pallet<Runtime>;
+    // #59 was RandomnessCollectiveFlip - REMOVED (SDK template pallet; its only user was
+    // Society). Mainnet still holds one RandomMaterial key under this name, left by a runtime
+    // older than 373; nothing reads it. Do not reuse this index.
 
     #[runtime::pallet_index(60)]
     pub type SafeMode = pallet_safe_mode::Pallet<Runtime>;
@@ -2606,8 +2523,8 @@ mod runtime {
     #[runtime::pallet_index(66)]
     pub type Mixnet = pallet_mixnet::Pallet<Runtime>;
 
-    #[runtime::pallet_index(67)]
-    pub type Society = pallet_society::Pallet<Runtime>;
+    // #67 was Society - REMOVED (SDK template pallet, never on mainnet; mainnet has no storage
+    // under its prefix). Do not reuse this index.
 
     // #[runtime::pallet_index(68)]
     // pub type Ismp = pallet_ismp::Pallet<Runtime>;
@@ -2880,6 +2797,12 @@ pub type Executive = frame_executive::Executive<
 // We don't have a limit in the Relay Chain.
 // const IDENTITY_MIGRATION_KEY_LIMIT: u64 = u64::MAX; // unused — V0ToV1 migration removed
 
+parameter_types! {
+	/// Weight of one `unreserve`, charged by the treasury cleanup for each bond it releases.
+	pub BalanceUnreserveWeight: Weight =
+		<<Runtime as pallet_balances::Config>::WeightInfo as pallet_balances::WeightInfo>::force_unreserve();
+}
+
 // All migrations executed on runtime upgrade as a nested tuple of types implementing
 // `OnRuntimeUpgrade`. Note: These are examples and do not need to be run directly
 // after the genesis block.
@@ -2890,6 +2813,8 @@ type Migrations = (
     migrations::ClearLegacySudoKey,
     // F-029: wipe orphaned OrderbookCommittee storage — governed OCEX, now removed
     migrations::ClearOrderbookCommittee,
+    // Orphaned RandomMaterial key from a pre-373 runtime (the pallet is not in this runtime).
+    migrations::ClearRandomnessCollectiveFlip,
     // Pallet storage version migrations
     migrations::StakingStorageVersionMigration<Runtime>,
     migrations::SessionStorageVersionMigration<Runtime>,
@@ -2923,8 +2848,14 @@ type Migrations = (
     // This removes the "ormlvest" Currency lock from all 13 affected accounts so their
     // tokens are not permanently frozen, then wipes the orphaned storage.
     migrations::ClearOrmlVestingLocks<Runtime>,
-    // Existing migrations
-    pallet_alliance::migration::Migration<Runtime>,
+    // Rewards and PDEXMigration were removed the same way. This removes their REWARDID and
+    // pdexlock locks wherever the old pallet's own unlock rule is met (on mainnet today: all 732
+    // REWARDID and all 954 pdexlock locks) and leaves every other lock in place. Runs once.
+    migrations::ClearRewardsAndMigrationLocks,
+    // SDK cleanup (polkadot-sdk PR #5892): releases the bonds of legacy treasury proposals that
+    // were never approved and removes them. Mainnet: #62, #69, #72, #81, 14,893.14 PDEX of bonds.
+    // Approved proposals are left alone. Idempotent: a second run finds nothing to release.
+    pallet_treasury::migration::cleanup_proposals::Migration<Runtime, (), BalanceUnreserveWeight>,
     // pallet_identity::migration::versioned::V0ToV1<Runtime, IDENTITY_MIGRATION_KEY_LIMIT>,
     // ^ Removed: try-runtime confirmed on-chain identity storage already at v2; V0→V1 is a stale no-op.
 );
@@ -3577,6 +3508,7 @@ impl_runtime_apis! {
 #[cfg(test)]
 mod tests {
     use frame_system::offchain::CreateSignedTransaction;
+    use frame_support::{assert_noop, assert_ok};
 
     use super::*;
 
@@ -3833,6 +3765,224 @@ mod tests {
                 <ForceOrigin as EnsureOrigin<RuntimeOrigin>>::try_origin(RuntimeOrigin::root())
                     .is_ok()
             );
+        });
+    }
+
+    // Each council election fills 5 seats, as on mainnet spec 373. The SDK template value is 13.
+    #[test]
+    fn council_elections_fill_five_seats() {
+        assert_eq!(<Runtime as pallet_elections_phragmen::Config>::DesiredMembers::get(), 5);
+    }
+
+    // Native fees and tips go entirely to the Treasury, as on mainnet spec 373. The SDK template
+    // gave 20% of both to the block author. Transaction payment hands DealWithFees the fee, then
+    // the tip; the whole sum must land in the Treasury account and nothing may be burned.
+    #[test]
+    #[allow(deprecated)]
+    fn fees_and_tips_go_entirely_to_treasury() {
+        use frame_support::traits::Currency;
+
+        assert_eq!(
+            core::any::TypeId::of::<<Runtime as pallet_transaction_payment::Config>::OnChargeTransaction>(),
+            core::any::TypeId::of::<CurrencyAdapter<Balances, DealWithFees>>(),
+        );
+        new_test_ext().execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(1);
+            let treasury = Treasury::account_id();
+            let issuance = pallet_balances::TotalIssuance::<Runtime>::get();
+
+            let fee = <Balances as Currency<AccountId>>::issue(3 * crate::constants::currency::PDEX);
+            let tip = <Balances as Currency<AccountId>>::issue(2 * crate::constants::currency::PDEX);
+            DealWithFees::on_unbalanceds([fee, tip].into_iter());
+
+            assert_eq!(
+                frame_system::Account::<Runtime>::get(&treasury).data.free,
+                5 * crate::constants::currency::PDEX,
+            );
+            assert_eq!(
+                pallet_balances::TotalIssuance::<Runtime>::get(),
+                issuance + 5 * crate::constants::currency::PDEX,
+            );
+        });
+    }
+
+    // Treasury SpendOrigin: Root with no cap, or at least 3/5 of the Council with a cap of
+    // 50,000 PDEX per spend. Checked on the origin itself, on spend_local and spend, and on
+    // Bounties::approve_bounty, which uses the same origin and cap.
+    #[test]
+    #[allow(deprecated)]
+    fn treasury_spend_origin_is_root_or_capped_council_three_fifths() {
+        use frame_support::traits::Currency;
+        type SpendOrigin = <Runtime as pallet_treasury::Config>::SpendOrigin;
+        const PDEX: Balance = crate::constants::currency::PDEX;
+        let cap: Balance = 50_000 * PDEX;
+        let council = |ayes: u32| -> RuntimeOrigin {
+            pallet_collective::RawOrigin::<AccountId, CouncilCollective>::Members(ayes, 5).into()
+        };
+
+        new_test_ext().execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(1);
+            let beneficiary = AccountId::from([31u8; 32]);
+            let to = || sp_runtime::MultiAddress::Id(beneficiary.clone());
+
+            // The origin and the cap it grants.
+            let max =
+                |o: RuntimeOrigin| <SpendOrigin as EnsureOrigin<RuntimeOrigin>>::try_origin(o).ok();
+            assert_eq!(max(RuntimeOrigin::root()), Some(Balance::MAX));
+            assert_eq!(max(council(3)), Some(cap));
+            assert_eq!(max(council(5)), Some(cap));
+            assert_eq!(max(council(2)), None);
+            assert_eq!(max(RuntimeOrigin::signed(beneficiary.clone())), None);
+
+            // spend_local: approved now, paid at the next spend period.
+            assert_ok!(Treasury::spend_local(council(3), cap, to()));
+            assert_noop!(
+                Treasury::spend_local(council(3), cap + 1, to()),
+                pallet_treasury::Error::<Runtime>::InsufficientPermission,
+            );
+            assert_noop!(
+                Treasury::spend_local(council(2), PDEX, to()),
+                sp_runtime::DispatchError::BadOrigin,
+            );
+            assert_ok!(Treasury::spend_local(RuntimeOrigin::root(), 1_000_000 * PDEX, to()));
+
+            // spend: the native asset (AssetKind = ()), paid by `payout` within PayoutPeriod.
+            assert_ok!(Treasury::spend(council(3), Box::new(()), cap, Box::new(to()), None));
+            assert_noop!(
+                Treasury::spend(council(3), Box::new(()), cap + 1, Box::new(to()), None),
+                pallet_treasury::Error::<Runtime>::InsufficientPermission,
+            );
+            assert_ok!(Treasury::spend(
+                RuntimeOrigin::root(),
+                Box::new(()),
+                1_000_000 * PDEX,
+                Box::new(to()),
+                None,
+            ));
+
+            // Bounties: approving a bounty takes the same origin and the bounty value must be
+            // within its cap.
+            let proposer = AccountId::from([32u8; 32]);
+            let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&proposer, 1_000 * PDEX);
+            assert_ok!(Bounties::propose_bounty(
+                RuntimeOrigin::signed(proposer.clone()),
+                cap,
+                b"within the cap".to_vec(),
+            ));
+            assert_ok!(Bounties::propose_bounty(
+                RuntimeOrigin::signed(proposer),
+                cap + 1,
+                b"over the cap".to_vec(),
+            ));
+            assert_ok!(Bounties::approve_bounty(council(3), 0));
+            assert_noop!(
+                Bounties::approve_bounty(council(3), 1),
+                pallet_treasury::Error::<Runtime>::InsufficientPermission,
+            );
+            assert_ok!(Bounties::approve_bounty(RuntimeOrigin::root(), 1));
+        });
+    }
+
+    // The Migrations tuple includes the SDK treasury cleanup (polkadot-sdk PR #5892): legacy
+    // proposals that were never approved are removed and their bonds unreserved (mainnet: #62,
+    // #69, #72, #81). A proposal in Approvals keeps its record and its bond.
+    #[test]
+    #[allow(deprecated)]
+    fn migrations_release_legacy_treasury_proposal_bonds() {
+        use frame_support::traits::{Currency, OnRuntimeUpgrade, ReservableCurrency};
+        const PDEX: Balance = crate::constants::currency::PDEX;
+
+        new_test_ext().execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(1);
+            let proposer = AccountId::from([51u8; 32]);
+            let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&proposer, 1_000 * PDEX);
+            assert_ok!(<Balances as ReservableCurrency<AccountId>>::reserve(&proposer, 300 * PDEX));
+            let proposal = |bond: Balance| pallet_treasury::Proposal {
+                proposer: proposer.clone(),
+                value: 10 * bond,
+                beneficiary: proposer.clone(),
+                bond,
+            };
+            pallet_treasury::Proposals::<Runtime>::insert(62, proposal(100 * PDEX));
+            pallet_treasury::Proposals::<Runtime>::insert(69, proposal(150 * PDEX));
+            pallet_treasury::Proposals::<Runtime>::insert(70, proposal(50 * PDEX));
+            assert_ok!(pallet_treasury::Approvals::<Runtime>::try_append(70));
+            pallet_treasury::ProposalCount::<Runtime>::put(71);
+
+            let _ = <Migrations as OnRuntimeUpgrade>::on_runtime_upgrade();
+
+            assert!(pallet_treasury::Proposals::<Runtime>::get(62).is_none());
+            assert!(pallet_treasury::Proposals::<Runtime>::get(69).is_none());
+            assert!(pallet_treasury::Proposals::<Runtime>::get(70).is_some());
+            assert_eq!(pallet_treasury::Approvals::<Runtime>::get().into_inner(), vec![70]);
+            let account = frame_system::Account::<Runtime>::get(&proposer).data;
+            assert_eq!(account.reserved, 50 * PDEX);
+            assert_eq!(account.free, 950 * PDEX);
+        });
+    }
+
+    // Alliance, AllianceMotion, Society and RandomnessCollectiveFlip were SDK template pallets.
+    // They are out of the runtime, and no other pallet index moved.
+    #[test]
+    fn template_pallets_removed_and_indices_kept() {
+        use frame_support::traits::PalletsInfoAccess;
+        let infos = AllPalletsWithSystem::infos();
+        for removed in ["Alliance", "AllianceMotion", "Society", "RandomnessCollectiveFlip"] {
+            assert!(infos.iter().all(|p| p.name != removed), "{removed} must not be in the runtime");
+        }
+        for (name, index) in [
+            ("Treasury", 16),
+            ("Bounties", 27),
+            ("Democracy", 30),
+            ("AssetConversion", 46),
+            ("PoolAssets", 51),
+            ("SkipFeelessPayment", 53),
+            ("DelegatedStaking", 58),
+            ("SafeMode", 60),
+            ("TxPause", 61),
+            ("MultiBlockMigrations", 62),
+            ("Beefy", 63),
+            ("Mmr", 64),
+            ("MmrLeaf", 65),
+            ("Mixnet", 66),
+        ] {
+            assert_eq!(
+                infos.iter().find(|p| p.name == name).map(|p| p.index),
+                Some(index),
+                "{name} keeps index {index}",
+            );
+        }
+    }
+
+    // PoolAssets ids are created only by the asset-conversion pallet, for LP tokens. A signed
+    // account, even a funded one, is refused, so nobody can squat the next LP token id and make
+    // create_pool fail. The pallet's own account passes the origin check.
+    #[test]
+    fn pool_assets_create_is_refused_for_signed_accounts() {
+        use frame_support::traits::Currency;
+        new_test_ext().execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(1);
+            let user = AccountId::from([41u8; 32]);
+            let _ = <Balances as Currency<AccountId>>::make_free_balance_be(
+                &user,
+                1_000 * crate::constants::currency::PDEX,
+            );
+            assert_noop!(
+                PoolAssets::create(
+                    RuntimeOrigin::signed(user.clone()),
+                    0u128.into(),
+                    sp_runtime::MultiAddress::Id(user),
+                    1,
+                ),
+                sp_runtime::DispatchError::BadOrigin,
+            );
+
+            type CreateOrigin = <Runtime as pallet_assets::Config<Instance2>>::CreateOrigin;
+            assert!(<CreateOrigin as EnsureOriginWithArg<RuntimeOrigin, u128>>::try_origin(
+                RuntimeOrigin::signed(AssetConversionOrigin::get()),
+                &0u128,
+            )
+            .is_ok());
         });
     }
 }

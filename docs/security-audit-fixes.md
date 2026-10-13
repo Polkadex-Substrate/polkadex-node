@@ -697,7 +697,9 @@ To remove them: delete the two entries from the `type Migrations = (...)` tuple 
 **Vulnerability:** `pallet_assets::Config<Instance1>::CreateOrigin = AsEnsureOriginWithArg<EnsureSigned<AccountId>>` let any signed account create an asset with any id, including 0.
 
 **Changes made:**
-- Added `AssetsCreateOrigin`, a custom `EnsureOriginWithArg<RuntimeOrigin, u128>` impl that rejects asset id 0 for any signed origin, delegating to `EnsureSigned` otherwise. Root/`ForceOrigin` can still create id 0 via `force_create`. Wired in as `Instance1`'s `CreateOrigin`. `PoolAssets` (Instance2) left unchanged — the finding didn't target it and LP-token ids don't carry the same special meaning.
+- Added `AssetsCreateOrigin`, a custom `EnsureOriginWithArg<RuntimeOrigin, u128>` impl that rejects asset id 0 for any signed origin, delegating to `EnsureSigned` otherwise. Root/`ForceOrigin` can still create id 0 via `force_create`. Wired in as `Instance1`'s `CreateOrigin`. `PoolAssets` (Instance2) was first left unchanged, since the finding didn't target it and LP-token ids don't carry the same special meaning.
+
+**Update (PR 23):** `PoolAssets` creation is now restricted to the AssetConversion pallet account: `Instance2`'s `CreateOrigin` is `AsEnsureOriginWithArg<EnsureSignedBy<AssetConversionOrigin, AccountId>>`, as in the SDK kitchensink. LP-token ids are sequential and public, so a user-created asset at the next id would have made `create_pool` fail with `InUse`. AssetConversion creates LP tokens through `fungibles::Create`, which does not go through `CreateOrigin`, so pool creation is unaffected. A runtime test checks that a funded signed account is refused.
 
 ---
 

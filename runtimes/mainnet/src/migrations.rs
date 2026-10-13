@@ -479,6 +479,17 @@ parameter_types! {
 /// `RemovePallet` migration.
 pub type ClearOrderbookCommittee = RemovePallet<OrderbookCommitteeStr, RocksDbWeight>;
 
+parameter_types! {
+    pub const RandomnessCollectiveFlipStr: &'static str = "RandomnessCollectiveFlip";
+}
+
+/// ClearRandomnessCollectiveFlip
+///
+/// Mainnet still holds one `RandomnessCollectiveFlip::RandomMaterial` key (2,594 bytes) left by a
+/// runtime older than 373; no runtime since has had the pallet. Wipes it with the framework's
+/// `RemovePallet` migration. Idempotent: a second run finds nothing under the prefix.
+pub type ClearRandomnessCollectiveFlip = RemovePallet<RandomnessCollectiveFlipStr, RocksDbWeight>;
+
 /// C6 Migration — RebuildLmpPoolIdIndex
 ///
 /// Adds a reverse index `pool_id → (market, market_maker)` to the LMP pallet
@@ -820,3 +831,826 @@ where
     }
 }
 
+// =============================================================================
+// Locks left by the removed Rewards and PDEXMigration pallets
+// =============================================================================
+
+use crate::{AccountId, BlockNumber};
+use frame_support::traits::{LockIdentifier, LockableCurrency};
+use sp_std::collections::btree_set::BTreeSet;
+
+/// Storage of the removed Rewards and PDEXMigration pallets, declared with the exact types of
+/// mainnet spec 373 (Polkadex-Substrate/Polkadex @ a29298bb). The migration only reads it.
+pub mod legacy_locks {
+    use frame_support::{
+        storage::types::{OptionQuery, ValueQuery},
+        storage_alias, Blake2_128Concat,
+    };
+    use polkadex_primitives::{AccountId, Balance, BlockNumber};
+    use sp_core::{Decode, Encode};
+
+    /// `pallet_rewards::RewardInfo`: one reward cycle.
+    // Mirrors the on-chain layout: every field must be present even where nothing reads it.
+    #[allow(dead_code)]
+    #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+    pub struct RewardInfo {
+        pub start_block: BlockNumber,
+        pub end_block: BlockNumber,
+        pub initial_percentage: u32,
+    }
+
+    /// `pallet_rewards::RewardInfoForAccount`: one account's reward under one reward id.
+    #[allow(dead_code)]
+    #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+    pub struct RewardInfoForAccount {
+        pub total_reward_amount: Balance,
+        pub claim_amount: Balance,
+        pub is_initial_rewards_claimed: bool,
+        pub is_initialized: bool,
+        pub lock_id: [u8; 8],
+        pub last_block_rewards_claim: BlockNumber,
+        pub initial_rewards_claimable: Balance,
+        pub factor: Balance,
+    }
+
+    /// `Rewards::InitializeRewards`: reward id to reward cycle.
+    #[storage_alias(verbatim)]
+    pub type InitializeRewards =
+        StorageMap<Rewards, Blake2_128Concat, u32, RewardInfo, OptionQuery>;
+
+    /// `Rewards::Distributor`: (reward id, account) to the account's reward record.
+    #[storage_alias(verbatim)]
+    pub type Distributor = StorageDoubleMap<
+        Rewards,
+        Blake2_128Concat,
+        u32,
+        Blake2_128Concat,
+        AccountId,
+        RewardInfoForAccount,
+        OptionQuery,
+    >;
+
+    /// `PDEXMigration::Operational`: the switch that enables `mint` and `unlock`.
+    #[storage_alias(verbatim)]
+    pub type Operational = StorageValue<PDEXMigration, bool, ValueQuery>;
+
+    /// `PDEXMigration::LockedTokenHolders`: account to the block of its last migration mint.
+    #[storage_alias(verbatim)]
+    pub type LockedTokenHolders =
+        StorageMap<PDEXMigration, Blake2_128Concat, AccountId, BlockNumber, OptionQuery>;
+}
+
+/// Lock id of the removed Rewards pallet (`REWARDS_LOCK_ID` in pallets/rewards).
+pub const REWARDS_LOCK_ID: LockIdentifier = *b"REWARDID";
+/// Lock id of the removed PDEXMigration pallet (`MIGRATION_LOCK` in pallets/pdex-migration).
+pub const PDEX_MIGRATION_LOCK_ID: LockIdentifier = *b"pdexlock";
+/// `LockPeriod` of PDEXMigration on mainnet spec 373: 201,600 blocks (28 days).
+pub const PDEX_MIGRATION_LOCK_PERIOD: BlockNumber = 201_600;
+
+const CLEAR_REWARDS_AND_MIGRATION_LOCKS_FROM_SPEC: u32 = 391; // Runs once, upgrading into spec 392
+
+/// ClearRewardsAndMigrationLocks
+///
+/// Rewards and PDEXMigration were removed from construct_runtime without a cleanup migration, so
+/// their balance locks stay on mainnet with no call left that can release them: `REWARDID` on
+/// 732 accounts (319,287.14 PDEX) and `pdexlock` on 954 accounts (404,434.83 PDEX).
+///
+/// This removes each lock that the old pallet itself would release at the current block, by the
+/// rules of mainnet spec 373 (Polkadex-Substrate/Polkadex @ a29298bb):
+///
+/// - `REWARDID`: `Rewards::claim(reward_id)` succeeds when `InitializeRewards(reward_id)` exists
+///   and `Distributor(reward_id, who)` is initialised, and then removes the whole lock named in
+///   that record. There is no block-number condition.
+/// - `pdexlock`: `PDEXMigration::unlock()` succeeds when `Operational` is set and
+///   `LockedTokenHolders(who) + 201,600 <= now`, and then removes the lock.
+///
+/// A lock whose rule is not met, or whose account has no record in the old storage, stays.
+/// Each lock goes through `LockableCurrency::remove_lock`, which recomputes `frozen` from the
+/// remaining locks and freezes. Only accounts that hold the lock are touched; the old pallets'
+/// storage is read, never written. At mainnet block 13,204,429 all 1,686 locks meet their rule.
+///
+/// Balances counts one consumer ref for an account whose frozen or reserved balance is non-zero,
+/// and releases it when both reach zero. An account that holds a lock without that ref (on mainnet
+/// one reaped account, no providers, whose pdexlock lock outlived it) would make the release
+/// underflow and log an error. Such an account gets the ref right before its lock is removed, so
+/// the count ends where Balances would leave it and nothing is logged as an error.
+///
+/// Guarded to run once, upgrading into spec 392, like the other one-shot migrations here.
+pub struct ClearRewardsAndMigrationLocks;
+
+/// The accounts whose lock the old pallet would release at a given block.
+pub struct ReleasableLocks {
+    /// Accounts whose `REWARDID` lock `Rewards::claim` would remove.
+    pub rewards: BTreeSet<AccountId>,
+    /// Accounts whose `pdexlock` lock `PDEXMigration::unlock` would remove.
+    pub pdex_migration: BTreeSet<AccountId>,
+    /// Storage reads spent finding them.
+    pub reads: u64,
+}
+
+impl ClearRewardsAndMigrationLocks {
+    fn has_lock(who: &AccountId, id: LockIdentifier) -> bool {
+        pallet_balances::Locks::<Runtime>::get(who).iter().any(|lock| lock.id == id)
+    }
+
+    /// Gives `who` the consumer ref Balances expects for a non-zero frozen or reserved balance,
+    /// if it has none. Returns whether one was added.
+    ///
+    /// Without it, the remove_lock that brings frozen and reserved to zero releases a ref the
+    /// account does not hold (an underflow, logged as an error), and one that leaves them
+    /// non-zero has Balances add the ref itself, also with an error log. An account with no
+    /// providers (reaped, only its lock left) cannot take a ref through inc_consumers_without_limit;
+    /// its count is set directly, and Balances removes that account entry again in the same
+    /// remove_lock call.
+    pub fn add_consumer_ref_if_missing(who: &AccountId) -> bool {
+        let account = frame_system::Account::<Runtime>::get(who);
+        if account.consumers > 0 || (account.data.frozen == 0 && account.data.reserved == 0) {
+            return false;
+        }
+        if frame_system::Pallet::<Runtime>::inc_consumers_without_limit(who).is_err() {
+            frame_system::Account::<Runtime>::mutate(who, |account| account.consumers = 1);
+        }
+        log::info!(
+            target: "runtime::migration",
+            "ClearRewardsAndMigrationLocks: {:?} (providers {}) held a lock without a consumer ref; \
+             added one before removing the lock",
+            who,
+            account.providers,
+        );
+        true
+    }
+
+    /// Removes lock `id` from `who` with `LockableCurrency::remove_lock`, after making sure the
+    /// account's consumer ref is in place. Returns whether a ref was added.
+    pub fn remove(who: &AccountId, id: LockIdentifier) -> bool {
+        let added = Self::add_consumer_ref_if_missing(who);
+        <pallet_balances::Pallet<Runtime> as LockableCurrency<AccountId>>::remove_lock(id, who);
+        added
+    }
+
+    /// Applies the old unlock rules at block `now` to every record in the old storage.
+    pub fn releasable(now: BlockNumber) -> ReleasableLocks {
+        use legacy_locks::{Distributor, InitializeRewards, LockedTokenHolders, Operational};
+        let mut reads: u64 = 0;
+
+        // REWARDID: claim() succeeds for an initialised record under a registered reward id.
+        let cycles: BTreeSet<u32> = InitializeRewards::iter_keys().collect();
+        reads += cycles.len() as u64 + 1;
+        let mut rewards = BTreeSet::new();
+        for (reward_id, who, record) in Distributor::iter() {
+            reads += 1;
+            if record.is_initialized
+                && record.lock_id == REWARDS_LOCK_ID
+                && cycles.contains(&reward_id)
+            {
+                reads += 1;
+                if Self::has_lock(&who, REWARDS_LOCK_ID) {
+                    rewards.insert(who);
+                }
+            }
+        }
+
+        // pdexlock: unlock() succeeds while the pallet is operational, once the account's last
+        // mint is at least LockPeriod blocks old.
+        let mut pdex_migration = BTreeSet::new();
+        reads += 1;
+        if Operational::get() {
+            for (who, minted_at) in LockedTokenHolders::iter() {
+                reads += 1;
+                if minted_at.saturating_add(PDEX_MIGRATION_LOCK_PERIOD) <= now {
+                    reads += 1;
+                    if Self::has_lock(&who, PDEX_MIGRATION_LOCK_ID) {
+                        pdex_migration.insert(who);
+                    }
+                }
+            }
+        } else {
+            log::warn!(
+                target: "runtime::migration",
+                "ClearRewardsAndMigrationLocks: PDEXMigration::Operational is false, so unlock() \
+                 fails for everyone; every pdexlock lock stays"
+            );
+        }
+
+        ReleasableLocks { rewards, pdex_migration, reads }
+    }
+}
+
+impl OnRuntimeUpgrade for ClearRewardsAndMigrationLocks {
+    fn on_runtime_upgrade() -> Weight {
+        let db = <Runtime as frame_system::Config>::DbWeight::get();
+        if crate::System::last_runtime_upgrade_spec_version() > CLEAR_REWARDS_AND_MIGRATION_LOCKS_FROM_SPEC {
+            log::warn!("Skipping ClearRewardsAndMigrationLocks: already applied");
+            return db.reads(1);
+        }
+
+        let found = Self::releasable(frame_system::Pallet::<Runtime>::block_number());
+        let mut refs_added: u64 = 0;
+        for who in found.rewards.iter() {
+            refs_added += Self::remove(who, REWARDS_LOCK_ID) as u64;
+        }
+        for who in found.pdex_migration.iter() {
+            refs_added += Self::remove(who, PDEX_MIGRATION_LOCK_ID) as u64;
+        }
+        log::info!(
+            target: "runtime::migration",
+            "ClearRewardsAndMigrationLocks: removed {} REWARDID locks and {} pdexlock locks; added {} \
+             missing consumer refs first",
+            found.rewards.len(),
+            found.pdex_migration.len(),
+            refs_added,
+        );
+
+        // Per removal: the account read for the consumer check, then remove_lock reads Locks,
+        // Freezes and the account and writes the account and Locks. Plus one write per ref added.
+        let removed = (found.rewards.len() + found.pdex_migration.len()) as u64;
+        db.reads_writes(1 + found.reads + 4 * removed, 2 * removed + refs_added)
+    }
+
+    #[cfg(feature = "try-runtime")]
+    fn pre_upgrade() -> Result<sp_std::vec::Vec<u8>, sp_runtime::TryRuntimeError> {
+        if crate::System::last_runtime_upgrade_spec_version() > CLEAR_REWARDS_AND_MIGRATION_LOCKS_FROM_SPEC {
+            return Ok(sp_std::vec::Vec::new());
+        }
+        let found = Self::releasable(frame_system::Pallet::<Runtime>::block_number());
+        let scan = try_runtime_checks::LockScan::take();
+        let snapshot = try_runtime_checks::LocksSnapshot::new(&found, &scan);
+        log::info!(
+            target: "runtime::migration",
+            "ClearRewardsAndMigrationLocks pre_upgrade: REWARDID {} locks ({} planck), {} to remove; \
+             pdexlock {} locks ({} planck), {} to remove",
+            scan.rewards.len(),
+            snapshot.rewards_total,
+            snapshot.rewards_released.len(),
+            scan.pdex_migration.len(),
+            snapshot.pdex_migration_total,
+            snapshot.pdex_migration_released.len(),
+        );
+        Ok(snapshot.encode())
+    }
+
+    #[cfg(feature = "try-runtime")]
+    fn post_upgrade(state: sp_std::vec::Vec<u8>) -> Result<(), sp_runtime::TryRuntimeError> {
+        use frame_support::ensure;
+        use try_runtime_checks::{legacy_key_counts, LockScan, LocksSnapshot};
+
+        if crate::System::last_runtime_upgrade_spec_version() > CLEAR_REWARDS_AND_MIGRATION_LOCKS_FROM_SPEC {
+            return Ok(());
+        }
+        let pre = LocksSnapshot::decode(&mut &state[..])
+            .map_err(|_| "ClearRewardsAndMigrationLocks: cannot decode the pre_upgrade state")?;
+        let scan = LockScan::take();
+
+        // The REWARDID and pdexlock locks left are exactly the ones whose rule was not met, with
+        // their amounts unchanged.
+        ensure!(
+            scan.rewards == pre.rewards_kept,
+            "ClearRewardsAndMigrationLocks: REWARDID locks left differ from the expected set"
+        );
+        ensure!(
+            scan.pdex_migration == pre.pdex_migration_kept,
+            "ClearRewardsAndMigrationLocks: pdexlock locks left differ from the expected set"
+        );
+        // Every lock with another id is unchanged.
+        ensure!(
+            scan.other_locks == pre.other_locks,
+            "ClearRewardsAndMigrationLocks: a lock with another id changed"
+        );
+        // Accounts that lost a lock: free and reserved unchanged, frozen recomputed from what is
+        // left, and the consumer count where Balances leaves it.
+        for touched in pre.touched.iter() {
+            let account = frame_system::Account::<Runtime>::get(&touched.who);
+            ensure!(
+                account.data.free == touched.free && account.data.reserved == touched.reserved,
+                "ClearRewardsAndMigrationLocks: free or reserved balance changed"
+            );
+            let locks = pallet_balances::Locks::<Runtime>::get(&touched.who);
+            let locked = locks.iter().map(|lock| lock.amount).max().unwrap_or_default();
+            let frozen = pallet_balances::Freezes::<Runtime>::get(&touched.who)
+                .iter()
+                .map(|freeze| freeze.amount)
+                .max()
+                .unwrap_or_default();
+            ensure!(
+                account.data.frozen == locked.max(frozen),
+                "ClearRewardsAndMigrationLocks: frozen does not match the remaining locks"
+            );
+            // Balances holds one consumer ref while frozen or reserved is non-zero and releases it
+            // when both reach zero; an account without providers is reaped in the same call.
+            let expected = if !touched.exists {
+                0
+            } else if touched.consumes_after {
+                touched.consumers.max(1)
+            } else {
+                touched.consumers.saturating_sub(1)
+            };
+            ensure!(
+                account.consumers == expected,
+                "ClearRewardsAndMigrationLocks: consumer count is not what Balances leaves"
+            );
+            // No account that still holds a lock ends without a consumer ref.
+            ensure!(
+                locks.is_empty() || account.consumers >= 1 || !touched.exists,
+                "ClearRewardsAndMigrationLocks: an account that still holds a lock has no consumer ref"
+            );
+        }
+        // The old pallets' storage and the total issuance are untouched.
+        ensure!(
+            legacy_key_counts() == pre.legacy_keys,
+            "ClearRewardsAndMigrationLocks: Rewards or PDEXMigration storage changed"
+        );
+        ensure!(
+            pallet_balances::TotalIssuance::<Runtime>::get() == pre.total_issuance,
+            "ClearRewardsAndMigrationLocks: total issuance changed"
+        );
+
+        let kept = |locks: &[(AccountId, crate::Balance)]| locks.iter().map(|l| l.1).sum::<crate::Balance>();
+        log::info!(
+            target: "runtime::migration",
+            "ClearRewardsAndMigrationLocks post_upgrade: removed {} REWARDID locks ({} planck) and \
+             {} pdexlock locks ({} planck); {} REWARDID and {} pdexlock locks stay",
+            pre.rewards_released.len(),
+            pre.rewards_total - kept(&pre.rewards_kept),
+            pre.pdex_migration_released.len(),
+            pre.pdex_migration_total - kept(&pre.pdex_migration_kept),
+            pre.rewards_kept.len(),
+            pre.pdex_migration_kept.len(),
+        );
+        Ok(())
+    }
+}
+
+/// State kept between pre_upgrade and post_upgrade of ClearRewardsAndMigrationLocks.
+#[cfg(feature = "try-runtime")]
+mod try_runtime_checks {
+    use super::{ReleasableLocks, PDEX_MIGRATION_LOCK_ID, REWARDS_LOCK_ID};
+    use crate::{AccountId, Balance, Runtime};
+    use sp_core::{Decode, Encode};
+    use sp_std::vec::Vec;
+
+    /// One pass over Balances::Locks: every REWARDID and pdexlock lock, and a hash of all others.
+    pub struct LockScan {
+        pub rewards: Vec<(AccountId, Balance)>,
+        pub pdex_migration: Vec<(AccountId, Balance)>,
+        pub other_locks: [u8; 32],
+    }
+
+    impl LockScan {
+        pub fn take() -> Self {
+            let mut rewards: Vec<(AccountId, Balance)> = Vec::new();
+            let mut pdex_migration: Vec<(AccountId, Balance)> = Vec::new();
+            let mut others: Vec<u8> = Vec::new();
+            for (who, locks) in pallet_balances::Locks::<Runtime>::iter() {
+                let mut rest = Vec::new();
+                for lock in locks.iter() {
+                    if lock.id == REWARDS_LOCK_ID {
+                        rewards.push((who.clone(), lock.amount));
+                    } else if lock.id == PDEX_MIGRATION_LOCK_ID {
+                        pdex_migration.push((who.clone(), lock.amount));
+                    } else {
+                        rest.push(lock.clone());
+                    }
+                }
+                if !rest.is_empty() {
+                    (who, rest).encode_to(&mut others);
+                }
+            }
+            LockScan { rewards, pdex_migration, other_locks: sp_io::hashing::blake2_256(&others) }
+        }
+    }
+
+    /// An account that loses a lock, as it was before the migration.
+    #[derive(Encode, Decode)]
+    pub struct Touched {
+        pub who: AccountId,
+        pub free: Balance,
+        pub reserved: Balance,
+        pub consumers: u32,
+        /// It has providers or sufficients, so Balances keeps its account entry.
+        pub exists: bool,
+        /// Its reserved balance or a remaining lock or freeze keeps it consuming afterwards.
+        pub consumes_after: bool,
+    }
+
+    #[derive(Encode, Decode)]
+    pub struct LocksSnapshot {
+        pub rewards_released: Vec<AccountId>,
+        pub pdex_migration_released: Vec<AccountId>,
+        /// The locks expected to stay, in Balances::Locks order, with their amounts.
+        pub rewards_kept: Vec<(AccountId, Balance)>,
+        pub pdex_migration_kept: Vec<(AccountId, Balance)>,
+        pub rewards_total: Balance,
+        pub pdex_migration_total: Balance,
+        pub other_locks: [u8; 32],
+        /// Every account that loses a lock, as it was before.
+        pub touched: Vec<Touched>,
+        /// Keys under the Rewards and PDEXMigration prefixes.
+        pub legacy_keys: (u32, u32),
+        pub total_issuance: Balance,
+    }
+
+    impl LocksSnapshot {
+        pub fn new(found: &ReleasableLocks, scan: &LockScan) -> Self {
+            let kept = |locks: &[(AccountId, Balance)], released: &sp_std::collections::btree_set::BTreeSet<AccountId>| {
+                locks.iter().filter(|(who, _)| !released.contains(who)).cloned().collect::<Vec<_>>()
+            };
+            let total = |locks: &[(AccountId, Balance)]| locks.iter().map(|l| l.1).sum::<Balance>();
+            let touched = found
+                .rewards
+                .union(&found.pdex_migration)
+                .map(|who| {
+                    let account = frame_system::Account::<Runtime>::get(who);
+                    let mut released = Vec::new();
+                    if found.rewards.contains(who) {
+                        released.push(REWARDS_LOCK_ID);
+                    }
+                    if found.pdex_migration.contains(who) {
+                        released.push(PDEX_MIGRATION_LOCK_ID);
+                    }
+                    let left = pallet_balances::Locks::<Runtime>::get(who)
+                        .iter()
+                        .filter(|lock| !released.contains(&lock.id))
+                        .map(|lock| lock.amount)
+                        .chain(pallet_balances::Freezes::<Runtime>::get(who).iter().map(|f| f.amount))
+                        .max()
+                        .unwrap_or_default();
+                    Touched {
+                        who: who.clone(),
+                        free: account.data.free,
+                        reserved: account.data.reserved,
+                        consumers: account.consumers,
+                        exists: account.providers > 0 || account.sufficients > 0,
+                        consumes_after: account.data.reserved != 0 || left != 0,
+                    }
+                })
+                .collect();
+            LocksSnapshot {
+                rewards_released: found.rewards.iter().cloned().collect(),
+                pdex_migration_released: found.pdex_migration.iter().cloned().collect(),
+                rewards_kept: kept(&scan.rewards, &found.rewards),
+                pdex_migration_kept: kept(&scan.pdex_migration, &found.pdex_migration),
+                rewards_total: total(&scan.rewards),
+                pdex_migration_total: total(&scan.pdex_migration),
+                other_locks: scan.other_locks,
+                touched,
+                legacy_keys: legacy_key_counts(),
+                total_issuance: pallet_balances::TotalIssuance::<Runtime>::get(),
+            }
+        }
+    }
+
+    fn count_keys(prefix: &[u8]) -> u32 {
+        let mut count = 0u32;
+        let mut key = prefix.to_vec();
+        while let Some(next) = sp_io::storage::next_key(&key) {
+            if !next.starts_with(prefix) {
+                break;
+            }
+            count += 1;
+            key = next;
+        }
+        count
+    }
+
+    /// Number of keys under the Rewards and under the PDEXMigration prefix.
+    pub fn legacy_key_counts() -> (u32, u32) {
+        (
+            count_keys(&sp_io::hashing::twox_128(b"Rewards")),
+            count_keys(&sp_io::hashing::twox_128(b"PDEXMigration")),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::legacy_locks::{
+        Distributor, InitializeRewards, LockedTokenHolders, Operational, RewardInfo,
+        RewardInfoForAccount,
+    };
+    use super::*;
+    use crate::{Balance, Balances};
+    use frame_support::traits::{Currency, WithdrawReasons};
+    use sp_runtime::BuildStorage;
+
+    const PDEX: Balance = crate::constants::currency::PDEX;
+    /// The mainnet block the lock classification was taken at.
+    const NOW: BlockNumber = 13_204_429;
+    const STAKING_LOCK_ID: LockIdentifier = *b"staking ";
+
+    fn new_test_ext() -> sp_io::TestExternalities {
+        let mut ext: sp_io::TestExternalities = frame_system::GenesisConfig::<Runtime>::default()
+            .build_storage()
+            .unwrap()
+            .into();
+        ext.execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(NOW);
+            // The system genesis records this runtime (392) as the last upgrade, so the guard
+            // would skip the migration. Mainnet's last upgrade is 373.
+            frame_system::LastRuntimeUpgrade::<Runtime>::put(frame_system::LastRuntimeUpgradeInfo {
+                spec_version: 373u32.into(),
+                spec_name: "node".into(),
+            });
+        });
+        ext
+    }
+
+    fn account(n: u8) -> AccountId {
+        AccountId::from([n; 32])
+    }
+
+    fn fund(who: &AccountId) {
+        let _ = <Balances as Currency<AccountId>>::make_free_balance_be(who, 10_000 * PDEX);
+    }
+
+    fn lock(who: &AccountId, id: LockIdentifier, amount: Balance) {
+        if frame_system::Account::<Runtime>::get(who).data.free == 0 {
+            fund(who);
+        }
+        <Balances as LockableCurrency<AccountId>>::set_lock(id, who, amount, WithdrawReasons::TRANSFER);
+    }
+
+    fn lock_of(who: &AccountId, id: LockIdentifier) -> Option<Balance> {
+        pallet_balances::Locks::<Runtime>::get(who).iter().find(|l| l.id == id).map(|l| l.amount)
+    }
+
+    fn frozen(who: &AccountId) -> Balance {
+        frame_system::Account::<Runtime>::get(who).data.frozen
+    }
+
+    fn record(is_initialized: bool) -> RewardInfoForAccount {
+        RewardInfoForAccount {
+            total_reward_amount: 600 * PDEX,
+            claim_amount: 100 * PDEX,
+            is_initial_rewards_claimed: true,
+            is_initialized,
+            lock_id: REWARDS_LOCK_ID,
+            last_block_rewards_claim: 6_271_048,
+            initial_rewards_claimable: 150 * PDEX,
+            factor: 6_370_340,
+        }
+    }
+
+    /// Seeds the old storage and the locks the way mainnet holds them, with one account per case.
+    ///  1: REWARDID, initialised record under the registered cycle            -> released
+    ///  2: REWARDID, record not initialised                                   -> kept (not met)
+    ///  3: REWARDID, no record                                                -> kept (no data)
+    ///  4: REWARDID, initialised record under an unregistered reward id       -> kept (not met)
+    ///  5: pdexlock, lock period ends exactly at NOW                          -> released
+    ///  6: pdexlock, lock period ends one block after NOW                     -> kept (not met)
+    ///  7: pdexlock, no record                                                -> kept (no data)
+    ///  8: REWARDID and pdexlock, both released; a staking lock stays
+    ///  9: initialised Rewards record but no lock (already claimed)           -> untouched
+    /// 10: PDEXMigration record but no lock (already unlocked)                -> untouched
+    fn seed() {
+        InitializeRewards::insert(
+            1,
+            RewardInfo { start_block: 1_815_527, end_block: 6_653_927, initial_percentage: 25 },
+        );
+        Operational::put(true);
+
+        lock(&account(1), REWARDS_LOCK_ID, 500 * PDEX);
+        Distributor::insert(1, account(1), record(true));
+        lock(&account(2), REWARDS_LOCK_ID, 500 * PDEX);
+        Distributor::insert(1, account(2), record(false));
+        lock(&account(3), REWARDS_LOCK_ID, 500 * PDEX);
+        lock(&account(4), REWARDS_LOCK_ID, 500 * PDEX);
+        Distributor::insert(2, account(4), record(true));
+
+        lock(&account(5), PDEX_MIGRATION_LOCK_ID, 400 * PDEX);
+        LockedTokenHolders::insert(account(5), NOW - PDEX_MIGRATION_LOCK_PERIOD);
+        lock(&account(6), PDEX_MIGRATION_LOCK_ID, 400 * PDEX);
+        LockedTokenHolders::insert(account(6), NOW - PDEX_MIGRATION_LOCK_PERIOD + 1);
+        lock(&account(7), PDEX_MIGRATION_LOCK_ID, 400 * PDEX);
+
+        lock(&account(8), REWARDS_LOCK_ID, 500 * PDEX);
+        lock(&account(8), PDEX_MIGRATION_LOCK_ID, 300 * PDEX);
+        lock(&account(8), STAKING_LOCK_ID, 200 * PDEX);
+        Distributor::insert(1, account(8), record(true));
+        LockedTokenHolders::insert(account(8), 624_538);
+
+        fund(&account(9));
+        Distributor::insert(1, account(9), record(true));
+        fund(&account(10));
+        LockedTokenHolders::insert(account(10), 624_538);
+    }
+
+    #[test]
+    fn removes_only_the_locks_whose_old_unlock_rule_is_met() {
+        new_test_ext().execute_with(|| {
+            seed();
+            let issuance = pallet_balances::TotalIssuance::<Runtime>::get();
+            let account_9 = frame_system::Account::<Runtime>::get(account(9));
+            let account_10 = frame_system::Account::<Runtime>::get(account(10));
+
+            let found = ClearRewardsAndMigrationLocks::releasable(NOW);
+            assert_eq!(found.rewards.into_iter().collect::<Vec<_>>(), vec![account(1), account(8)]);
+            assert_eq!(
+                found.pdex_migration.into_iter().collect::<Vec<_>>(),
+                vec![account(5), account(8)]
+            );
+
+            let _ = ClearRewardsAndMigrationLocks::on_runtime_upgrade();
+
+            // Released, and frozen recomputed from what is left.
+            assert_eq!(lock_of(&account(1), REWARDS_LOCK_ID), None);
+            assert_eq!(frozen(&account(1)), 0);
+            assert_eq!(lock_of(&account(5), PDEX_MIGRATION_LOCK_ID), None);
+            assert_eq!(frozen(&account(5)), 0);
+            assert_eq!(lock_of(&account(8), REWARDS_LOCK_ID), None);
+            assert_eq!(lock_of(&account(8), PDEX_MIGRATION_LOCK_ID), None);
+            assert_eq!(lock_of(&account(8), STAKING_LOCK_ID), Some(200 * PDEX));
+            assert_eq!(frozen(&account(8)), 200 * PDEX);
+
+            // Kept: rule not met, or no record.
+            for n in [2, 3, 4] {
+                assert_eq!(lock_of(&account(n), REWARDS_LOCK_ID), Some(500 * PDEX));
+                assert_eq!(frozen(&account(n)), 500 * PDEX);
+            }
+            for n in [6, 7] {
+                assert_eq!(lock_of(&account(n), PDEX_MIGRATION_LOCK_ID), Some(400 * PDEX));
+                assert_eq!(frozen(&account(n)), 400 * PDEX);
+            }
+
+            // Nothing else touched: balances, accounts without a lock, the old storage, issuance.
+            for n in 1..=8 {
+                let data = frame_system::Account::<Runtime>::get(account(n)).data;
+                assert_eq!((data.free, data.reserved), (10_000 * PDEX, 0));
+            }
+            assert_eq!(frame_system::Account::<Runtime>::get(account(9)), account_9);
+            assert_eq!(frame_system::Account::<Runtime>::get(account(10)), account_10);
+            assert!(pallet_balances::Locks::<Runtime>::get(account(9)).is_empty());
+            assert!(pallet_balances::Locks::<Runtime>::get(account(10)).is_empty());
+            assert_eq!(Distributor::get(1, account(1)), Some(record(true)));
+            assert_eq!(Distributor::iter().count(), 5);
+            assert_eq!(LockedTokenHolders::get(account(5)), Some(NOW - PDEX_MIGRATION_LOCK_PERIOD));
+            assert_eq!(LockedTokenHolders::iter().count(), 4);
+            assert_eq!(pallet_balances::TotalIssuance::<Runtime>::get(), issuance);
+        });
+    }
+
+    #[test]
+    fn a_second_run_changes_nothing_and_the_guard_skips_after_392() {
+        new_test_ext().execute_with(|| {
+            seed();
+            let _ = ClearRewardsAndMigrationLocks::on_runtime_upgrade();
+            let root = sp_io::storage::root(sp_core::storage::StateVersion::V1);
+
+            // Nothing is left to release, so running the migration again writes nothing.
+            let found = ClearRewardsAndMigrationLocks::releasable(NOW);
+            assert!(found.rewards.is_empty() && found.pdex_migration.is_empty());
+            let _ = ClearRewardsAndMigrationLocks::on_runtime_upgrade();
+            assert_eq!(sp_io::storage::root(sp_core::storage::StateVersion::V1), root);
+
+            // Once the chain has upgraded into 392 the guard skips it, even for a lock whose
+            // rule is met.
+            frame_system::LastRuntimeUpgrade::<Runtime>::put(
+                frame_system::LastRuntimeUpgradeInfo::from(crate::VERSION),
+            );
+            lock(&account(11), REWARDS_LOCK_ID, 500 * PDEX);
+            Distributor::insert(1, account(11), record(true));
+            let _ = ClearRewardsAndMigrationLocks::on_runtime_upgrade();
+            assert_eq!(lock_of(&account(11), REWARDS_LOCK_ID), Some(500 * PDEX));
+        });
+    }
+
+    #[test]
+    fn pdexlock_stays_when_the_migration_pallet_is_not_operational() {
+        new_test_ext().execute_with(|| {
+            seed();
+            Operational::put(false);
+            let _ = ClearRewardsAndMigrationLocks::on_runtime_upgrade();
+            assert_eq!(lock_of(&account(5), PDEX_MIGRATION_LOCK_ID), Some(400 * PDEX));
+            assert_eq!(lock_of(&account(8), PDEX_MIGRATION_LOCK_ID), Some(300 * PDEX));
+            // The REWARDID rule does not depend on it.
+            assert_eq!(lock_of(&account(1), REWARDS_LOCK_ID), None);
+            assert_eq!(lock_of(&account(8), REWARDS_LOCK_ID), None);
+        });
+    }
+
+    /// A lock can sit on an account without the consumer ref Balances counts for it. On mainnet
+    /// that is one reaped account (no providers) whose pdexlock lock outlived it. The ref is added
+    /// right before the lock goes, so Balances' release lands on zero instead of underflowing.
+    #[test]
+    fn locks_on_accounts_without_a_consumer_ref() {
+        new_test_ext().execute_with(|| {
+            seed();
+            let consumers = |n: u8| frame_system::Pallet::<Runtime>::consumers(&account(n));
+            // Account 1 (no other lock) and account 8 (keeps a staking lock) lost their ref.
+            frame_system::Account::<Runtime>::mutate(account(1), |a| a.consumers = 0);
+            frame_system::Account::<Runtime>::mutate(account(8), |a| a.consumers = 0);
+            // Account 12 was reaped: no providers and no balance, only its lock and the frozen
+            // amount FixBalancesFrozen writes for it.
+            let reaped = account(12);
+            lock(&reaped, PDEX_MIGRATION_LOCK_ID, 5 * PDEX);
+            LockedTokenHolders::insert(&reaped, 624_538);
+            frame_system::Account::<Runtime>::mutate(&reaped, |a| {
+                a.providers = 0;
+                a.consumers = 0;
+                a.data.free = 0;
+            });
+
+            // Without providers inc_consumers_without_limit refuses, so the count is set directly.
+            assert!(ClearRewardsAndMigrationLocks::add_consumer_ref_if_missing(&reaped));
+            assert_eq!(consumers(12), 1);
+            assert!(!ClearRewardsAndMigrationLocks::add_consumer_ref_if_missing(&reaped));
+            frame_system::Account::<Runtime>::mutate(&reaped, |a| a.consumers = 0);
+
+            let _ = ClearRewardsAndMigrationLocks::on_runtime_upgrade();
+
+            // Account 1: lock gone and the added ref released again; the account stays.
+            assert_eq!(lock_of(&account(1), REWARDS_LOCK_ID), None);
+            assert_eq!(consumers(1), 0);
+            assert_eq!(frozen(&account(1)), 0);
+            assert_eq!(frame_system::Account::<Runtime>::get(account(1)).data.free, 10_000 * PDEX);
+            // Account 8 keeps its staking lock and now holds the ref it should have had.
+            assert_eq!(lock_of(&account(8), REWARDS_LOCK_ID), None);
+            assert_eq!(lock_of(&account(8), PDEX_MIGRATION_LOCK_ID), None);
+            assert_eq!(lock_of(&account(8), STAKING_LOCK_ID), Some(200 * PDEX));
+            assert_eq!(consumers(8), 1);
+            // The reaped account is gone entirely: lock and account entry.
+            assert!(pallet_balances::Locks::<Runtime>::get(&reaped).is_empty());
+            assert!(!frame_system::Account::<Runtime>::contains_key(&reaped));
+            // Accounts that had their ref are unaffected by the extra step.
+            assert_eq!(consumers(5), 0);
+            assert_eq!(lock_of(&account(5), PDEX_MIGRATION_LOCK_ID), None);
+        });
+    }
+
+    /// Values read from mainnet at block 13,204,429 (spec 373) must decode through the aliases
+    /// at the keys mainnet uses. The values are the raw mainnet bytes; the account in the keys is
+    /// a test account.
+    #[test]
+    fn aliases_read_the_mainnet_layout() {
+        fn unhex(s: &str) -> Vec<u8> {
+            (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+        }
+        new_test_ext().execute_with(|| {
+            use sp_io::hashing::blake2_128;
+            let who = account(7);
+            let concat = |key: &[u8]| [&blake2_128(key)[..], key].concat();
+
+            // twox128("Rewards") ++ twox128("Distributor") ++ (reward id 1) ++ (account)
+            let distributor = [
+                unhex("540a4f8754aa5298a3d6e9aa09e93f97ceb4876b50655e052e4e5e04aee50f9b"),
+                concat(&1u32.encode()),
+                concat(&who.encode()),
+            ]
+            .concat();
+            assert_eq!(Distributor::hashed_key_for(1u32, &who), distributor);
+            sp_io::storage::set(
+                &distributor,
+                &unhex(
+                    "00208e7b602500000000000000000000a4b977982823000000000000000000000101524557415244\
+                     494448b05f000088e31e58090000000000000000000024346100000000000000000000000000",
+                ),
+            );
+            assert_eq!(
+                Distributor::get(1u32, &who),
+                Some(RewardInfoForAccount {
+                    total_reward_amount: 41_096_320_000_000,
+                    claim_amount: 38_657_263_647_140,
+                    is_initial_rewards_claimed: true,
+                    is_initialized: true,
+                    lock_id: *b"REWARDID",
+                    last_block_rewards_claim: 6_271_048,
+                    initial_rewards_claimable: 10_274_080_000_000,
+                    factor: 6_370_340,
+                })
+            );
+            assert_eq!(
+                Distributor::iter().map(|(id, acc, _)| (id, acc)).collect::<Vec<_>>(),
+                vec![(1, who.clone())]
+            );
+
+            // twox128("Rewards") ++ twox128("InitializeRewards") ++ (reward id 1)
+            let cycle = [
+                unhex("540a4f8754aa5298a3d6e9aa09e93f977b3950f8fd6c2b89975e04f39790a2b9"),
+                concat(&1u32.encode()),
+            ]
+            .concat();
+            assert_eq!(InitializeRewards::hashed_key_for(1u32), cycle);
+            sp_io::storage::set(&cycle, &unhex("e7b31b00e787650019000000"));
+            assert_eq!(
+                InitializeRewards::get(1u32),
+                Some(RewardInfo { start_block: 1_815_527, end_block: 6_653_927, initial_percentage: 25 })
+            );
+
+            // twox128("PDEXMigration") ++ twox128("LockedTokenHolders") ++ (account)
+            let holder = [
+                unhex("4ef636f65fd8673a753a8276ac217285440e110669db20db8ae66c7379c53a7c"),
+                concat(&who.encode()),
+            ]
+            .concat();
+            assert_eq!(LockedTokenHolders::hashed_key_for(&who), holder);
+            sp_io::storage::set(&holder, &unhex("9a870900"));
+            assert_eq!(LockedTokenHolders::get(&who), Some(624_538));
+
+            // twox128("PDEXMigration") ++ twox128("Operational")
+            let operational = unhex("4ef636f65fd8673a753a8276ac21728529ddc5444fb1a19e6bb7daf22ffb6a95");
+            assert_eq!(Operational::hashed_key().to_vec(), operational);
+            assert!(!Operational::get());
+            sp_io::storage::set(&operational, &unhex("01"));
+            assert!(Operational::get());
+        });
+    }
+}

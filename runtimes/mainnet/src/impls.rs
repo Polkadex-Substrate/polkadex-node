@@ -424,23 +424,14 @@
 //	}
 //}
 
-use alloc::boxed::Box;
-use frame_support::{
-	pallet_prelude::*,
-	traits::{
-		fungibles::{Balanced, Credit},
-		Currency, OnUnbalanced,
-	},
+use frame_support::traits::{
+	fungibles::{Balanced, Credit},
+	Currency, OnUnbalanced,
 };
-use pallet_alliance::{IdentityVerifier, ProposalIndex, ProposalProvider};
 use pallet_asset_tx_payment::HandleCredit;
-use pallet_identity::legacy::IdentityField;
 //use polkadot_sdk::*;
 
-use crate::{
-	AccountId, AllianceCollective, AllianceMotion, Assets, Authorship, Balances, Hash,
-	NegativeImbalance, Runtime, RuntimeCall,
-};
+use crate::{AccountId, Assets, Authorship, Balances, NegativeImbalance, Runtime};
 
 pub struct Author;
 impl OnUnbalanced<NegativeImbalance> for Author {
@@ -460,62 +451,5 @@ impl HandleCredit<AccountId, Assets> for CreditToBlockAuthor {
 			// Drop the result which will trigger the `OnDrop` of the imbalance in case of error.
 			let _ = Assets::resolve(&author, credit);
 		}
-	}
-}
-
-pub struct AllianceIdentityVerifier;
-impl IdentityVerifier<AccountId> for AllianceIdentityVerifier {
-	fn has_required_identities(who: &AccountId) -> bool {
-		crate::Identity::has_identity(who, (IdentityField::Display | IdentityField::Web).bits())
-	}
-
-	fn has_good_judgement(who: &AccountId) -> bool {
-		use pallet_identity::{IdentityOf, Judgement};
-		IdentityOf::<Runtime>::get(who)
-			.map(|registration| registration.judgements)
-			.map_or(false, |judgements| {
-				judgements
-					.iter()
-					.any(|(_, j)| matches!(j, Judgement::KnownGood | Judgement::Reasonable))
-			})
-	}
-
-	fn super_account_id(who: &AccountId) -> Option<AccountId> {
-		use pallet_identity::SuperOf;
-		SuperOf::<Runtime>::get(who).map(|parent| parent.0)
-	}
-}
-
-pub struct AllianceProposalProvider;
-impl ProposalProvider<AccountId, Hash, RuntimeCall> for AllianceProposalProvider {
-	fn propose_proposal(
-		who: AccountId,
-		threshold: u32,
-		proposal: Box<RuntimeCall>,
-		length_bound: u32,
-	) -> Result<(u32, u32), DispatchError> {
-		AllianceMotion::do_propose_proposed(who, threshold, proposal, length_bound)
-	}
-
-	fn vote_proposal(
-		who: AccountId,
-		proposal: Hash,
-		index: ProposalIndex,
-		approve: bool,
-	) -> Result<bool, DispatchError> {
-		AllianceMotion::do_vote(who, proposal, index, approve)
-	}
-
-	fn close_proposal(
-		proposal_hash: Hash,
-		proposal_index: ProposalIndex,
-		proposal_weight_bound: Weight,
-		length_bound: u32,
-	) -> DispatchResultWithPostInfo {
-		AllianceMotion::do_close(proposal_hash, proposal_index, proposal_weight_bound, length_bound)
-	}
-
-	fn proposal_of(proposal_hash: Hash) -> Option<RuntimeCall> {
-		pallet_collective::ProposalOf::<Runtime, AllianceCollective>::get(proposal_hash)
 	}
 }
