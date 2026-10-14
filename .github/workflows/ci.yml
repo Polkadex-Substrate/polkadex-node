@@ -1,177 +1,256 @@
 name: Continuous Integration
 
+# GitHub-hosted runners only: no self-hosted runner and no secrets.
+#   pin-check   toolchain is 1.91.0, Cargo.lock is complete (cargo metadata --locked),
+#               release.yml still pins protoc and rustup-init by sha256.
+#   build-test  mainnet runtime unit tests, cargo check of the node, and cargo check
+#               of the node with try-runtime and with runtime-benchmarks.
+# Left out on purpose: rustfmt and clippy (fixing their findings would change the
+# runtime under soak), release builds and artifact uploads (release.yml does those),
+# and the parachain crates (no longer in the workspace).
+
 on:
   pull_request:
-    types: [labeled]
+    branches: [testnet, mainnet]
   push:
-    branches: [Develop, mainnet-release]
+    branches: [testnet, mainnet]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One group per ref. A newer commit on a pull request cancels the run it replaces.
+# Runs for testnet, mainnet and tags are not cancelled once started; GitHub keeps at
+# most one waiting run per group, so a burst of pushes to one branch tests the newest.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
 
 env:
-  RUNNER_INSTANCE_TYPE: c5d.4xlarge
+  # Pins. pin-check fails when rust-toolchain.toml or release.yml no longer match.
+  # Both jobs install rustup-init from these pins and build-test also installs
+  # protoc; each download is sha256 checked before use.
+  PIN_RUST_TOOLCHAIN: "1.91.0"
+  PIN_RUSTUP_VER: "1.29.1"
+  PIN_RUSTUP_SHA256: "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71"
+  PIN_PROTOC_VER: "25.3"
+  PIN_PROTOC_SHA256: "f853e691868d0557425ea290bf7ba6384eef2fa9b04c323afab49a770ba9da80"
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_TERM_COLOR: always
 
 jobs:
-  start-runner:
-    name: Start self-hosted EC2 runner
-    # Run the job only if it has proper label or it is triggered by the push to the dev or main branch.
-    if: |
-      contains(github.event.pull_request.labels.*.name, 'A0-PleaseReview') ||
-      contains(github.event_name, 'push')
-    runs-on: ubuntu-latest
-    outputs:
-      label: ${{ steps.start-ec2-runner.outputs.label }}
-      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+  pin-check:
+    name: Pin check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-      - name: Start EC2 runner
-        id: start-ec2-runner
-        uses: machulav/ec2-github-runner@v2
-        with:
-          mode: start
-          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN_REPO }}
-          ec2-image-id: ami-04fffb9b173db7fb2 # Ubuntu 22 with 500 GB volume. Updated on Feb 09 2024.
-          ec2-instance-type: ${{ env.RUNNER_INSTANCE_TYPE }}
-          subnet-id: subnet-a4d326e8
-          security-group-id: sg-078363c0f7b5f0b41
-          iam-role-name: github-runner-role
-          aws-resource-tags: >
-            [
-              {"Key": "Name", "Value": "github-runner"},
-              {"Key": "GitHubRepository", "Value": "${{ github.repository }}"}
-            ]
-  build:
-    name: Build | Run linters | Run tests
-    needs: start-runner
-    runs-on: ${{ needs.start-runner.outputs.label }}
+          persist-credentials: false
+
+      # Every check below runs even if an earlier one failed, so one run lists
+      # every drift.
+      - name: release.yml still pins protoc and rustup-init
+        run: |
+          f=.github/workflows/release.yml
+          trimmed=$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' "$f")
+          rc=0
+          # The single-quoted entries are release.yml text, matched literally.
+          # shellcheck disable=SC2016
+          for want in \
+            "PROTOC_VER=${PIN_PROTOC_VER}" \
+            "PROTOC_SHA256=${PIN_PROTOC_SHA256}" \
+            'echo "${PROTOC_SHA256}  /tmp/protoc.zip" | sha256sum -c -' \
+            "RUSTUP_VER=${PIN_RUSTUP_VER}" \
+            "RUSTUP_SHA256=${PIN_RUSTUP_SHA256}" \
+            'echo "${RUSTUP_SHA256}  /tmp/rustup-init" | sha256sum -c -'
+          do
+            if grep -Fxq -- "$want" <<< "$trimmed"; then
+              echo "ok: $want"
+            else
+              echo "::error file=$f::release.yml no longer has this line: $want"
+              rc=1
+            fi
+          done
+          exit "$rc"
+
+      - name: Install rustup (pinned) and the toolchain from rust-toolchain.toml
+        if: ${{ !cancelled() }}
+        run: |
+          # The runner image ships its own rustup and stable toolchain. Remove them
+          # so only the pinned installer and rust-toolchain.toml are used.
+          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+          rm -rf "$cargo_home" "${RUSTUP_HOME:-$HOME/.rustup}"
+          base=https://static.rust-lang.org/rustup/archive
+          curl --proto '=https' --tlsv1.2 -sSfL -o "$RUNNER_TEMP/rustup-init" \
+            "$base/${PIN_RUSTUP_VER}/x86_64-unknown-linux-gnu/rustup-init"
+          echo "${PIN_RUSTUP_SHA256}  $RUNNER_TEMP/rustup-init" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/rustup-init"
+          "$RUNNER_TEMP/rustup-init" -y --no-modify-path --profile minimal \
+            --default-toolchain none
+          rm -f "$RUNNER_TEMP/rustup-init"
+          echo "$cargo_home/bin" >> "$GITHUB_PATH"
+          export PATH="$cargo_home/bin:$PATH"
+          # Keep the pinned rustup: no self-update during the toolchain install.
+          rustup set auto-self-update disable
+          # No name given: installs the channel, components and targets that
+          # rust-toolchain.toml lists.
+          rustup toolchain install
+
+      - name: Toolchain is exactly ${{ env.PIN_RUST_TOOLCHAIN }}
+        if: ${{ !cancelled() }}
+        run: |
+          rc=0
+          want="^[[:space:]]*channel[[:space:]]*=[[:space:]]*\"${PIN_RUST_TOOLCHAIN//./\\.}\"[[:space:]]*$"
+          if ! grep -Eq "$want" rust-toolchain.toml; then
+            echo "::error file=rust-toolchain.toml::channel is not \"${PIN_RUST_TOOLCHAIN}\""
+            rc=1
+          fi
+          rustup show active-toolchain || rc=1
+          for tool in rustc cargo; do
+            v=$("$tool" --version) || { rc=1; continue; }
+            echo "$v"
+            case "$v" in
+              "$tool ${PIN_RUST_TOOLCHAIN} "*) ;;
+              *) echo "::error::$tool reports '$v', expected ${PIN_RUST_TOOLCHAIN}"; rc=1 ;;
+            esac
+          done
+          exit "$rc"
+
+      - name: Cargo.lock is complete
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+  build-test:
+    name: Build and test
+    needs: pin-check
+    runs-on: ubuntu-24.04
+    # Hard stop far inside GitHub's 6 h job limit; the target is under 90 min.
+    timeout-minutes: 150
     steps:
-      - name: Set home environment variable # bug self hosted https://github.com/actions-rs/toolchain/issues/137
+      # GitHub only guarantees 14 GB of disk on these runners; this build needs more.
+      - name: Free disk space
+        timeout-minutes: 10
         run: |
-          echo "HOME=/root" >> ${GITHUB_ENV} # bug
-      - name: Install dependencies
+          echo "Disk before:"
+          df -h /
+          # Preinstalled toolchains this build does not use.
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/share/swift \
+            /usr/local/share/powershell \
+            /usr/local/share/chromium \
+            /usr/local/julia* \
+            /usr/lib/jvm \
+            /usr/share/miniconda \
+            /usr/lib/google-cloud-sdk \
+            /opt/az /opt/microsoft /opt/google
+          echo "Disk after:"
+          df -h /
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: System build dependencies and protoc (pinned)
+        timeout-minutes: 10
         run: |
-          cat /etc/issue 
-         # apt update   #Included in base AMI
-         # apt install -y clang lldb lld gcc zip protobuf-compiler build-essential curl libssl-dev # Included in base AMI
-      - name: Install latest nightly with wasm target
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: wasm32-unknown-unknown
-          default: true
-          components: rustfmt, clippy
-      - name: Install .toml files linter
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
+            build-essential clang libclang-dev llvm-dev cmake pkg-config \
+            git curl unzip ca-certificates make perl python3
+          # protoc: the release.yml pin, hash checked before use.
+          base=https://github.com/protocolbuffers/protobuf/releases/download
+          curl -sSfL -o "$RUNNER_TEMP/protoc.zip" \
+            "$base/v${PIN_PROTOC_VER}/protoc-${PIN_PROTOC_VER}-linux-x86_64.zip"
+          echo "${PIN_PROTOC_SHA256}  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
+          sudo unzip -q -o "$RUNNER_TEMP/protoc.zip" -d /usr/local bin/protoc 'include/*'
+          rm -f "$RUNNER_TEMP/protoc.zip"
+          protoc --version
+
+      - name: Install rustup (pinned) and the toolchain from rust-toolchain.toml
+        id: toolchain
+        timeout-minutes: 10
         run: |
-          curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-linux-x86_64.gz \
-          | gzip -d - | install -m 755 /dev/stdin /usr/local/bin/taplo
-      - name: Checkout to the current branch
-        uses: actions/checkout@v3
-      - name: Cache Rust Dependencies
-        uses: actions/cache@v3
+          # The runner image ships its own rustup and stable toolchain. Remove them
+          # so only the pinned installer and rust-toolchain.toml are used.
+          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+          rm -rf "$cargo_home" "${RUSTUP_HOME:-$HOME/.rustup}"
+          base=https://static.rust-lang.org/rustup/archive
+          curl --proto '=https' --tlsv1.2 -sSfL -o "$RUNNER_TEMP/rustup-init" \
+            "$base/${PIN_RUSTUP_VER}/x86_64-unknown-linux-gnu/rustup-init"
+          echo "${PIN_RUSTUP_SHA256}  $RUNNER_TEMP/rustup-init" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/rustup-init"
+          "$RUNNER_TEMP/rustup-init" -y --no-modify-path --profile minimal \
+            --default-toolchain none
+          rm -f "$RUNNER_TEMP/rustup-init"
+          echo "$cargo_home/bin" >> "$GITHUB_PATH"
+          export PATH="$cargo_home/bin:$PATH"
+          # Keep the pinned rustup: no self-update during the toolchain install.
+          rustup set auto-self-update disable
+          # No name given: installs the channel, components and targets that
+          # rust-toolchain.toml lists.
+          rustup toolchain install
+          rustup show active-toolchain
+          rustc -Vv
+          cargo -V
+
+      # Keyed on Cargo.lock, every Cargo.toml, rust-toolchain.toml and the rustc
+      # version. Saved only from testnet and mainnet; pull requests restore from
+      # their base branch, tags from mainnet.
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Check versions info
+          save-if: ${{ github.ref == 'refs/heads/testnet' || github.ref == 'refs/heads/mainnet' }}
+          cache-bin: "false"
+
+      # The four steps below do not depend on each other. Each runs when setup
+      # succeeded, even if an earlier one failed, so one run reports every failure.
+      - name: Runtime unit tests (node-polkadex-runtime)
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
+        timeout-minutes: 60
+        env:
+          # Native tests; they do not use the wasm binary.
+          SKIP_WASM_BUILD: "1"
+        run: cargo test --release --locked -p node-polkadex-runtime --no-fail-fast
+
+      # No SKIP_WASM_BUILD here: this also builds the runtime wasm (no_std), so a
+      # change that only breaks the wasm build fails in CI, not at release time.
+      - name: Check the node (polkadex-node, with the runtime wasm)
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
+        timeout-minutes: 60
+        run: cargo check --locked -p polkadex-node
+
+      - name: Check the node with try-runtime
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
+        timeout-minutes: 45
+        env:
+          # Type-checks the feature-gated code natively; the wasm is not needed.
+          SKIP_WASM_BUILD: "1"
+        run: cargo check --locked -p polkadex-node --features try-runtime
+
+      - name: Check the node with runtime-benchmarks
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
+        timeout-minutes: 45
+        env:
+          # Type-checks the feature-gated code natively; the wasm is not needed.
+          SKIP_WASM_BUILD: "1"
+        run: cargo check --locked -p polkadex-node --features runtime-benchmarks
+
+      - name: Disk use at the end
+        if: ${{ !cancelled() }}
         run: |
-          cargo fmt -- --version
-          cargo clippy -V
-      - name: Lint .toml files
-        run: |
-          taplo lint
-          taplo fmt --check
-
-      - name: Build project with "try-runtime" feature
-        run: RUSTFLAGS="-D warnings" cargo build --features try-runtime
-
-      - name: Build mainnet node runtime
-        run: RUSTFLAGS="-D warnings" cargo build -p node-polkadex-runtime
-      - name: Build mainnet node with "runtime-benchmarks" feature
-        run: RUSTFLAGS="-D warnings" cargo build -p polkadex-node --features runtime-benchmarks
-      - name: Test mainnet node pallets weights generation
-        run: ./target/debug/polkadex-node benchmark pallet --pallet "*" --extrinsic "*" --steps 2 --repeat 1
-
-      - name: Build parachain node runtime
-        run: RUSTFLAGS="-D warnings" cargo build -p parachain-polkadex-runtime
-      - name: Build parachain node with "runtime-benchmarks" feature
-        run: RUSTFLAGS="-D warnings" cargo build -p parachain-polkadex-node --features runtime-benchmarks
-      - name: Test parachain node pallets weights generation
-        run: ./target/debug/parachain-polkadex-node benchmark pallet --pallet "*" --extrinsic "*" --steps 2 --repeat 1
-
-      - name: Build in release mode
-        if: contains(github.ref, 'Develop')
-        run: RUSTFLAGS="-D warnings" cargo build --release
-      - name: Build in dev mode
-        if: "!(contains(github.ref, 'Develop'))"
-        run: RUSTFLAGS="-D warnings" cargo build
-
-      - name: Check Formatting
-        run: cargo fmt --all -- --check
-      - name: Check Clippy
-        run: cargo clippy -- -D warnings
-      - name: Test Project
-        run: RUSTFLAGS="-D warnings" cargo test --workspace
-      - name: Run Cargo Tarpaulin
-        uses: actions-rs/tarpaulin@v0.1
-        with:
-          version: '0.22.0'
-          args: '--avoid-cfg-tarpaulin --exclude polkadex-node node-polkadex-runtime parachain-polkadex-node parachain-polkadex-runtime --workspace --timeout 180'
-      - name: Upload to codecov.io
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{secrets.CODECOV_TOKEN}}
-          fail_ci_if_error: true
-      - name: Archive code coverage results
-        if: github.event_name == 'push'
-        uses: actions/upload-artifact@v1
-        with:
-          name: code-coverage-report
-          path: cobertura.xml
-      - name: Zip compiled mainnet node binary
-        if: contains(github.ref, 'Develop')
-        # Zipping is required since billing is based on the raw uploaded size.
-        run: zip -r -j polkadex-node.zip ./target/release/polkadex-node
-      - name: Upload zipped mainnet binary as an artifact
-        if: contains(github.ref, 'Develop')
-        uses: actions/upload-artifact@v3
-        with:
-          name: polkadex-node
-          path: ./polkadex-node.zip
-          if-no-files-found: error
-      - name: Zip compiled parachain node binary
-        if: contains(github.ref, 'Develop')
-        # Zipping is required since billing is based on the raw uploaded size.
-        run: zip -r -j parachain-polkadex-node.zip ./target/release/parachain-polkadex-node
-      - name: Upload zipped parachain binary as an artifact
-        if: contains(github.ref, 'Develop')
-        uses: actions/upload-artifact@v3
-        with:
-          name: parachain-polkadex-node
-          path: ./parachain-polkadex-node.zip
-          if-no-files-found: error
-  stop-runner:
-    name: Stop self-hosted EC2 runner
-    needs:
-      - start-runner
-      - build
-    runs-on: ubuntu-latest
-    if: ${{ always() }} # required to stop the runner even if the error happened in the previous jobs
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-      - name: Stop EC2 runner
-        uses: machulav/ec2-github-runner@v2
-        with:
-          mode: stop
-          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN_REPO }}
-          label: ${{ needs.start-runner.outputs.label }}
-          ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
+          df -h /
+          du -sh target "${CARGO_HOME:-$HOME/.cargo}" "${RUSTUP_HOME:-$HOME/.rustup}" || true

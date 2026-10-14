@@ -22,9 +22,10 @@
 use crate::{
 	constants::currency::*, AccountId, AssetsConfig,
 	BabeConfig, Balance, BalancesConfig, ElectionsConfig, /* NominationPoolsConfig, */
-	RuntimeGenesisConfig, SessionConfig, SessionKeys, SocietyConfig, StakingConfig,
-	SudoConfig, TechnicalCommitteeConfig, BABE_GENESIS_EPOCH_CONFIG,
+	RuntimeGenesisConfig, SessionConfig, SessionKeys, StakingConfig,
+	TechnicalCommitteeConfig, BABE_GENESIS_EPOCH_CONFIG,
 	// PDEXMigrationConfig, // pallet removed from construct_runtime
+	// SudoConfig, // F-002: pallet_sudo removed from construct_runtime
 };
 pub use pallet_staking::StakerStatus;
 use frame_support::build_struct_json_patch;
@@ -59,7 +60,8 @@ pub type Staker = (AccountId, AccountId, Balance, StakerStatus<AccountId>);
 /// Helper function to create RuntimeGenesisConfig json patch for testing.
 pub fn kitchensink_genesis(
 	initial_authorities: Vec<(AccountId, AccountId, SessionKeys)>,
-	root_key: AccountId,
+	// F-002: pallet_sudo removed from construct_runtime — root_key no longer used here
+	_root_key: AccountId,
 	endowed_accounts: Vec<AccountId>,
 	stakers: Vec<Staker>,
 	staking_playground_config: Option<StakingPlaygroundConfig>,
@@ -109,9 +111,7 @@ pub fn kitchensink_genesis(
 			members: collective.iter().cloned().map(|member| (member, STASH)).collect(),
 		},
 		technical_committee: TechnicalCommitteeConfig { members: collective },
-		sudo: SudoConfig { key: Some(root_key) },
 		babe: BabeConfig { epoch_config: BABE_GENESIS_EPOCH_CONFIG },
-		society: SocietyConfig { pot: 0 },
 		assets: AssetsConfig {
 			// This asset is used by the NIS pallet as counterpart currency.
 			assets: vec![(9, Sr25519Keyring::Alice.to_account_id(), true, 1)],
@@ -130,7 +130,7 @@ pub fn kitchensink_genesis(
 		democracy: Default::default(),
 		beefy: Default::default(),
 		// Custom
-		orderbook_committee: Default::default(),
+		// orderbook_committee: Default::default(), // F-029: pallet removed from construct_runtime
 		// pdex_migration: PDEXMigrationConfig { max_tokens: ERC20_PDEX_SUPPLY, operational: false }, // pallet removed
 	})
 }

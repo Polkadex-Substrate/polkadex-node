@@ -10,22 +10,24 @@
 
 | Migration | Testnet status | Mainnet required | Safe to remove after first run |
 |---|---|---|---|
-| `InitOcexFeeConfig` | ✅ Applied | ✅ Yes | Yes |
 | `UpgradeSessionKeys` | ✅ Applied (spec 379) | ✅ Yes (if mainnet < spec 379) | Yes, after first run |
+| `ClearLegacySudoKey` | New in 392; ran in try-runtime and on the mainnet-state soak | ✅ Yes | Yes |
+| `ClearOrderbookCommittee` | New in 392; ran in try-runtime and on the mainnet-state soak | ✅ Yes (the prefix is already empty) | Yes |
+| `ClearRandomnessCollectiveFlip` | New in 392; ran in try-runtime and on the mainnet-state soak | ✅ Yes | Yes |
 | `StakingStorageVersionMigration` | ✅ Applied | ✅ Yes | Yes |
 | `SessionStorageVersionMigration` | ✅ Applied | ✅ Yes | Yes |
-| `GrandpaStorageVersionMigration` | ✅ Applied | ✅ Yes | Yes |
+| `pallet_grandpa::migrations::MigrateV4ToV5` | No-op, testnet is already at v5 | ✅ Yes, mainnet is at v4 | Yes |
 | `IdentityStorageVersionMigration` | ✅ Applied | ✅ Yes | Yes |
 | `ChildBountiesStorageVersionMigration` | ✅ Applied | ✅ Yes | Yes |
-| `StorageVersionMigration<*>` × 12 | ✅ Applied | ✅ Yes | Yes |
+| `StorageVersionMigration<*>` × 13 | ✅ Applied | ✅ Yes | Yes |
 | `FixBalancesFrozen` | ✅ Applied | ✅ Yes | Yes |
 | `FixCouncilPrime` | ✅ Applied | ✅ Yes | Yes |
 | `ClearOffenceReports` | ✅ Applied | ✅ Yes | Yes |
-| `TestnetOcexStateReset` | ✅ Applied (spec 387) | ❌ **Testnet only** | **Must remove before mainnet** |
-| `ResetTestnetAssetSupply` | ✅ Applied (spec 389) | ❌ **Testnet only** | **Must remove before mainnet** |
-| `pallet_alliance::migration::Migration` | ✅ Applied | ✅ Yes | Yes |
-| `pallet_contracts::Migration` | ✅ Applied | ✅ Yes | Yes |
-| `pallet_identity::migration::versioned::V0ToV1` | ✅ Applied | ✅ Yes | Yes |
+| `ClearOrmlVestingLocks` | New in 392; ran in try-runtime and on the mainnet-state soak | ✅ Yes | Yes |
+| `ClearRewardsAndMigrationLocks` | New in 392; ran in try-runtime and on the mainnet-state soak | ✅ Yes | Yes |
+| `pallet_treasury::migration::cleanup_proposals::Migration` | New in 392; ran in try-runtime and on the mainnet-state soak | ✅ Yes | Yes |
+
+This list follows `type Migrations` in `runtimes/mainnet/src/lib.rs`, in the order the runtime runs them.
 
 ---
 
@@ -35,18 +37,34 @@
 
 ---
 
-#### `InitOcexFeeConfig`
-- **What it does:** Sets `OCEX::FeeDistributionConfig` to defaults (50% burn, 100-block auctions) if not already set.
-- **Guard:** Checks `is_none()` before writing — safe to run on any chain, no-op if already configured.
-- **Mainnet:** Must run on first upgrade to initialise the fee config.
-- **After first run:** Remove from the tuple.
-
----
-
 #### `UpgradeSessionKeys`
 - **What it does:** Migrates session keys from the old format (grandpa + babe + im_online + authority_discovery + orderbook + **thea**) to the new format (same minus thea, plus **mixnet** + **beefy**). Validators are initialised with dummy mixnet/beefy keys and must call `author_rotateKeys` + `session_setKeys` post-upgrade.
 - **Guard:** `last_runtime_upgrade_spec_version() <= 378`. No-op on any chain already past spec 378.
 - **Mainnet:** Required if mainnet is upgrading from a spec ≤ 378 runtime. Check mainnet's current spec version before the upgrade.
+- **After first run:** Remove from the tuple.
+
+---
+
+#### `ClearLegacySudoKey`
+- **What it does:** F-002. `pallet_sudo` was removed from `construct_runtime!` long ago, but its storage was never wiped: `Sudo::Key` still holds the 2021 genesis root key. Clears everything under the `Sudo` prefix, the key and the storage version marker, so nothing is left under a pallet name the runtime does not have.
+- **Guard:** `last_runtime_upgrade_spec_version() <= 391`: runs once, upgrading into 392.
+- **Mainnet:** Required. try-runtime at block 13,204,927 found `Sudo::Key` and removed 2 keys.
+- **After first run:** Remove from the tuple.
+
+---
+
+#### `ClearOrderbookCommittee`
+- **What it does:** F-029. `RemovePallet` for the `OrderbookCommittee` prefix. That committee (`pallet_collective` Instance4) governed OCEX, which was removed from `construct_runtime!`; this wipes anything left under its prefix (members, proposals, votes).
+- **Guard:** None needed. A second run finds nothing under the prefix.
+- **Mainnet:** In the tuple as a guarantee. try-runtime at block 13,204,927 found no keys under the prefix, so on mainnet it removes nothing.
+- **After first run:** Remove from the tuple.
+
+---
+
+#### `ClearRandomnessCollectiveFlip`
+- **What it does:** `RemovePallet` for the `RandomnessCollectiveFlip` prefix. Mainnet still holds one `RandomnessCollectiveFlip::RandomMaterial` key (2,594 bytes) left by a runtime older than 373; no runtime since has had the pallet, and 392 does not either.
+- **Guard:** None needed. A second run finds nothing under the prefix.
+- **Mainnet:** Required. try-runtime at block 13,204,927 removed the one key and found none left.
 - **After first run:** Remove from the tuple.
 
 ---
@@ -59,7 +77,6 @@ These all follow the same pattern: compare on-chain storage version with in-code
 |---|---|
 | `StakingStorageVersionMigration` | `pallet_staking` |
 | `SessionStorageVersionMigration` | `pallet_session` |
-| `GrandpaStorageVersionMigration` | `pallet_grandpa` |
 | `IdentityStorageVersionMigration` | `pallet_identity` |
 | `ChildBountiesStorageVersionMigration` | `pallet_child_bounties` |
 | `StorageVersionMigration<pallet_balances>` | Balances |
@@ -75,6 +92,8 @@ These all follow the same pattern: compare on-chain storage version with in-code
 | `StorageVersionMigration<pallet_democracy>` | Democracy |
 | `StorageVersionMigration<pallet_preimage>` | Preimage |
 | `StorageVersionMigration<pallet_assets::Instance1>` | Assets |
+
+`pallet_grandpa::migrations::MigrateV4ToV5` is not a bump. It moves the authority list from the well-known key `:grandpa_authorities` into `Grandpa::Authorities`, removes the old key, and only runs at on-chain version 4. Mainnet is at v4, so it runs there.
 
 - **Mainnet:** All required to sync on-chain storage version markers with the upgraded in-code versions. Without these, pallets may refuse to run their own internal migrations.
 - **After first run:** Remove from the tuple.
@@ -105,46 +124,27 @@ These all follow the same pattern: compare on-chain storage version with in-code
 
 ---
 
-#### `pallet_alliance::migration::Migration<Runtime>`
-- **What it does:** Standard Alliance pallet upstream migration. Idempotent — checks storage version internally.
-- **Mainnet:** Required.
+#### `ClearOrmlVestingLocks<Runtime>`
+- **What it does:** F-030. OrmlVesting was removed from `construct_runtime!` without a cleanup migration, so its `ormlvest` lock stays on 12 accounts with no call left that can remove it. Removes that lock from each of them and wipes the orphaned OrmlVesting storage: 12 `VestingSchedules` entries and the storage version marker.
+- **Guard:** `last_runtime_upgrade_spec_version() <= 391`: runs once, upgrading into 392.
+- **Mainnet:** Required. try-runtime at block 13,204,927 found 13 keys, unlocked 12 accounts and left none.
 - **After first run:** Remove from the tuple.
 
 ---
 
-#### `pallet_contracts::Migration<Runtime>`
-- **What it does:** Standard Contracts pallet upstream migration chain. Idempotent — driven by storage version.
-- **Mainnet:** Required.
+#### `ClearRewardsAndMigrationLocks`
+- **What it does:** Rewards and PDEXMigration were removed from `construct_runtime!` without a cleanup migration, so their locks stay with no call left that can release them: `REWARDID` on 732 accounts (319,287.14 PDEX) and `pdexlock` on 954 accounts (404,434.83 PDEX). It removes each lock that the old pallet would release at the current block under mainnet spec 373's rules: `REWARDID` when `Rewards::claim` would succeed (no block condition), `pdexlock` when `PDEXMigration::Operational` is set and `LockedTokenHolders(who) + 201,600 <= now`. Any other lock stays. An account that holds such a lock without the consumer ref Balances expects (one reaped account on mainnet) gets the ref first, so the removal does not underflow.
+- **Guard:** `last_runtime_upgrade_spec_version() <= 391`: runs once, upgrading into 392.
+- **Mainnet:** Required. try-runtime at block 13,204,927 removed all 732 `REWARDID` and all 954 `pdexlock` locks and added the one missing consumer ref. On a fork of mainnet state, block numbers restart at 0, so the `pdexlock` rule is not met there and those locks stay; that is a fork artifact.
 - **After first run:** Remove from the tuple.
 
 ---
 
-#### `pallet_identity::migration::versioned::V0ToV1<Runtime, IDENTITY_MIGRATION_KEY_LIMIT>`
-- **What it does:** Migrates Identity pallet storage from v0 to v1 layout. Processes up to `IDENTITY_MIGRATION_KEY_LIMIT` entries.
-- **Mainnet:** Required — mainnet identity data is in v0 format.
+#### `pallet_treasury::migration::cleanup_proposals::Migration<Runtime, (), BalanceUnreserveWeight>`
+- **What it does:** The SDK's cleanup (polkadot-sdk PR #5892). Releases the bonds of legacy treasury proposals that were never approved and removes the proposals. Approved proposals are left alone. On mainnet: proposals #62, #69, #72 and #81, 14,893.14 PDEX of bonds.
+- **Guard:** None needed. A second run finds nothing to release.
+- **Mainnet:** Required. try-runtime released the 4 bonds and left proposals and approvals at (0, 0).
 - **After first run:** Remove from the tuple.
-
----
-
-## ❌ Testnet-only — must remove before mainnet upgrade
-
----
-
-### `TestnetOcexStateReset`
-- **Introduced:** spec 387
-- **What it does:** Wipes all OCEX on-chain state (Snapshots, IngressMessages, Accounts, Proxies, TotalAssets, Withdrawals, OnChainEvents, PriceOracle, LMP state, SnapshotNonce, LMPEpoch) and all `Assets::Account` + `Assets::Approvals` entries via raw `clear_storage_prefix`.
-- **Why testnet-only:** This was needed because the testnet accumulated stale OCEX state under the wrong decimal configuration (pre-spec 386). Mainnet never had this state — all mainnet assets were correctly configured at 12dp from the start.
-- **Mainnet behaviour if left in:** The code comment claims it is a no-op on mainnet, but this relies on mainnet having no entries in those storage maps — which is not guaranteed. Wiping `Assets::Account` on mainnet would burn every account's token balance. **Catastrophic if triggered.**
-- **Action: Remove before building the mainnet runtime.**
-
----
-
-### `ResetTestnetAssetSupply`
-- **Introduced:** spec 389
-- **What it does:** For asset IDs 3–10, resets `supply`, `accounts`, and `approvals` counters in `Assets::Asset` to zero if the asset has zero actual holders on-chain. Fixes phantom counters left by `TestnetOcexStateReset` (which cleared `Assets::Account` without going through pallet-assets burn flow, so counters were never decremented).
-- **Why testnet-only:** The root cause (phantom counters from the spec 387 wipe) cannot exist on mainnet since `TestnetOcexStateReset` never ran there. The guard (`actual_holders == 0`) would be false for every mainnet asset with real holders, making it a functional no-op. However, leaving dead testnet-specific logic in the mainnet runtime is bad practice.
-- **Mainnet behaviour if left in:** No-op (guard protects it) — but still, remove.
-- **Action: Remove before building the mainnet runtime.**
 
 ---
 
@@ -164,8 +164,8 @@ These items have been identified as necessary but are not yet in `migrations.rs`
 
 ## Checklist before next mainnet runtime upgrade
 
-- [ ] Remove `TestnetOcexStateReset` from `type Migrations`
-- [ ] Remove `ResetTestnetAssetSupply` from `type Migrations`
+- [x] Remove `TestnetOcexStateReset` from `type Migrations`
+- [x] Remove `ResetTestnetAssetSupply` from `type Migrations`
 - [ ] Confirm mainnet current spec version — verify `UpgradeSessionKeys` guard applies
 - [ ] Check mainnet MaxConsumers — raise to 64 if still at 16
 - [ ] Set `deliver_failed = true` in tesseract config on relayer server

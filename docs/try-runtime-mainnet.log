@@ -1,0 +1,176 @@
+== 08-try-runtime-snapshot
+== started 2026-10-10T10:52:04Z
+== running: upgrade_prepared_snapshot
+== waiting for /root/snapshot-r2/mainnet.snap.exit
+-rw-r--r-- 1 root root 713068407 Oct 10 10:56 /root/snapshot-r2/mainnet.snap
+⏳ Loading snapshot...
+[2026-10-10T10:57:04Z INFO  remote-ext] Loading snapshot from "/root/snapshot-r2/mainnet.snap"
+✅ Loaded snapshot in 3.69s
+[2026-10-10T10:57:10Z INFO  remote-ext] initialized state externalities with storage root 0x4d620bf19e143cce7a403aa177cea5cf8c80f7ee274bacd8a331469fbbc1132d and state_version V0
+[2026-10-10T10:57:10Z INFO  try-runtime::cli] Original runtime [Name: "node"] [Version: 373] [Code hash: 0xa598...e42b]
+[2026-10-10T10:57:11Z INFO  try-runtime::cli] New runtime      [Name: "node"] [Version: 392] [Code hash: 0x741b...dd1f]
+[2026-10-10T10:57:11Z INFO  try-runtime::cli] -----------------------------------------------------------
+    
+    
+[2026-10-10T10:57:11Z INFO  try-runtime::cli] 🔬 Running TryRuntime_on_runtime_upgrade with checks: All
+    
+    
+[2026-10-10T10:57:11Z INFO  try-runtime::cli] -----------------------------------------------------------
+    
+    
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "ChildBounties" detected in the runtime. Initializing the on-chain storage version to match the storage version defined in the pallet: StorageVersion(1)
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "AssetConversionTxPayment" detected in the runtime. The pallet has no defined storage version, so the on-chain version is being initialized to StorageVersion(0).
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "Statement" detected in the runtime. The pallet has no defined storage version, so the on-chain version is being initialized to StorageVersion(0).
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "PoolAssets" detected in the runtime. Initializing the on-chain storage version to match the storage version defined in the pallet: StorageVersion(1)
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "SkipFeelessPayment" detected in the runtime. The pallet has no defined storage version, so the on-chain version is being initialized to StorageVersion(0).
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "DelegatedStaking" detected in the runtime. Initializing the on-chain storage version to match the storage version defined in the pallet: StorageVersion(0)
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "SafeMode" detected in the runtime. The pallet has no defined storage version, so the on-chain version is being initialized to StorageVersion(0).
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "TxPause" detected in the runtime. The pallet has no defined storage version, so the on-chain version is being initialized to StorageVersion(0).
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "MultiBlockMigrations" detected in the runtime. Initializing the on-chain storage version to match the storage version defined in the pallet: StorageVersion(0)
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "Beefy" detected in the runtime. The pallet has no defined storage version, so the on-chain version is being initialized to StorageVersion(0).
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "Mmr" detected in the runtime. The pallet has no defined storage version, so the on-chain version is being initialized to StorageVersion(0).
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "MmrLeaf" detected in the runtime. The pallet has no defined storage version, so the on-chain version is being initialized to StorageVersion(0).
+[2026-10-10T10:57:16Z INFO  runtime::frame-support] 🐥 New pallet "Mixnet" detected in the runtime. The pallet has no defined storage version, so the on-chain version is being initialized to StorageVersion(0).
+[2026-10-10T10:57:16Z INFO  node_polkadex_runtime::migrations] 🔍 Pre-upgrade check for session keys migration
+[2026-10-10T10:57:16Z INFO  node_polkadex_runtime::migrations] Found 200 queued keys before migration
+[2026-10-10T10:57:16Z INFO  node_polkadex_runtime::migrations] 🔧 Starting session keys migration - adding mixnet and beefy
+[2026-10-10T10:57:16Z INFO  node_polkadex_runtime::migrations] ✅ Session keys migration completed
+[2026-10-10T10:57:16Z INFO  node_polkadex_runtime::migrations] 🔍 Post-upgrade check: 200 keys before, 200 keys after
+[2026-10-10T10:57:16Z INFO  node_polkadex_runtime::migrations] ✅ Post-upgrade verification passed
+[2026-10-10T10:57:16Z INFO  node_polkadex_runtime::migrations] 🔍 ClearLegacySudoKey pre_upgrade: Sudo::Key exists = true
+[2026-10-10T10:57:16Z INFO  node_polkadex_runtime::migrations] 🔑 Cleared legacy Sudo storage prefix (removed=2)
+[2026-10-10T10:57:16Z WARN  frame_support::migrations] Migration RemovePallet<OrderbookCommittee> can be removed (no keys found pre-removal).
+[2026-10-10T10:57:16Z INFO  frame_support::migrations] Removed 0 OrderbookCommittee keys 🧹
+[2026-10-10T10:57:17Z INFO  frame_support::migrations] No OrderbookCommittee keys found post-removal 🎉
+[2026-10-10T10:57:17Z INFO  frame_support::migrations] Found RandomnessCollectiveFlip keys pre-removal 👀
+[2026-10-10T10:57:17Z INFO  frame_support::migrations] Removed 1 RandomnessCollectiveFlip keys 🧹
+[2026-10-10T10:57:17Z INFO  frame_support::migrations] No RandomnessCollectiveFlip keys found post-removal 🎉
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Staking pallet storage version from StorageVersion(0) to StorageVersion(16)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Session pallet storage version from StorageVersion(0) to StorageVersion(1)
+[2026-10-10T10:57:17Z INFO  frame_support::migrations] 🚚 Pallet "Grandpa" VersionedMigration migrating storage version from 4 to 5.
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Identity pallet storage version from StorageVersion(0) to StorageVersion(2)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Balances storage version from StorageVersion(0) to StorageVersion(1)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating ElectionProviderMultiPhase storage version from StorageVersion(0) to StorageVersion(1)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Council storage version from StorageVersion(0) to StorageVersion(4)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating TechnicalCommittee storage version from StorageVersion(0) to StorageVersion(4)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating ImOnline storage version from StorageVersion(0) to StorageVersion(1)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Offences storage version from StorageVersion(0) to StorageVersion(1)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Historical storage version from StorageVersion(0) to StorageVersion(1)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Scheduler storage version from StorageVersion(0) to StorageVersion(4)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Multisig storage version from StorageVersion(0) to StorageVersion(1)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Bounties storage version from StorageVersion(0) to StorageVersion(4)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Democracy storage version from StorageVersion(0) to StorageVersion(1)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Preimage storage version from StorageVersion(0) to StorageVersion(1)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Updating Assets storage version from StorageVersion(0) to StorageVersion(1)
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🔧 Fixed frozen field for 1 accounts with stale locks
+[2026-10-10T10:57:17Z INFO  node_polkadex_runtime::migrations] 🧹 Cleared 3729 Offences::Reports entries (maybe_cursor=false)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks pre_upgrade: 13 OrmlVesting storage keys found
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: removed ormlvest lock for account 08a1c86a2c789eeb1295c3b3ba63b2cde5d23fa6c80d8f87246c21a11fa3ba1d (5CG2JLk6...)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: removed ormlvest lock for account 0a1f6fa0345ceac40338c78bdfc68a211898921032d30e1b4492090c29962505 (5CHyg59A...)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: removed ormlvest lock for account eab1d6b0efce910517067712d026e42ab5f84ffd068b80d3cd55cd7c95d4db68 (5HNRteZJ...)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: removed ormlvest lock for account bc13c9a902a524609f064014695f2b6548a17d7e8bb12a834220559bc38bbc5d (5GKJjjmv...)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: removed ormlvest lock for account 969554a9c50959bc434b99051b9803cc911ba3cad6c0e1d2ab2b8bcbbd1f057e (5FU9QB3d...)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: removed ormlvest lock for account 7a56462554bef5d4f946a3c2ea1798398303aaf49e2d80d272096fb04cd95d06 (5Eq7Ky4n...)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: removed ormlvest lock for account 082cb53d6299dc033e467de007bfd5c4c0d24135aa85d2f1d983008ff78fbb66 (5CFRXBqN...)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: removed ormlvest lock for account 182400644f4780a65a43e00f9630152fe0ab2323d0dacd04e808ceccf462f416 (5CcMhch8...)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: removed ormlvest lock for account cc0056b00683900613556f57c5324a2882fa9b5f50702e61ffade0b1102f0674 (5GgBj5JH...)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: removed ormlvest lock for account 0838d06bad89b000120bea3e2cbf59e342f518a3f76becfa8c35bfd386e79825 (5CFV7mjm...)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: removed ormlvest lock for account e4cdc8abc0405db44c1a6886a2f2c59012fa3b98c07b61d63cc7f9e437ba243e (5HEhuUC6...)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: removed ormlvest lock for account 8a442ebbcdb3aeace616292a957f36462e1e4c69e11de340527bfb617b01e068 (5FBzihKV...)
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks: unlocked 12 accounts, ran 13 clear_prefix iterations
+[2026-10-10T10:57:17Z INFO  runtime::migration] ClearOrmlVestingLocks post_upgrade: 13 keys cleared, 0 remaining ✅
+[2026-10-10T10:57:18Z INFO  runtime::migration] ClearRewardsAndMigrationLocks pre_upgrade: REWARDID 732 locks (319287139743064710 planck), 732 to remove; pdexlock 954 locks (404434830201291839 planck), 954 to remove
+[2026-10-10T10:57:18Z INFO  runtime::migration] ClearRewardsAndMigrationLocks: 068327afae49de8c41599dead9da714696712d65e6f758b18bae60cb6335b824 (5CDF75f3...) (providers 0) held a lock without a consumer ref; added one before removing the lock
+[2026-10-10T10:57:18Z INFO  runtime::migration] ClearRewardsAndMigrationLocks: removed 732 REWARDID locks and 954 pdexlock locks; added 1 missing consumer refs first
+[2026-10-10T10:57:18Z INFO  runtime::migration] ClearRewardsAndMigrationLocks post_upgrade: removed 732 REWARDID locks (319287139743064710 planck) and 954 pdexlock locks (404434830201291839 planck); 0 REWARDID and 0 pdexlock locks stay
+[2026-10-10T10:57:18Z INFO  runtime::treasury] Proposals and Approvals count (4, 0)
+[2026-10-10T10:57:18Z INFO  runtime::treasury] Released bond amount of 681800000000000 to proposer 6c0197856b35c7f631f5aa8d9cfd83f7e75202b0d821e67d2f344e4e4b5fc10f (5EWKW3cx...)
+[2026-10-10T10:57:18Z INFO  runtime::treasury] Released bond amount of 2803125000000000 to proposer 94fe3a0cb3261e69bb2f0ea5c9fb2724a3234bc011cf9eafa56af0176333d22d (5FS4TwFG...)
+[2026-10-10T10:57:18Z INFO  runtime::treasury] Released bond amount of 8171050000000000 to proposer fe71d671db4e5670a1dce1aa94398156c09929eb03e8eea20fd56b4f2a2f5828 (5HpKqV1Q...)
+[2026-10-10T10:57:18Z INFO  runtime::treasury] Released bond amount of 3237164500000000 to proposer 976ce4203c844a11164d1b3f8342ad16a4cc5d99ac8eaae5cd74f4b1cc68c764 (5FVFSCAN...)
+[2026-10-10T10:57:18Z INFO  runtime::treasury] Migration for pallet-treasury finished, released 4 proposal bonds.
+[2026-10-10T10:57:18Z INFO  runtime::treasury] Proposals and Approvals count (0, 0)
+[2026-10-10T10:57:18Z INFO  runtime::frame-support] ⚠️ MultiBlockMigrations declares internal migrations (which *might* execute). On-chain `StorageVersion(0)` vs in-code storage version `StorageVersion(0)`
+[2026-10-10T10:57:20Z INFO  runtime::executive] ✅ Entire runtime state decodes without error. 19351676 bytes total.
+[2026-10-10T10:57:20Z INFO  runtime::frame-support] 🩺 Running "System" try-state checks
+[2026-10-10T10:57:20Z INFO  runtime::frame-support] 🩺 Running "Utility" try-state checks
+[2026-10-10T10:57:20Z INFO  runtime::frame-support] 🩺 Running "Babe" try-state checks
+[2026-10-10T10:57:20Z INFO  runtime::frame-support] 🩺 Running "Timestamp" try-state checks
+[2026-10-10T10:57:20Z INFO  runtime::frame-support] 🩺 Running "Authorship" try-state checks
+[2026-10-10T10:57:20Z INFO  runtime::frame-support] 🩺 Running "Indices" try-state checks
+[2026-10-10T10:57:20Z INFO  runtime::frame-support] 🩺 Running "Balances" try-state checks
+[2026-10-10T10:57:20Z INFO  runtime::frame-support] 🩺 Running "TransactionPayment" try-state checks
+[2026-10-10T10:57:20Z INFO  runtime::frame-support] 🩺 Running "ElectionProviderMultiPhase" try-state checks
+[2026-10-10T10:57:20Z INFO  runtime::frame-support] 🩺 Running "Staking" try-state checks
+[2026-10-10T10:57:20Z WARN  runtime::staking] [13204927] 💸 total issuance will cause T::CurrencyToVote to downscale -- report to maintainers.
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Session" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Council" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "TechnicalCommittee" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Elections" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "TechnicalMembership" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Grandpa" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Treasury" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "ImOnline" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "AuthorityDiscovery" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Offences" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Historical" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Identity" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Recovery" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Scheduler" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Proxy" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Multisig" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Bounties" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Democracy" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Preimage" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "ChildBounties" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Assets" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "AssetConversion" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "AssetConversionTxPayment" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Statement" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "PoolAssets" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "SkipFeelessPayment" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "DelegatedStaking" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "SafeMode" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "TxPause" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "MultiBlockMigrations" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Beefy" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Mmr" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "MmrLeaf" try-state checks
+[2026-10-10T10:57:21Z INFO  runtime::frame-support] 🩺 Running "Mixnet" try-state checks
+[2026-10-10T10:57:21Z INFO  try-runtime::cli] --------------------------------------------------------------------------
+    
+    
+[2026-10-10T10:57:21Z INFO  try-runtime::cli] 🔬 Running TryRuntime_on_runtime_upgrade again to check idempotency: All
+    
+    
+[2026-10-10T10:57:21Z INFO  try-runtime::cli] --------------------------------------------------------------------------
+    
+    
+[2026-10-10T10:57:26Z INFO  node_polkadex_runtime::migrations] Skipping session keys upgrade: already applied
+[2026-10-10T10:57:26Z WARN  node_polkadex_runtime::migrations] Skipping ClearLegacySudoKey: already applied
+[2026-10-10T10:57:26Z INFO  frame_support::migrations] Removed 0 OrderbookCommittee keys 🧹
+[2026-10-10T10:57:26Z INFO  frame_support::migrations] Removed 1 RandomnessCollectiveFlip keys 🧹
+[2026-10-10T10:57:26Z WARN  frame_support::migrations] 🚚 Pallet "Grandpa" VersionedMigration migration 4->5 can be removed; on-chain is already at StorageVersion(5).
+[2026-10-10T10:57:26Z WARN  node_polkadex_runtime::migrations] Skipping FixBalancesFrozen: already applied
+[2026-10-10T10:57:26Z WARN  node_polkadex_runtime::migrations] Skipping FixCouncilPrime: already applied
+[2026-10-10T10:57:26Z WARN  node_polkadex_runtime::migrations] Skipping ClearOffenceReports: already applied
+[2026-10-10T10:57:26Z WARN  node_polkadex_runtime::migrations] Skipping ClearOrmlVestingLocks: already applied
+[2026-10-10T10:57:26Z WARN  node_polkadex_runtime::migrations] Skipping ClearRewardsAndMigrationLocks: already applied
+[2026-10-10T10:57:26Z INFO  runtime::treasury] Migration for pallet-treasury finished, released 0 proposal bonds.
+[2026-10-10T10:57:26Z INFO  runtime::frame-support] ⚠️ MultiBlockMigrations declares internal migrations (which *might* execute). On-chain `StorageVersion(0)` vs in-code storage version `StorageVersion(0)`
+[2026-10-10T10:57:27Z INFO  try_runtime_core::commands::on_runtime_upgrade] Storage root before: 0xd51d4c291b2fe06a4b4b3d7c9fa1dacc4bb1fef5d4965d227a96e56777f1675e, after: 0xd51d4c291b2fe06a4b4b3d7c9fa1dacc4bb1fef5d4965d227a96e56777f1675e
+[2026-10-10T10:57:27Z INFO  try_runtime_core::commands::on_runtime_upgrade] ✅ Migrations are idempotent
+[2026-10-10T10:57:27Z INFO  try-runtime::cli] ---------------------------------------------------------------------------------------
+    
+    
+[2026-10-10T10:57:27Z INFO  try-runtime::cli] 🔬 TryRuntime_on_runtime_upgrade succeeded! Running it again for weight measurements.
+    
+    
+[2026-10-10T10:57:27Z INFO  try-runtime::cli] ---------------------------------------------------------------------------------------
+    
+    
+[2026-10-10T10:57:34Z INFO  try-runtime::cli] PoV size (zstd-compressed compact proof): 2.5 MiB. For parachains, it's your responsibility to verify that a PoV of this size fits within any relaychain constraints.
+[2026-10-10T10:57:34Z INFO  try-runtime::cli] Consumed ref_time: 1.6208916s (40.52% of max 4s)
+[2026-10-10T10:57:34Z INFO  try-runtime::cli] ✅ No weight safety issues detected. Please note this does not guarantee a successful runtime upgrade. Always test your runtime upgrade with recent state, and ensure that the weight usage of your migrations will not drastically differ between testing and actual on-chain execution.
+[2026-10-10T10:57:34Z INFO  try_runtime_core::commands::on_runtime_upgrade] ℹ Skipping Multi-Block-Migrations
+== exit 0 after 331s
