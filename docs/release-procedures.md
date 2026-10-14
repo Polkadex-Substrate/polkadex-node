@@ -6,12 +6,19 @@ How the steps in `release-checklist.md` are carried out. The checklist says what
 
 Three days on the testnet chain with no incident. No incident means all of:
 
-- blocks produced continuously, no gap longer than one slot
+- blocks produced continuously, no gap longer than one slot, except a same-slot race (below)
 - finality lag under 10 blocks
 - active validator count not down by more than 10 percent
-- no error-level log lines on the team's own nodes
+- no error-level log lines on the team's own nodes, except the exempt lines below
 
-Ops watches for the three days and records the result in writing before the mainnet PR is opened. A single miss restarts the three days.
+**Same-slot race.** Two validators author a block for the same slot, both blocks appear in the nodes' logs, and one is dropped when the heavier chain wins. This shows as a gap of one or two slots even when everything works, and it happens on mainnet too. A gap is a same-slot race, not an incident, when both blocks are in the logs, the gap is at most 3 slots and finality lag stays under 10 blocks. Ops lists every race with its log evidence. Any other gap longer than one slot is an incident.
+
+**Exempt error lines.**
+
+- The `Corrupted state at` line at the upgrade block (procedure 6, point 2).
+- Lines caused by a recorded test action, such as a transaction sent on purpose during the soak. Ops records the action, its time and the exact lines it caused, and says why they do not apply on mainnet or how the cause is fixed.
+
+Ops watches for the three days and records the result in writing before the mainnet PR is opened, against these criteria and with the raw evidence attached. A single incident restarts the three days.
 
 ## Procedure 2: the tag branch gate
 
