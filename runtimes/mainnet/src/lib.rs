@@ -552,7 +552,7 @@ impl pallet_ismp::Config for Runtime {
 	type OffchainDB = ();
 	// Delivery is unsigned in this version; the handler's result is discarded.
 	type FeeHandler = ();
-	type MigrationWeightInfo = ();
+	type MigrationWeightInfo = weights::pallet_ismp::WeightInfo<Runtime>;
 }
 
 impl ismp_grandpa::Config for Runtime {
@@ -2839,6 +2839,7 @@ mod benches {
 		[pallet_proxy, Proxy]
 		[pallet_multisig, Multisig]
 		[pallet_ismp, Ismp]
+		[ismp_grandpa, IsmpGrandpa]
 	);
 }
 
