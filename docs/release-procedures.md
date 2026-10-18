@@ -57,7 +57,7 @@ If any check fails, the client upgrade becomes a condition for enactment and sec
 
 ## Procedure 5: BEEFY and the validator set
 
-BEEFY must not start until more than two thirds of the active validators, counted by validator, have real BEEFY keys and a BEEFY-capable client. BEEFY counts authorities, not stake: with N authorities it needs `N - floor((N-1)/3)` signatures, which is 134 of 200. Started earlier, it sticks permanently at the first session it cannot finalise.
+BEEFY must not start until more than two thirds of the active validators, counted by validator, have real BEEFY keys and a BEEFY-capable client. BEEFY counts authorities, not stake: with N authorities it needs `N - floor((N-1)/3)` signatures, which is 134 of 200. Started earlier, it stalls at the first session it cannot finalise and stays stalled until governance resets it with `beefy.set_new_genesis`, which restarts the voter from a new genesis block.
 
 - At enactment the runtime sets no BEEFY genesis. Confirm by reading `beefy.genesisBlock()`: it must be `None` on testnet after the soak and on mainnet after enactment. If it ever reads `Some` before the threshold is met, treat it as an incident.
 - Track the threshold from chain state: a validator's BEEFY session key that is all zeros is the placeholder from the migration. Count validators with real keys, and check `beefy.authorities()` has the same length as `session.validators()` after enactment; a shorter list means the BEEFY authority bound is truncating the set and must be fixed before any start.
