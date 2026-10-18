@@ -796,6 +796,9 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 			// full account takeover through a call that superficially "moves no value."
 			// Recovery is inherently an authority-escalation mechanism, so it's blocked
 			// wholesale for NonTransfer rather than picking apart which of its calls are safe.
+			//
+			// Hyperbridge moves funds out too: HyperFungibleToken::send escrows or burns them for a
+			// remote recipient, Ismp::fund_message pays them into the relayer fee account.
 			ProxyType::NonTransfer => !matches!(
 				c,
 				RuntimeCall::Balances(..)
@@ -804,6 +807,8 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 					| RuntimeCall::PoolAssets(..)
 					| RuntimeCall::AssetConversion(..)
 					| RuntimeCall::Recovery(..)
+					| RuntimeCall::HyperFungibleToken(..)
+					| RuntimeCall::Ismp(pallet_ismp::Call::fund_message { .. })
 			),
 			ProxyType::Governance => matches!(
 				c,
@@ -3670,6 +3675,34 @@ mod tests {
             assert!(ProxyType::Any.filter(&asset_conversion_call));
             assert!(ProxyType::Any.filter(&recovery_call));
         });
+    }
+
+    // A NonTransfer proxy cannot bridge the real account's funds out or pay a relayer fee from
+    // them; a harmless call still passes.
+    #[test]
+    fn non_transfer_proxy_blocks_hft_and_fund_message() {
+        use pallet_hyper_fungible_token::types::SendParams;
+        let send = RuntimeCall::HyperFungibleToken(pallet_hyper_fungible_token::Call::send {
+            params: SendParams {
+                asset_id: 1u128,
+                destination: StateMachine::Evm(1),
+                recipient: Default::default(),
+                amount: 1,
+                timeout: 0,
+                relayer_fee: 0,
+                call_data: None,
+            },
+        });
+        let fund_message = RuntimeCall::Ismp(pallet_ismp::Call::fund_message {
+            message: pallet_ismp::FundMessageParams {
+                commitment: pallet_ismp::MessageCommitment::Request(Default::default()),
+                amount: 1,
+            },
+        });
+        let remark = RuntimeCall::System(frame_system::Call::remark { remark: vec![] });
+        assert!(!ProxyType::NonTransfer.filter(&send));
+        assert!(!ProxyType::NonTransfer.filter(&fund_message));
+        assert!(ProxyType::NonTransfer.filter(&remark));
     }
 
     // F-066: asset id 0 is reserved. A signed origin must be rejected for id 0 and
