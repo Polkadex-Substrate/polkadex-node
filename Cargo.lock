@@ -6861,8 +6861,6 @@ dependencies = [
 [[package]]
 name = "ismp-grandpa"
 version = "2512.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba73dd0e6e958a88ee0142514bff3985431560636d13db00a9357ae5dcea59d1"
 dependencies = [
  "anyhow",
  "ckb-merkle-mountain-range",
