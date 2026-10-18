@@ -272,13 +272,11 @@ use sp_consensus::SelectChain;
 use sp_consensus_babe::BabeApi;
 use sp_consensus_beefy::AuthorityIdBound;
 use sp_keystore::KeystorePtr;
-// use sp_core::H256; // unused after Ismp RPC removal
 use sp_runtime::{OpaqueExtrinsic, traits::{BlakeTwo256}};
-//use pallet_ismp_rpc::{IsmpApiServer, IsmpRpcHandler};
 use rpc_assets::{PolkadexAssetHandlerRpc, PolkadexAssetHandlerRpcApiServer};
 use swap_rpc::{PolkadexSwapRpc, PolkadexSwapRpcApiServer};
-// ismp/ocex/rewards RPC handlers — commented out while pallets are removed from runtime
-// use ismp_rpc::{IsmpApiServer, IsmpRpcHandler};
+use ismp_rpc::{IsmpApiServer, IsmpRpcHandler};
+// ocex/rewards RPC handlers — commented out while pallets are removed from runtime
 // use pallet_rewards_rpc::PolkadexRewardsRpc;
 // use pallet_ocex_rpc::PolkadexOcexRpc;
 // use pallet_ocex_rpc::PolkadexOcexRpcApiServer;
@@ -375,7 +373,7 @@ where
 	SC: SelectChain<Block> + 'static,
 	B: sc_client_api::Backend<Block> + Send + Sync + 'static,
 	B::State: sc_client_api::backend::StateBackend<sp_runtime::traits::HashingFor<Block>>,
-	// C::Api: pallet_ismp_runtime_api::IsmpRuntimeApi<Block, H256>, // Ismp pallet removed
+	C::Api: pallet_ismp_runtime_api::IsmpRuntimeApi<Block, Hash>,
 	C::Api: rpc_assets::PolkadexAssetHandlerRuntimeApi<Block, AccountId, Hash>,
 	// C::Api: pallet_rewards_rpc::PolkadexRewardsRuntimeApi<Block, AccountId, Hash>, // Rewards pallet removed
 	// C::Api: pallet_ocex_rpc::PolkadexOcexRuntimeApi<Block, AccountId, Hash>, // OCEX pallet removed
@@ -422,7 +420,7 @@ where
 		.into_rpc(),
 	)?;
 	io.merge(TransactionPayment::new(client.clone()).into_rpc())?;
-	// io.merge(IsmpRpcHandler::new(client.clone(), backend.clone())?.into_rpc())?; // Ismp pallet removed
+	io.merge(IsmpRpcHandler::new(client.clone(), backend.clone())?.into_rpc())?;
 	io.merge(
 		Babe::new(client.clone(), babe_worker_handle.clone(), keystore, select_chain).into_rpc(),
 	)?;
