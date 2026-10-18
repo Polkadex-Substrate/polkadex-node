@@ -6877,25 +6877,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ismp-parachain"
-version = "2512.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c4e20f51a845adb788cce8972c751819f847d0f06d15f744c3cfd446ccba02d"
-dependencies = [
- "hex",
- "hex-literal 0.4.1",
- "ismp",
- "log",
- "pallet-ismp",
- "parity-scale-codec",
- "polkadot-sdk",
- "primitive-types 0.13.1",
- "scale-info",
- "serde",
- "substrate-state-machine",
-]
-
-[[package]]
 name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8644,7 +8625,6 @@ dependencies = [
  "hex-literal 1.1.0",
  "ismp",
  "ismp-grandpa",
- "ismp-parachain",
  "log",
  "orderbook-primitives",
  "pallet-asset-conversion",
@@ -8671,6 +8651,7 @@ dependencies = [
  "pallet-im-online",
  "pallet-indices",
  "pallet-ismp",
+ "pallet-ismp-params",
  "pallet-ismp-runtime-api",
  "pallet-lmp",
  "pallet-membership",
@@ -10104,6 +10085,17 @@ dependencies = [
  "scale-info",
  "serde",
  "sp-io",
+]
+
+[[package]]
+name = "pallet-ismp-params"
+version = "1.0.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "ismp",
+ "parity-scale-codec",
+ "scale-info",
 ]
 
 [[package]]
@@ -12882,6 +12874,7 @@ dependencies = [
  "frame-benchmarking-cli",
  "frame-support",
  "frame-system-rpc-runtime-api",
+ "frame-try-runtime",
  "futures 0.3.31",
  "futures-timer",
  "jsonrpsee",

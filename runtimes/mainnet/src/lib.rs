@@ -91,7 +91,7 @@ use polkadex_primitives::Nonce; // AssetId unused after OCEX removal
 // use rust_decimal::Decimal; // unused after OCEX removal
 use sp_api::impl_runtime_apis;
 use sp_authority_discovery::AuthorityId as AuthorityDiscoveryId;
-use sp_core::{crypto::KeyTypeId, OpaqueMetadata}; // H256 unused after ismp removal
+use sp_core::{crypto::KeyTypeId, OpaqueMetadata, H256};
 use sp_inherents::{CheckInherentsResult, InherentData};
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -120,15 +120,13 @@ use sp_consensus_beefy::{
 	ecdsa_crypto::{AuthorityId as BeefyId, Signature as BeefySignature},
 	mmr::MmrLeafVersion,
 };
-// ismp imports — commented out with Ismp/IsmpGrandpa/HyperFungibleToken pallets
-// use ismp::Error as IsmpError;
-use ismp::host::StateMachine; // still referenced by some type bounds
-// use ismp::module::IsmpModule;
-// use ismp::router::{GetResponse, IsmpRouter, Request};
-// use ismp::consensus::{ConsensusClientId, StateMachineHeight, StateMachineId};
-// use pallet_ismp::ModuleId;
-//use weights::{ismp_parachain as ismp_parachain_weight};
-// use weights::{ismp_grandpa as ismp_grandpa_weight}; // unused after IsmpGrandpa removal
+use ismp::{
+	consensus::{ConsensusClientId, StateMachineHeight, StateMachineId},
+	host::StateMachine,
+	module::IsmpModule,
+	router::{GetResponse, IsmpRouter, Request},
+	Error as IsmpError,
+};
 
 /// Implementations of some helper traits passed into runtime modules as associated types.
 pub mod impls;
@@ -169,7 +167,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 392,
+    spec_version: 393,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     // Bumped 2→3: TxExtension tuple changed vs old SignedExtra —
@@ -483,8 +481,6 @@ parameter_types! {
     pub const MixnetNumRegisterStartSlackBlocks: BlockNumber = 3;
     pub const MixnetNumRegisterEndSlackBlocks: BlockNumber = 3;
     pub const MixnetRegistrationPriority: TransactionPriority = ImOnlineUnsignedPriority::get() - 1;
-    // The hyperbridge parachain on Polkadot
-    pub const Coprocessor: Option<StateMachine> = Some(StateMachine::Kusama(4009));
     // The host state machine of this pallet
     pub const HostStateMachine: StateMachine = StateMachine::Substrate(*b"PDEX");
     pub const Decimals: u8 = 12;
@@ -531,24 +527,6 @@ const_assert!(DesiredMembers::get() <= CouncilMaxMembers::get());
 //	type SelectCore = cumulus_pallet_parachain_system::DefaultCoreSelector<Runtime>;
 //}
 
-//impl ismp_parachain::Config for Runtime {
-//	type RuntimeEvent = RuntimeEvent;
-//	type IsmpHost = Ismp;
-//	type WeightInfo = ismp_parachain_weight::WeightInfo<Runtime>;
-//	type RootOrigin = EnsureRoot<AccountId>;
-//}
-
-// impl pallet_hyperbridge::Config for Runtime {
-// 	type IsmpHost = Ismp;
-// }
-
-// impl ismp_grandpa::Config for Runtime {
-// 	type IsmpHost = Ismp;
-// 	type WeightInfo = ismp_grandpa_weight::WeightInfo<Runtime>;
-// 	// type RootOrigin = EnsureRoot<AccountId>;
-// 	type RootOrigin = EnsureRootOrHalfCouncil;
-// }
-
 /// Should provide an account that is funded and can be used to pay for asset creation
 pub struct AssetAdmin;
 
@@ -559,98 +537,57 @@ impl Get<AccountId> for AssetAdmin {
 }
 
 
-// impl pallet_hyper_fungible_token::Config for Runtime {
-//     type Dispatcher = Ismp;
-//     type Assets = Assets;
-//     type NativeCurrency = Balances;
-//     type NativeAssetId = PolkadexAssetId;
-//     type CreateOrigin = EnsureRootOrHalfCouncil;
-//     type Decimals = Decimals;
-//     type EvmToSubstrate = ();
-//     type WeightInfo = ();
-// }
+impl pallet_ismp::Config for Runtime {
+	// Root only: a consensus client can redirect the whole bridge (referendum or TC fast-track).
+	type AdminOrigin = EnsureRoot<AccountId>;
+	type HostStateMachine = HostStateMachine;
+	type TimestampProvider = Timestamp;
+	// Relayer fees in PDEX for now; a stablecoin can replace it later.
+	type Currency = Balances;
+	type Balance = Balance;
+	type Router = Router;
+	// Set by governance (Gargantua Kusama(4009), Nexus Polkadot(3367)); None until then.
+	type Coprocessor = IsmpParams;
+	type ConsensusClients = (ismp_grandpa::consensus::GrandpaConsensusClient<Runtime>,);
+	type OffchainDB = ();
+	// Delivery is unsigned in this version; the handler's result is discarded.
+	type FeeHandler = ();
+	type MigrationWeightInfo = ();
+}
 
-// impl pallet_ismp::Config for Runtime {
-//     // type AdminOrigin = EnsureRoot<AccountId>;
-// 	type AdminOrigin = EnsureRootOrHalfCouncil;
-//     type HostStateMachine = HostStateMachine;
-//     type TimestampProvider = Timestamp;
-//     type Currency = Balances;
-//     type Balance = Balance;
-//     type Router = Router;
-//     type Coprocessor = Coprocessor;
-// 	//type ConsensusClients = (ismp_parachain::ParachainConsensusClient<Runtime, IsmpParachain>,);
-// 	type ConsensusClients = (
-//         ismp_grandpa::consensus::GrandpaConsensusClient<Runtime>,
-//     );
-//     type OffchainDB = ();
-//     type FeeHandler = ();
-//     type MigrationWeightInfo = ();
-// }
+impl ismp_grandpa::Config for Runtime {
+	type IsmpHost = Ismp;
+	type WeightInfo = weights::ismp_grandpa::WeightInfo<Runtime>;
+	type RootOrigin = EnsureRoot<AccountId>;
+}
 
-// #[derive(Default)]
-// pub struct Router;
-// impl IsmpRouter for Router {
-//     fn module_for_id(&self, id: Vec<u8>) -> Result<Box<dyn IsmpModule>, anyhow::Error> {
-//         let module_id = ModuleId::from_bytes(&id).map_err(|e| anyhow::anyhow!("{}", e))?;
-//         let module = match module_id {
-//             pallet_hyper_fungible_token::PALLET_ID =>
-//                 Box::new(pallet_hyper_fungible_token::Pallet::<Runtime>::default()),
-//             _ => Err(IsmpError::ModuleNotFound(id))?
-//         };
-//         Ok(module)
-//     }
-// }
+impl pallet_ismp_params::Config for Runtime {}
 
-// #[derive(Default)]
-// pub struct Router;
-// impl IsmpRouter for Router {
-//     fn module_for_id(&self, id: Vec<u8>) -> Result<Box<dyn IsmpModule>, anyhow::Error> {
-//         //let module = match id.as_slice() {
-//         //    YOUR_MODULE_ID => Box::new(YourModule::default()),
-//         //    _ => Err(IsmpError::ModuleNotFound(id))?
-//         //};
-//         match id.as_slice() {
-//             // pallet_hyperbridge::PALLET_HYPERBRIDGE_ID => {
-//             //     Ok(Box::new(pallet_hyperbridge::Pallet::<Runtime>::default()))
-//             // }
-// 			pallet_hyper_fungible_token::PALLET_ID => {
-//                 Ok(Box::new(pallet_hyper_fungible_token::Pallet::<Runtime>::default()))
-// 			}
-//             _ => Err(IsmpError::ModuleNotFound(id))?,
-//         }
-//     }
-// }
+impl pallet_hyper_fungible_token::Config for Runtime {
+	type Dispatcher = Ismp;
+	type Assets = Assets;
+	type NativeCurrency = Balances;
+	type NativeAssetId = PolkadexAssetId;
+	// Token registration is operational: Root or half the council.
+	type CreateOrigin = EnsureRootOrHalfCouncil;
+	type Decimals = Decimals;
+	type EvmToSubstrate = ();
+	// The crate ships no benchmarks, only these placeholder weights.
+	type WeightInfo = ();
+}
 
-/// Some custom module capable of processing some incoming/request or response.
-/// This could also be a pallet itself.
-// #[derive(Default)]
-// struct YourModule;
+/// Routes ISMP messages to modules; pallet-ismp handles `HYPR-FEE` before asking it.
+#[derive(Default)]
+pub struct Router;
 
-// pub const YOUR_MODULE_ID: &'static [u8] = &[12, 24, 36, 48];
-
-// impl IsmpModule for YourModule {
-//     /// Called by the ISMP hanlder, to notify module of a new POST request
-//     /// the module may choose to respond immediately, or in a later block
-//     fn on_accept(&self, request: PostRequest) -> Result<(), anyhow::Error> {
-//         // do something useful with the request
-//         Ok(())
-//     }
-
-//     /// Called by the ISMP hanlder, to notify module of a response to a previously
-//     /// sent out request
-//     fn on_response(&self, response: Response) -> Result<(), anyhow::Error> {
-//         // do something useful with the response
-//         Ok(())
-//     }
-
-//     /// Called by the ISMP hanlder, to notify module of requests that were previously
-//     /// sent but have now timed-out
-// 	fn on_timeout(&self, request: Timeout) -> Result<(), anyhow::Error> {
-//         // revert any state changes that were made prior to dispatching the request
-//         Ok(())
-//     }
-// }
+impl IsmpRouter for Router {
+	fn module_for_id(&self, id: Vec<u8>) -> Result<Box<dyn IsmpModule>, anyhow::Error> {
+		if id == pallet_hyper_fungible_token::PALLET_ID.to_bytes() {
+			return Ok(Box::new(HyperFungibleToken::default()));
+		}
+		Err(IsmpError::ModuleNotFound(id).into())
+	}
+}
 
 /// Native transaction fees and tips go entirely to the Treasury, as on mainnet spec 373.
 /// (The SDK template this runtime started from gave 20% of both to the block author.)
@@ -2526,20 +2463,19 @@ mod runtime {
     // #67 was Society - REMOVED (SDK template pallet, never on mainnet; mainnet has no storage
     // under its prefix). Do not reuse this index.
 
-    // #[runtime::pallet_index(68)]
-    // pub type Ismp = pallet_ismp::Pallet<Runtime>;
+    #[runtime::pallet_index(68)]
+    pub type Ismp = pallet_ismp::Pallet<Runtime>;
 
-    // #[runtime::pallet_index(69)]
-    // pub type IsmpGrandpa = ismp_grandpa::Pallet<Runtime>;
+    #[runtime::pallet_index(69)]
+    pub type IsmpGrandpa = ismp_grandpa::Pallet<Runtime>;
 
-    // #[runtime::pallet_index(70)]
-    // pub type Hyperbridge = pallet_hyperbridge::Pallet<Runtime>;
+    // #70 (Hyperbridge) and #71 (TokenGateway) are dead upstream. Do not reuse these indices.
 
-    // #[runtime::pallet_index(71)]
-	// pub type TokenGateway = pallet_token_gateway::Pallet<Runtime>;
+    #[runtime::pallet_index(72)]
+    pub type HyperFungibleToken = pallet_hyper_fungible_token::Pallet<Runtime>;
 
-    // #[runtime::pallet_index(72)]
-    // pub type HyperFungibleToken = pallet_hyper_fungible_token::Pallet<Runtime>;
+    #[runtime::pallet_index(73)]
+    pub type IsmpParams = pallet_ismp_params::Pallet<Runtime>;
 
 }
 
@@ -2897,6 +2833,7 @@ mod benches {
 		[pallet_utility, Utility]
 		[pallet_proxy, Proxy]
 		[pallet_multisig, Multisig]
+		[pallet_ismp, Ismp]
 	);
 }
 
@@ -3413,35 +3350,44 @@ impl_runtime_apis! {
 	// 	}
 	// }
 
-    // impl pallet_ismp_runtime_api::IsmpRuntimeApi<Block, <Block as BlockT>::Hash> for Runtime {
-    //     fn host_state_machine() -> StateMachine {
-    //       <Runtime as pallet_ismp::Config>::HostStateMachine::get()
-    //     }
-    //     fn challenge_period(state_machine_id: StateMachineId) -> Option<u64> {
-    //       pallet_ismp::Pallet::<Runtime>::challenge_period(state_machine_id)
-    //     }
-    //     fn block_events() -> Vec<::ismp::events::Event> {
-    //       pallet_ismp::Pallet::<Runtime>::block_events()
-    //     }
-    //     fn block_events_with_metadata() -> Vec<(::ismp::events::Event, Option<u32>)> {
-    //       pallet_ismp::Pallet::<Runtime>::block_events_with_metadata()
-    //     }
-    //     fn consensus_state(id: ConsensusClientId) -> Option<Vec<u8>> {
-    //       pallet_ismp::Pallet::<Runtime>::consensus_states(id)
-    //     }
-    //     fn state_machine_update_time(height: StateMachineHeight) -> Option<u64> {
-    //       pallet_ismp::Pallet::<Runtime>::state_machine_update_time(height)
-    //     }
-    //     fn latest_state_machine_height(id: StateMachineId) -> Option<u64> {
-    //       pallet_ismp::Pallet::<Runtime>::latest_state_machine_height(id)
-    //     }
-    //     fn requests(commitments: Vec<H256>) -> Vec<Request> {
-    //       pallet_ismp::Pallet::<Runtime>::requests(commitments)
-    //     }
-    //     fn responses(commitments: Vec<H256>) -> Vec<GetResponse> {
-    //       pallet_ismp::Pallet::<Runtime>::responses(commitments)
-    //     }
-    // }
+	impl pallet_ismp_runtime_api::IsmpRuntimeApi<Block, <Block as BlockT>::Hash> for Runtime {
+		fn host_state_machine() -> StateMachine {
+			<Runtime as pallet_ismp::Config>::HostStateMachine::get()
+		}
+
+		fn challenge_period(state_machine_id: StateMachineId) -> Option<u64> {
+			Ismp::challenge_period(state_machine_id)
+		}
+
+		fn block_events() -> Vec<::ismp::events::Event> {
+			Ismp::block_events()
+		}
+
+		fn block_events_with_metadata() -> Vec<(::ismp::events::Event, Option<u32>)> {
+			Ismp::block_events_with_metadata()
+		}
+
+		fn consensus_state(id: ConsensusClientId) -> Option<Vec<u8>> {
+			Ismp::consensus_states(id)
+		}
+
+		// 2512.2.0 writes update times to the bounded map only; its getter reads the legacy map.
+		fn state_machine_update_time(height: StateMachineHeight) -> Option<u64> {
+			pallet_ismp::BoundedStateMachineUpdateTime::<Runtime>::get(height.id, height.height)
+		}
+
+		fn latest_state_machine_height(id: StateMachineId) -> Option<u64> {
+			Ismp::latest_state_machine_height(id)
+		}
+
+		fn requests(commitments: Vec<H256>) -> Vec<Request> {
+			Ismp::requests(commitments)
+		}
+
+		fn responses(commitments: Vec<H256>) -> Vec<GetResponse> {
+			Ismp::responses(commitments)
+		}
+	}
 
 
 	#[cfg(feature = "try-runtime")]
@@ -3985,5 +3931,113 @@ mod tests {
             )
             .is_ok());
         });
+    }
+
+    // Hyperbridge pallets sit at 68, 69, 72 and 73; 70 and 71 stay unused.
+    #[test]
+    fn ismp_pallets_take_indices_68_69_72_73() {
+        use frame_support::traits::PalletsInfoAccess;
+        let infos = AllPalletsWithSystem::infos();
+        for (name, index) in
+            [("Ismp", 68), ("IsmpGrandpa", 69), ("HyperFungibleToken", 72), ("IsmpParams", 73)]
+        {
+            assert_eq!(
+                infos.iter().find(|p| p.name == name).map(|p| p.index),
+                Some(index),
+                "{name} sits at {index}",
+            );
+        }
+        assert!(infos.iter().all(|p| p.index != 70 && p.index != 71), "70 and 71 stay unused");
+    }
+
+    #[test]
+    fn ismp_host_state_machine_is_pdex() {
+        assert_eq!(
+            <Runtime as pallet_ismp::Config>::HostStateMachine::get(),
+            StateMachine::Substrate(*b"PDEX"),
+        );
+    }
+
+    // The coprocessor is None until Root sets it; signed and council origins are refused.
+    #[test]
+    fn ismp_coprocessor_is_unset_until_root_sets_it() {
+        type Coprocessor = <Runtime as pallet_ismp::Config>::Coprocessor;
+        let gargantua = Some(StateMachine::Kusama(4009));
+        let nexus = Some(StateMachine::Polkadot(3367));
+        let council: RuntimeOrigin =
+            pallet_collective::RawOrigin::<AccountId, CouncilCollective>::Members(5, 5).into();
+        new_test_ext().execute_with(|| {
+            assert_eq!(Coprocessor::get(), None);
+            for origin in [RuntimeOrigin::signed(AccountId::from([61u8; 32])), council] {
+                assert_noop!(
+                    IsmpParams::set_coprocessor(origin, gargantua),
+                    sp_runtime::DispatchError::BadOrigin,
+                );
+            }
+            for coprocessor in [gargantua, nexus] {
+                assert_ok!(IsmpParams::set_coprocessor(RuntimeOrigin::root(), coprocessor));
+                assert_eq!(Coprocessor::get(), coprocessor);
+            }
+        });
+    }
+
+    // A consensus client can redirect the whole bridge: Root only, even a unanimous council is
+    // refused.
+    #[test]
+    fn ismp_create_consensus_client_is_root_only() {
+        let message = ismp::messaging::CreateConsensusState {
+            consensus_state: vec![],
+            consensus_client_id: ismp_grandpa::consensus::GRANDPA_CONSENSUS_ID,
+            consensus_state_id: *b"ksma",
+            unbonding_period: 0,
+            challenge_periods: Default::default(),
+            state_machine_commitments: vec![],
+        };
+        let council: RuntimeOrigin =
+            pallet_collective::RawOrigin::<AccountId, CouncilCollective>::Members(5, 5).into();
+        new_test_ext().execute_with(|| {
+            for origin in [RuntimeOrigin::signed(AccountId::from([62u8; 32])), council] {
+                assert_noop!(
+                    Ismp::create_consensus_client(origin, message.clone()),
+                    sp_runtime::DispatchError::BadOrigin,
+                );
+            }
+            assert_ok!(Ismp::create_consensus_client(RuntimeOrigin::root(), message));
+            assert!(pallet_ismp::ConsensusStates::<Runtime>::get(*b"ksma").is_some());
+        });
+    }
+
+    // Token registration is operational: Root or more than half the council.
+    #[test]
+    fn hft_register_token_is_root_or_half_council() {
+        use pallet_hyper_fungible_token::types::{ChainConfig, TokenRegistration};
+        let config = ChainConfig { token_contract: Default::default(), decimals: 18 };
+        let registration = TokenRegistration {
+            local_id: 1u128,
+            native: false,
+            chains: [(StateMachine::Evm(1), config)].into(),
+        };
+        let council = |ayes: u32| -> RuntimeOrigin {
+            pallet_collective::RawOrigin::<AccountId, CouncilCollective>::Members(ayes, 5).into()
+        };
+        new_test_ext().execute_with(|| {
+            for origin in [RuntimeOrigin::signed(AccountId::from([63u8; 32])), council(2)] {
+                assert_noop!(
+                    HyperFungibleToken::register_token(origin, registration.clone()),
+                    sp_runtime::DispatchError::BadOrigin,
+                );
+            }
+            assert_ok!(HyperFungibleToken::register_token(council(3), registration.clone()));
+            assert_ok!(HyperFungibleToken::register_token(RuntimeOrigin::root(), registration));
+        });
+    }
+
+    // b"pall_hft" reaches the HFT pallet; any other id is ModuleNotFound.
+    #[test]
+    fn ismp_router_maps_pall_hft_and_rejects_unknown_ids() {
+        assert!(Router.module_for_id(b"pall_hft".to_vec()).is_ok());
+        let unknown = b"unknown!".to_vec();
+        let err = Router.module_for_id(unknown.clone()).err().expect("unknown ids are refused");
+        assert_eq!(err.downcast_ref::<IsmpError>(), Some(&IsmpError::ModuleNotFound(unknown)));
     }
 }
