@@ -3991,7 +3991,8 @@ mod tests {
         );
     }
 
-    // The coprocessor is None until Root sets it; signed and council origins are refused.
+    // The coprocessor is None until Root sets it, and each set emits CoprocessorSet; signed and
+    // council origins are refused.
     #[test]
     fn ismp_coprocessor_is_unset_until_root_sets_it() {
         type Coprocessor = <Runtime as pallet_ismp::Config>::Coprocessor;
@@ -4000,6 +4001,7 @@ mod tests {
         let council: RuntimeOrigin =
             pallet_collective::RawOrigin::<AccountId, CouncilCollective>::Members(5, 5).into();
         new_test_ext().execute_with(|| {
+            frame_system::Pallet::<Runtime>::set_block_number(1); // no events at genesis
             assert_eq!(Coprocessor::get(), None);
             for origin in [RuntimeOrigin::signed(AccountId::from([61u8; 32])), council] {
                 assert_noop!(
@@ -4007,9 +4009,12 @@ mod tests {
                     sp_runtime::DispatchError::BadOrigin,
                 );
             }
-            for coprocessor in [gargantua, nexus] {
+            for coprocessor in [gargantua, nexus, None] {
                 assert_ok!(IsmpParams::set_coprocessor(RuntimeOrigin::root(), coprocessor));
                 assert_eq!(Coprocessor::get(), coprocessor);
+                frame_system::Pallet::<Runtime>::assert_last_event(
+                    pallet_ismp_params::Event::<Runtime>::CoprocessorSet { coprocessor }.into(),
+                );
             }
         });
     }
