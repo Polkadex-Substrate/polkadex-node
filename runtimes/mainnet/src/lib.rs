@@ -568,8 +568,8 @@ impl pallet_hyper_fungible_token::Config for Runtime {
 	type Assets = Assets;
 	type NativeCurrency = Balances;
 	type NativeAssetId = PolkadexAssetId;
-	// Token registration is operational: Root or half the council.
-	type CreateOrigin = EnsureRootOrHalfCouncil;
+	// Root only: a registration picks the EVM contract that may mint or release the asset.
+	type CreateOrigin = EnsureRoot<AccountId>;
 	type Decimals = Decimals;
 	type EvmToSubstrate = ();
 	// The crate ships no benchmarks, only these placeholder weights.
@@ -4007,9 +4007,10 @@ mod tests {
         });
     }
 
-    // Token registration is operational: Root or more than half the council.
+    // A registration picks the EVM contract trusted to mint or release the asset: Root only, even
+    // a unanimous council is refused.
     #[test]
-    fn hft_register_token_is_root_or_half_council() {
+    fn hft_register_token_is_root_only() {
         use pallet_hyper_fungible_token::types::{ChainConfig, TokenRegistration};
         let config = ChainConfig { token_contract: Default::default(), decimals: 18 };
         let registration = TokenRegistration {
@@ -4017,17 +4018,15 @@ mod tests {
             native: false,
             chains: [(StateMachine::Evm(1), config)].into(),
         };
-        let council = |ayes: u32| -> RuntimeOrigin {
-            pallet_collective::RawOrigin::<AccountId, CouncilCollective>::Members(ayes, 5).into()
-        };
+        let council: RuntimeOrigin =
+            pallet_collective::RawOrigin::<AccountId, CouncilCollective>::Members(5, 5).into();
         new_test_ext().execute_with(|| {
-            for origin in [RuntimeOrigin::signed(AccountId::from([63u8; 32])), council(2)] {
+            for origin in [RuntimeOrigin::signed(AccountId::from([63u8; 32])), council] {
                 assert_noop!(
                     HyperFungibleToken::register_token(origin, registration.clone()),
                     sp_runtime::DispatchError::BadOrigin,
                 );
             }
-            assert_ok!(HyperFungibleToken::register_token(council(3), registration.clone()));
             assert_ok!(HyperFungibleToken::register_token(RuntimeOrigin::root(), registration));
         });
     }
