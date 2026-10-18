@@ -35,8 +35,16 @@ pub mod pallet {
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
 
+	// FRAME 2512 appends `frame_system::Config<RuntimeEvent: From<Event<Self>>>` itself.
 	#[pallet::config]
 	pub trait Config: frame_system::Config {}
+
+	#[pallet::event]
+	#[pallet::generate_deposit(pub(super) fn deposit_event)]
+	pub enum Event<T: Config> {
+		/// The coprocessor was set, or cleared with `None`.
+		CoprocessorSet { coprocessor: Option<StateMachine> },
+	}
 
 	/// The coprocessor state machine; `None` until Root sets it.
 	#[pallet::storage]
@@ -54,6 +62,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			ensure_root(origin)?;
 			Coprocessor::<T>::set(coprocessor);
+			Self::deposit_event(Event::CoprocessorSet { coprocessor });
 			Ok(())
 		}
 	}
