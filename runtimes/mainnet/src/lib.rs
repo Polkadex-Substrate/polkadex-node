@@ -3755,6 +3755,43 @@ mod tests {
         assert_eq!(<Runtime as pallet_elections_phragmen::Config>::DesiredMembers::get(), 5);
     }
 
+    // The dev and local presets build as the node builds them (the preset merged into the default
+    // config): Elections, the council and the technical committee get the same 5 accounts.
+    #[test]
+    fn dev_and_local_presets_build() {
+        use serde_json::Value;
+        use sp_genesis_builder::{DEV_RUNTIME_PRESET, LOCAL_TESTNET_RUNTIME_PRESET};
+        // sc-chain-spec's json_patch::merge.
+        fn merge(a: &mut Value, b: Value) {
+            match (a, b) {
+                (Value::Object(a), Value::Object(b)) =>
+                    for (k, v) in b {
+                        merge(a.entry(k).or_insert(Value::Null), v);
+                    },
+                (a, b) => *a = b,
+            }
+        }
+        for id in [DEV_RUNTIME_PRESET, LOCAL_TESTNET_RUNTIME_PRESET] {
+            let patch = genesis_config_presets::get_preset(&id.into()).expect("preset exists");
+            let mut config = serde_json::to_value(RuntimeGenesisConfig::default()).unwrap();
+            merge(&mut config, serde_json::from_slice(&patch).unwrap());
+            sp_io::TestExternalities::new_empty().execute_with(|| {
+                build_state::<RuntimeGenesisConfig>(serde_json::to_vec(&config).unwrap()).unwrap();
+                let elected: Vec<AccountId> = pallet_elections_phragmen::Members::<Runtime>::get()
+                    .into_iter()
+                    .map(|seat| seat.who)
+                    .collect();
+                assert_eq!(elected.len() as u32, DesiredMembers::get(), "{id}");
+                for members in [
+                    pallet_collective::Members::<Runtime, CouncilCollective>::get(),
+                    pallet_collective::Members::<Runtime, TechnicalCollective>::get(),
+                ] {
+                    assert_eq!(members, elected, "{id}");
+                }
+            });
+        }
+    }
+
     // Native fees and tips go entirely to the Treasury, as on mainnet spec 373. The SDK template
     // gave 20% of both to the block author. Transaction payment hands DealWithFees the fee, then
     // the tip; the whole sum must land in the Treasury account and nothing may be burned.
