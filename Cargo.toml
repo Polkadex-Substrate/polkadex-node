@@ -236,7 +236,7 @@ ismp = { version = "=2512.1.0", default-features = false }
 pallet-ismp = { version = "=2512.2.0", default-features = false }
 ismp-rpc = { version = "=2512.1.0", default-features = false, package = "pallet-ismp-rpc"}
 ismp-parachain = { version = "=2512.3.0", default-features = false }
-ismp-grandpa = { version = "=2512.1.0", default-features = false }
+ismp-grandpa = { version = "=2512.2.0", default-features = false }
 pallet-ismp-runtime-api = { version = "=2512.1.0", default-features = false }
 pallet-hyper-fungible-token = { version = "=2512.0.0", default-features = false }
 # CUSTOM
@@ -273,5 +273,3 @@ pallet-elections-phragmen = { path = "vendor/pallet-elections-phragmen" }
 # Copy of the crates.io release that caps the RocksDB write-ahead logs (node issue #27); see
 # the note at the top of vendor/sc-client-db/src/utils.rs.
 sc-client-db = { path = "vendor/sc-client-db" }
-# ismp-grandpa 2512.1.0 with hyperbridge #1069 backported (vendor/ismp-grandpa/PATCHES.md).
-ismp-grandpa = { path = "vendor/ismp-grandpa" }
