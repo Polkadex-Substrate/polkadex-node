@@ -168,7 +168,8 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
     spec_version: 393,
-    impl_version: 0,
+    // 1: the rehearsal chain already runs 393/0; mainnet goes from 392 straight to 393/1.
+    impl_version: 1,
     apis: RUNTIME_API_VERSIONS,
     // Bumped 2→3: TxExtension tuple changed vs old SignedExtra —
     // SkipCheckIfFeeless wrapper added around ChargeAssetTxPayment (pos 8),
@@ -4080,6 +4081,52 @@ mod tests {
             }
             assert_ok!(Ismp::create_consensus_client(RuntimeOrigin::root(), message));
             assert!(pallet_ismp::ConsensusStates::<Runtime>::get(*b"ksma").is_some());
+        });
+    }
+
+    // Hyperbridge #1069 (ismp-grandpa 2512.2.0): a relay finality proof re-wrapped as
+    // StandaloneChain for a parachain tracker fails the envelope check before any proof check.
+    #[test]
+    fn ismp_grandpa_refuses_a_relay_proof_wrapped_as_standalone() {
+        use grandpa_verifier::Error::{ConsensusMessageStateMachineMismatch, UnknownHeadersEmpty};
+        use grandpa_verifier_primitives::{ConsensusState, FinalityProof};
+        use ismp::consensus::ConsensusClient;
+        use ismp_grandpa::{
+            consensus::GrandpaConsensusClient,
+            messages::{ConsensusMessage, RelayChainMessage, StandaloneChainMessage},
+        };
+        let coprocessor = StateMachine::Kusama(4009);
+        let state = ConsensusState {
+            current_authorities: vec![],
+            current_set_id: 0,
+            latest_height: 0,
+            latest_hash: Default::default(),
+            slot_duration: 6000,
+            state_machine: coprocessor,
+        };
+        // Upstream's envelope-test fixture: an empty finality proof.
+        let finality_proof = FinalityProof {
+            block: Default::default(),
+            justification: vec![],
+            unknown_headers: vec![],
+        };
+        let relay = RelayChainMessage { finality_proof, parachain_headers: Default::default() };
+        let wrapped = StandaloneChainMessage { finality_proof: relay.finality_proof.clone() };
+        let client: GrandpaConsensusClient<Runtime> = Default::default();
+        let verify = |message: ConsensusMessage| {
+            let proof = message.encode();
+            client.verify_consensus(&Ismp::default(), *b"ksma", state.encode(), proof).err()
+        };
+        new_test_ext().execute_with(|| {
+            assert_eq!(
+                verify(ConsensusMessage::StandaloneChain(wrapped)),
+                Some(IsmpError::from(ConsensusMessageStateMachineMismatch(coprocessor))),
+            );
+            // The same proof in the Polkadot envelope passes the check and reaches the verifier.
+            assert_eq!(
+                verify(ConsensusMessage::Polkadot(relay)),
+                Some(IsmpError::from(UnknownHeadersEmpty)),
+            );
         });
     }
 

@@ -8624,6 +8624,8 @@ dependencies = [
  "frame-system-benchmarking",
  "frame-system-rpc-runtime-api",
  "frame-try-runtime",
+ "grandpa-verifier",
+ "grandpa-verifier-primitives",
  "hex-literal 1.1.0",
  "ismp",
  "ismp-grandpa",

@@ -121,6 +121,10 @@ rpc-assets-runtime-api = { workspace = true }
 pallet-rewards-runtime-api = { workspace = true }
 pallet-ocex-runtime-api = { workspace = true }
 
+[dev-dependencies]
+grandpa-verifier = { workspace = true }
+grandpa-verifier-primitives = { workspace = true }
+
 [build-dependencies]
 substrate-wasm-builder = { workspace = true }
 docify = { workspace = true }
