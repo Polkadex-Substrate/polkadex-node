@@ -236,7 +236,7 @@ ismp = { version = "=2512.1.0", default-features = false }
 pallet-ismp = { version = "=2512.2.0", default-features = false }
 ismp-rpc = { version = "=2512.1.0", default-features = false, package = "pallet-ismp-rpc"}
 ismp-parachain = { version = "=2512.3.0", default-features = false }
-ismp-grandpa = { version = "=2512.1.0", default-features = false }
+ismp-grandpa = { version = "=2512.2.0", default-features = false }
 pallet-ismp-runtime-api = { version = "=2512.1.0", default-features = false }
 pallet-hyper-fungible-token = { version = "=2512.0.0", default-features = false }
 # CUSTOM
@@ -266,5 +266,3 @@ polkadex-client = { path = "client", default-features = false }
 # stable2512 workspace ships a patched proc-macro 0.7.1 that does support it.
 pallet-revive-proc-macro = { git = "https://github.com/paritytech/polkadot-sdk.git", tag = "polkadot-stable2512-3" }
 pallet-hyper-fungible-token = { path = "vendor/pallet-hyper-fungible-token" }
-# ismp-grandpa 2512.1.0 with hyperbridge #1069 backported (vendor/ismp-grandpa/PATCHES.md).
-ismp-grandpa = { path = "vendor/ismp-grandpa" }

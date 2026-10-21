@@ -5896,9 +5896,9 @@ dependencies = [
 
 [[package]]
 name = "grandpa-verifier"
-version = "2512.1.0"
+version = "2512.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "238207733343847770b8bedc80de6e2ca9dc9ba14f27fa51ccf87d9c832b1518"
+checksum = "ee0b44c4c46bffc0f558529ee4e26731b17d45dc22f7e07ad4b508d6b6f82134"
 dependencies = [
  "anyhow",
  "derive_more 0.99.20",
@@ -6860,7 +6860,9 @@ dependencies = [
 
 [[package]]
 name = "ismp-grandpa"
-version = "2512.1.0"
+version = "2512.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9ee279e4ebb5436a4dc6d804d09e2f9c4fa6a51b4b75478f821b7b88acb132a"
 dependencies = [
  "anyhow",
  "ckb-merkle-mountain-range",
