@@ -237,6 +237,8 @@ pallet-ismp = { version = "=2512.2.0", default-features = false }
 ismp-rpc = { version = "=2512.1.0", default-features = false, package = "pallet-ismp-rpc"}
 ismp-parachain = { version = "=2512.3.0", default-features = false }
 ismp-grandpa = { version = "=2512.2.0", default-features = false }
+grandpa-verifier = { version = "=2512.2.0", default-features = false }
+grandpa-verifier-primitives = { version = "=2512.1.0", default-features = false }
 pallet-ismp-runtime-api = { version = "=2512.1.0", default-features = false }
 pallet-hyper-fungible-token = { version = "=2512.0.0", default-features = false }
 # CUSTOM
