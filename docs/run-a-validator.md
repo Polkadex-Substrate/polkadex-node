@@ -135,11 +135,11 @@ Example of node sync:
 
 The `--pruning=archive` flag is implied by the `--validator` flag, so it is only required explicitly if you start your node without one of these two options. If you do not set your pruning to archive node, even when not running in validator mode, you will need to re-sync your database when you switch.
 
-If you are interested in determining how much longer you have to go, your server logs (printed to STDOUT from the `Polkadex` process) will tell you the latest block your node has processed and verified. You can then compare that to the current highest block via [Telemetry](https://telemetry.polkadot.io/#list/0x3920bcb4960a1eef5580cd5367ff3f430eef052774f78468852f7b9cb39f8a3c) or the [PolkadotJS Block Explorer](https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fmainnet.polkadex.trade#/explorer).
+If you are interested in determining how much longer you have to go, your server logs (printed to STDOUT from the `Polkadex` process) will tell you the latest block your node has processed and verified. You can then compare that to the current highest block via [Telemetry](https://telemetry.polkadot.io/#list/0x3920bcb4960a1eef5580cd5367ff3f430eef052774f78468852f7b9cb39f8a3c) or the [PolkadotJS Block Explorer](https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Frpc.polkadex.ee#/explorer).
 
 
 ## Bond PDEX
-[Create two accounts](https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fmainnet.polkadex.trade#/accounts) ([here is a video guide for creating an account](https://www.youtube.com/watch?v=hhUZ40ZWqkE)) and transfer some PDEX tokens to the main account.
+[Create two accounts](https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Frpc.polkadex.ee#/accounts) ([here is a video guide for creating an account](https://www.youtube.com/watch?v=hhUZ40ZWqkE)) and transfer some PDEX tokens to the main account.
 It is highly recommended that you set your controller and stash accounts as two separate accounts. For this, you will need to create two accounts and make sure each of them have at least enough funds to pay the fees for making transactions. Keep most of your funds in the stash account since it is meant to be the custodian of your staking funds.
 
 Make sure not to bond all your PDEX balance since you will be unable to pay transaction fees from your bonded balance.
@@ -149,7 +149,7 @@ It is now time to set up your validator. You will want to do the following:
 - Bond the PDEX from your Stash account. These PDEX will be put at stake for the security of the network and can be slashed.
 - Select the Controller. This is the account that will decide when to start or stop validating.
 
-First, go to the [Staking](https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fmainnet.polkadex.trade#/staking/actions) section. Click on "Account Actions", and then the "+ Stash" button.
+First, go to the [Staking](https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Frpc.polkadex.ee#/staking/actions) section. Click on "Account Actions", and then the "+ Stash" button.
 
 ![Bonding Preferences](./screenshots/bonding_preferences.png)
 
@@ -196,6 +196,10 @@ Similarly:
 ```
 
 You can give your validator any name that you like, but note that others will be able to see it and it will be included in the list of all servers using the same telemetry server. Since numerous people are using telemetry, it is recommended that you choose something likely to be unique.
+
+##### Telemetry and privacy
+
+Telemetry is optional. Polkadex nodes report to Parity's public telemetry at [telemetry.polkadot.io](https://telemetry.polkadot.io/#list/0x3920bcb4960a1eef5580cd5367ff3f430eef052774f78468852f7b9cb39f8a3c) (filtered to the Polkadex genesis hash), where it lets the community and the team see which nodes are online and which version they run. It shows your node name, node version and an approximate city derived from the node's IP address. The mainnet chain spec lists no telemetry endpoint, so a node reports only if you start it with `--telemetry-url 'wss://telemetry.polkadot.io/submit/ 0'`; omit the flag (or pass `--no-telemetry`) to opt out. If you do report, pick a unique node name. There is no need to restart a running validator just for this flag; add it at your next planned restart or client upgrade.
 
 ##### Running a validator as a service
 
@@ -255,7 +259,7 @@ You can restart your node at this point.
 
 You need to tell the chain your Session keys by signing and submitting an extrinsic. This is what associates your validator with your Stash account.
 
-Go to [Staking > Account Actions](https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fmainnet.polkadex.trade#/staking/actions), and click "Session Key" on the bonding account you generated earlier. Enter the output from `author_rotateKeys` in the field and click "Set Session Key".
+Go to [Staking > Account Actions](https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Frpc.polkadex.ee#/staking/actions), and click "Session Key" on the bonding account you generated earlier. Enter the output from `author_rotateKeys` in the field and click "Set Session Key".
 
 > **Note:** From runtime 392 on, session keys belong to the account that signs `setKeys`, so sign it with your Stash account. The "Session Key" button signs with the Controller account. If your Controller is a separate account, use Developer > Extrinsics instead: select your Stash account, choose `session` and `setKeys`, and enter the output from `author_rotateKeys` as `keys` and `0x` as `proof`. A `setKeys` signed by the Controller succeeds but does not change your validator's keys. If you already signed it with the Controller, run `author_rotateKeys` again and sign the new keys with your Stash account.
 
