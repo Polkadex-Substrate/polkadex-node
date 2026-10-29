@@ -163,5 +163,9 @@ pub mod pallet {
 		fn fee(asset: &T::AssetId, dest: &StateMachine) -> Option<(T::AccountId, T::Balance)> {
 			Some((FeeCollector::<T>::get()?, BridgeFees::<T>::get(asset, dest)?))
 		}
+
+		fn max_call_data() -> u32 {
+			MaxCallData::<T>::get()
+		}
 	}
 }
