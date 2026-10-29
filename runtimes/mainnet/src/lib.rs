@@ -3567,6 +3567,9 @@ impl_runtime_apis! {
 }
 
 #[cfg(test)]
+mod bridge_fee_tests;
+
+#[cfg(test)]
 mod hyperbridge_tests;
 
 mod ismp_bounds;
