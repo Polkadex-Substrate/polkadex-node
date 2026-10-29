@@ -112,6 +112,12 @@ pub struct SubstrateCalldata {
 	pub runtime_call: Vec<u8>,
 }
 
+/// Polkadex: the bridge fee of `send`, set by governance
+pub trait BridgeFee<AccountId, AssetId, Balance> {
+	/// The collector and the fee for sending `asset` to `dest`; `None` while either is unset
+	fn fee(asset: &AssetId, dest: &StateMachine) -> Option<(AccountId, Balance)>;
+}
+
 /// Converts an EVM address to a substrate AccountId
 pub trait EvmToSubstrate<T: frame_system::Config> {
 	fn convert(addr: H160) -> T::AccountId;
