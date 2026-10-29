@@ -562,7 +562,12 @@ impl ismp_grandpa::Config for Runtime {
 	type RootOrigin = EnsureRoot<AccountId>;
 }
 
-impl pallet_ismp_params::Config for Runtime {}
+impl pallet_ismp_params::Config for Runtime {
+	type AssetId = u128;
+	type Balance = Balance;
+	// The council can reprice bridge fees when gas moves; the collector stays Root only.
+	type FeeOrigin = EnsureRootOrHalfCouncil;
+}
 
 impl pallet_hyper_fungible_token::Config for Runtime {
 	type Dispatcher = Ismp;
