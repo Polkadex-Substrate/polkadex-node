@@ -104,7 +104,7 @@ pub mod pallet {
 		/// Weight information for extrinsics in this pallet
 		type WeightInfo: WeightInfo;
 
-		/// Polkadex: the bridge fee of `send`, set by governance
+		/// Polkadex: the bridge fee and the `call_data` cap of `send`, set by governance
 		type BridgeFee: BridgeFee<
 			Self::AccountId,
 			AssetId<Self>,
@@ -237,6 +237,8 @@ pub mod pallet {
 		ErcDecimalsBelowLocal,
 		/// Polkadex: no bridge fee or no fee collector is set for this asset and destination
 		BridgeFeeNotSet,
+		/// Polkadex: `call_data` is longer than the governance cap
+		CallDataTooLong,
 	}
 
 	#[pallet::call]
@@ -262,6 +264,12 @@ pub mod pallet {
 			>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
+			// Polkadex: call_data within the governance cap (MaxCallData; the default 0 allows none)
+			let call_data_len = params.call_data.as_ref().map_or(0, |data| data.len());
+			ensure!(
+				call_data_len <= T::BridgeFee::max_call_data() as usize,
+				Error::<T>::CallDataTooLong
+			);
 			let dispatcher = <T as Config>::Dispatcher::default();
 
 			let token_contract =
