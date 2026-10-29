@@ -26,9 +26,9 @@ use pallet_hyper_fungible_token::WeightInfo as HftWeights;
 /// Weight functions for `pallet_hyper_fungible_token`.
 pub struct WeightInfo<T>(PhantomData<T>);
 impl<T: frame_system::Config> HftWeights for WeightInfo<T> {
-	// The hook reads the fee and the collector and moves the fee between two accounts.
+	// The hook reads MaxCallData, FeeCollector, BridgeFees and both accounts, and moves the fee.
 	fn send() -> Weight {
-		<() as HftWeights>::send().saturating_add(T::DbWeight::get().reads_writes(2, 4))
+		<() as HftWeights>::send().saturating_add(T::DbWeight::get().reads_writes(5, 4))
 	}
 	fn register_token(c: u32) -> Weight {
 		<() as HftWeights>::register_token(c)
