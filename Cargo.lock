@@ -5896,9 +5896,9 @@ dependencies = [
 
 [[package]]
 name = "grandpa-verifier"
-version = "2512.1.0"
+version = "2512.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "238207733343847770b8bedc80de6e2ca9dc9ba14f27fa51ccf87d9c832b1518"
+checksum = "ee0b44c4c46bffc0f558529ee4e26731b17d45dc22f7e07ad4b508d6b6f82134"
 dependencies = [
  "anyhow",
  "derive_more 0.99.20",
@@ -6860,9 +6860,9 @@ dependencies = [
 
 [[package]]
 name = "ismp-grandpa"
-version = "2512.1.0"
+version = "2512.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba73dd0e6e958a88ee0142514bff3985431560636d13db00a9357ae5dcea59d1"
+checksum = "f9ee279e4ebb5436a4dc6d804d09e2f9c4fa6a51b4b75478f821b7b88acb132a"
 dependencies = [
  "anyhow",
  "ckb-merkle-mountain-range",
@@ -6875,25 +6875,6 @@ dependencies = [
  "polkadot-sdk",
  "primitive-types 0.13.1",
  "scale-info",
- "substrate-state-machine",
-]
-
-[[package]]
-name = "ismp-parachain"
-version = "2512.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c4e20f51a845adb788cce8972c751819f847d0f06d15f744c3cfd446ccba02d"
-dependencies = [
- "hex",
- "hex-literal 0.4.1",
- "ismp",
- "log",
- "pallet-ismp",
- "parity-scale-codec",
- "polkadot-sdk",
- "primitive-types 0.13.1",
- "scale-info",
- "serde",
  "substrate-state-machine",
 ]
 
@@ -8643,10 +8624,11 @@ dependencies = [
  "frame-system-benchmarking",
  "frame-system-rpc-runtime-api",
  "frame-try-runtime",
+ "grandpa-verifier",
+ "grandpa-verifier-primitives",
  "hex-literal 1.1.0",
  "ismp",
  "ismp-grandpa",
- "ismp-parachain",
  "log",
  "orderbook-primitives",
  "pallet-asset-conversion",
@@ -8673,6 +8655,7 @@ dependencies = [
  "pallet-im-online",
  "pallet-indices",
  "pallet-ismp",
+ "pallet-ismp-params",
  "pallet-ismp-runtime-api",
  "pallet-lmp",
  "pallet-membership",
@@ -10106,6 +10089,17 @@ dependencies = [
  "scale-info",
  "serde",
  "sp-io",
+]
+
+[[package]]
+name = "pallet-ismp-params"
+version = "1.0.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "ismp",
+ "parity-scale-codec",
+ "scale-info",
 ]
 
 [[package]]
@@ -12884,6 +12878,7 @@ dependencies = [
  "frame-benchmarking-cli",
  "frame-support",
  "frame-system-rpc-runtime-api",
+ "frame-try-runtime",
  "futures 0.3.31",
  "futures-timer",
  "jsonrpsee",

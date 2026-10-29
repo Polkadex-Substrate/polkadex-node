@@ -1,0 +1,25 @@
+[package]
+name = "pallet-ismp-params"
+version = "1.0.0"
+edition = "2021"
+authors = ["Polkadex Authors"]
+description = "Holds the ISMP coprocessor state machine, set by Root"
+license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
+
+[dependencies]
+parity-scale-codec = { workspace = true, default-features = false }
+scale-info = { workspace = true, default-features = false, features = ["derive"] }
+frame-support = { workspace = true, default-features = false }
+frame-system = { workspace = true, default-features = false }
+ismp = { workspace = true, default-features = false }
+
+[features]
+default = ["std"]
+std = [
+  "parity-scale-codec/std",
+  "scale-info/std",
+  "frame-support/std",
+  "frame-system/std",
+  "ismp/std",
+]
+try-runtime = ["frame-support/try-runtime", "frame-system/try-runtime"]

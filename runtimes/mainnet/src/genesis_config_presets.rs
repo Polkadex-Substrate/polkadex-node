@@ -192,7 +192,8 @@ pub fn validator(account: AccountId) -> Staker {
 
 /// Extract some accounts from endowed to be put into the collective.
 fn collective(endowed: &[AccountId]) -> Vec<AccountId> {
-	const MAX_COLLECTIVE_SIZE: usize = 50;
+	// Elections accepts at most DesiredMembers at genesis; the council and the TC share the list.
+	const MAX_COLLECTIVE_SIZE: usize = crate::DesiredMembers::get() as usize;
 	let endowed_accounts_count = endowed.len();
 	endowed
 		.iter()

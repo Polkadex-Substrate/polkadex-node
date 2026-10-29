@@ -103,9 +103,7 @@ sp-inherents = { workspace = true }
 sp-staking = { workspace = true }
 sp-npos-elections = { workspace = true }
 ismp = { workspace = true }
-# pallet-ismp = { workspace = true, features = ["unsigned"] }
 pallet-ismp = { workspace = true }
-ismp-parachain = { workspace = true }
 ismp-grandpa = { workspace = true }
 pallet-ismp-runtime-api = { workspace = true }
 pallet-hyper-fungible-token = { workspace = true }
@@ -118,9 +116,14 @@ pallet-ocex-lmp = { workspace = true }
 pallet-lmp = { workspace = true }
 thea = { workspace = true }
 pallet-rewards = { workspace = true }
+pallet-ismp-params = { workspace = true }
 rpc-assets-runtime-api = { workspace = true }
 pallet-rewards-runtime-api = { workspace = true }
 pallet-ocex-runtime-api = { workspace = true }
+
+[dev-dependencies]
+grandpa-verifier = { workspace = true }
+grandpa-verifier-primitives = { workspace = true }
 
 [build-dependencies]
 substrate-wasm-builder = { workspace = true }
@@ -234,10 +237,10 @@ std = [
 	"sp-keyring/std",
 	"ismp/std",
 	"pallet-ismp/std",
-	"ismp-parachain/std",
 	"ismp-grandpa/std",
 	"pallet-ismp-runtime-api/std",
 	"pallet-hyper-fungible-token/std",
+	"pallet-ismp-params/std",
 ]
 runtime-benchmarks = [
 	"sp-storage",
@@ -265,6 +268,7 @@ runtime-benchmarks = [
 	"pallet-im-online/runtime-benchmarks",
 	"pallet-indices/runtime-benchmarks",
 	"pallet-ismp/runtime-benchmarks",
+	"ismp-grandpa/runtime-benchmarks",
 	"pallet-membership/runtime-benchmarks",
 	"pallet-mmr/runtime-benchmarks",
 	"pallet-multisig/runtime-benchmarks",
@@ -332,4 +336,8 @@ try-runtime = [
 	"pallet-statement/try-runtime",
 	"pallet-asset-tx-payment/try-runtime",
 	"pallet-migrations/try-runtime",
+	"pallet-ismp/try-runtime",
+	"ismp-grandpa/try-runtime",
+	"pallet-hyper-fungible-token/try-runtime",
+	"pallet-ismp-params/try-runtime",
 ]
