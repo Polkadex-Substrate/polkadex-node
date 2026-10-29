@@ -448,6 +448,10 @@ pub mod pallet {
 		) -> DispatchResult {
 			let (collector, fee) =
 				T::BridgeFee::fee(&asset, &dest).ok_or(Error::<T>::BridgeFeeNotSet)?;
+			// Record only fees that move: BridgeFeePaid events sum to the collector's income.
+			if fee.is_zero() || who == &collector {
+				return Ok(());
+			}
 			if asset == T::NativeAssetId::get() {
 				<T as Config>::NativeCurrency::transfer(
 					who,

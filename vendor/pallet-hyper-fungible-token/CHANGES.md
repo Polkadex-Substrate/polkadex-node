@@ -11,9 +11,10 @@ say so in their headers, and the new code is marked "Polkadex".
   Files: `src/impls.rs`, `src/lib.rs`.
 - Bridge fee: a new `Config::BridgeFee` (trait `types::BridgeFee`). Before the lock or burn, `send`
   moves the fee for its asset and destination from the sender to the fee collector, in the asset
-  sent (`NativeCurrency` for the native asset, `Assets` otherwise), and emits `BridgeFeePaid`. With
-  no fee or no collector set, `send` fails with `BridgeFeeNotSet` and nothing moves. Timeout
-  refunds return the amount only. Files: `src/lib.rs`, `src/types.rs`.
+  sent (`NativeCurrency` for the native asset, `Assets` otherwise), and emits `BridgeFeePaid`; a
+  zero fee or the collector's own send moves nothing and emits nothing. With no fee or no collector
+  set, `send` fails with `BridgeFeeNotSet` and nothing moves. Timeout refunds return the amount
+  only. Files: `src/lib.rs`, `src/types.rs`.
 - `call_data` cap: `send` refuses `call_data` longer than `BridgeFee::max_call_data()` with
   `CallDataTooLong`. File: `src/lib.rs`.
 
