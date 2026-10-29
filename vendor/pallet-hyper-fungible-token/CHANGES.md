@@ -29,5 +29,12 @@ say so in their headers, and the new code is marked "Polkadex".
   a contract reused for another asset or a local metadata change cannot alter a pending refund.
   Transfers sent before the upgrade have no terms and refund by `RefundRoutes` as before. Files:
   `src/lib.rs`, `src/module.rs`.
+- Bridge fee: a new `Config::BridgeFee` (trait `types::BridgeFee`). Before the lock or burn, `send`
+  moves the fee for its asset and destination from the sender to the fee collector, in the asset
+  sent (`NativeCurrency` for the native asset, `Assets` otherwise), and emits `BridgeFeePaid`. With
+  no fee or no collector set, `send` fails with `BridgeFeeNotSet` and nothing moves. Timeout
+  refunds return the amount only. Files: `src/lib.rs`, `src/types.rs`.
+- `call_data` cap: `send` refuses `call_data` longer than `BridgeFee::max_call_data()` with
+  `CallDataTooLong`. File: `src/lib.rs`.
 
-The new error is appended, so existing indices and `TokenSent` do not change.
+The new event and errors are appended, so existing indices and `TokenSent` do not change.
