@@ -17,7 +17,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 //! Weights for `pallet_hyper_fungible_token` until its benchmarks run: the crate's flat
-//! placeholders, and on `send` the write of the transfer's refund terms.
+//! placeholders, and on `send` the refund-terms write and the bridge fee hook on top.
 
 use core::marker::PhantomData;
 use frame_support::{traits::Get, weights::Weight};
@@ -26,9 +26,10 @@ use pallet_hyper_fungible_token::WeightInfo as HftWeights;
 /// Weight functions for `pallet_hyper_fungible_token`.
 pub struct WeightInfo<T>(PhantomData<T>);
 impl<T: frame_system::Config> HftWeights for WeightInfo<T> {
-	// Send records the transfer's refund terms.
+	// Send records the transfer's refund terms; the hook reads the fee and the collector and moves
+	// the fee between two accounts.
 	fn send() -> Weight {
-		<() as HftWeights>::send().saturating_add(T::DbWeight::get().writes(1))
+		<() as HftWeights>::send().saturating_add(T::DbWeight::get().reads_writes(2, 5))
 	}
 	fn register_token(c: u32) -> Weight {
 		<() as HftWeights>::register_token(c)
