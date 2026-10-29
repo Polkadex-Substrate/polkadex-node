@@ -1,6 +1,6 @@
 // This file is part of Polkadex.
 //
-// Copyright (c) 2026 Polkadex oü.
+// Copyright (C) 2026 The Polkadex Authors.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 //
 // This program is free software: you can redistribute it and/or modify
