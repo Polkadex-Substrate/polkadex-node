@@ -153,8 +153,15 @@ fn assert_paid(from: &AccountId, asset: u128, dest: StateMachine, fee: Balance, 
 	);
 }
 
+/// The send after `before` events moved no fee: one TokenSent with `amount`, no BridgeFeePaid.
+fn assert_no_fee_event(before: usize, amount: Balance) {
+	let events = hft_events();
+	assert!(matches!(&events[before..], [HftEvent::TokenSent { amount: a, .. }] if *a == amount));
+}
+
 // A send pays the fee of its (asset, destination) to the collector, on top of the amount and in
-// the asset sent, before the lock (PDEX) or the burn (USDT). The collector pays itself: a no-op.
+// the asset sent, before the lock (PDEX) or the burn (USDT). The collector's own send pays nothing
+// and records no fee.
 #[test]
 fn send_pays_the_fee_on_top_in_the_asset_sent() {
 	new_test_ext().execute_with(|| {
@@ -173,15 +180,16 @@ fn send_pays_the_fee_on_top_in_the_asset_sent() {
 		assert_eq!(Assets::balance(USDT, collector()), 1 + USD);
 		assert_eq!(Assets::total_supply(USDT), supply - 50 * USD);
 
+		let before = hft_events().len();
 		assert_ok!(send(&collector(), params(PDEX_ID, BSC, 20 * PDEX)));
-		assert_paid(&collector(), PDEX_ID, BSC, 10 * PDEX, 20 * PDEX);
+		assert_no_fee_event(before, 20 * PDEX);
 		assert_eq!(Balances::free_balance(collector()), 11 * PDEX);
 		assert_eq!(Balances::free_balance(&escrow), 120 * PDEX);
 	});
 }
 
 // Fail closed: with no fee for the pair, or no collector, the send is refused and nothing moves.
-// A cleared fee refuses again; a zero fee is a set fee.
+// A cleared fee refuses again; a zero fee is a set fee and records no fee.
 #[test]
 fn send_without_fee_or_collector_is_refused() {
 	new_test_ext().execute_with(|| {
@@ -198,8 +206,9 @@ fn send_without_fee_or_collector_is_refused() {
 		assert_ok!(IsmpParams::set_bridge_fee(RuntimeOrigin::root(), PDEX_ID, ETH, None));
 		refused(PDEX_ID, ETH);
 		assert_ok!(IsmpParams::set_bridge_fee(RuntimeOrigin::root(), PDEX_ID, ETH, Some(0)));
+		let before = hft_events().len();
 		assert_ok!(send(&sender(), params(PDEX_ID, ETH, 10 * PDEX)));
-		assert_paid(&sender(), PDEX_ID, ETH, 0, 10 * PDEX);
+		assert_no_fee_event(before, 10 * PDEX);
 	});
 }
 
