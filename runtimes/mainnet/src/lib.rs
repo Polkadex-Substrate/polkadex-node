@@ -619,6 +619,8 @@ impl pallet_hyper_fungible_token::Config for Runtime {
 	type EvmToSubstrate = ();
 	// The crate ships no benchmarks: its placeholder weights, plus the refund-terms write on `send`.
 	type WeightInfo = weights::pallet_hyper_fungible_token::WeightInfo<Runtime>;
+	// Every send pays the fee IsmpParams holds for its (asset, destination); unset fails closed.
+	type BridgeFee = IsmpParams;
 }
 
 /// Routes ISMP messages to modules; pallet-ismp handles `HYPR-FEE` before asking it.

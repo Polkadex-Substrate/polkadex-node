@@ -12,6 +12,7 @@ scale-info = { workspace = true, default-features = false, features = ["derive"]
 frame-support = { workspace = true, default-features = false }
 frame-system = { workspace = true, default-features = false }
 ismp = { workspace = true, default-features = false }
+pallet-hyper-fungible-token = { workspace = true, default-features = false }
 
 [features]
 default = ["std"]
@@ -21,5 +22,10 @@ std = [
   "frame-support/std",
   "frame-system/std",
   "ismp/std",
+  "pallet-hyper-fungible-token/std",
 ]
-try-runtime = ["frame-support/try-runtime", "frame-system/try-runtime"]
+try-runtime = [
+  "frame-support/try-runtime",
+  "frame-system/try-runtime",
+  "pallet-hyper-fungible-token/try-runtime",
+]

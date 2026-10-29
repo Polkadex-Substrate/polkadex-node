@@ -36,6 +36,7 @@ pub mod pallet {
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
 	use ismp::host::StateMachine;
+	use pallet_hyper_fungible_token::types::BridgeFee;
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
@@ -154,6 +155,13 @@ pub mod pallet {
 	impl<T: Config> Get<Option<StateMachine>> for Pallet<T> {
 		fn get() -> Option<StateMachine> {
 			Coprocessor::<T>::get()
+		}
+	}
+
+	// The fee hook of `pallet-hyper-fungible-token`'s `send`.
+	impl<T: Config> BridgeFee<T::AccountId, T::AssetId, T::Balance> for Pallet<T> {
+		fn fee(asset: &T::AssetId, dest: &StateMachine) -> Option<(T::AccountId, T::Balance)> {
+			Some((FeeCollector::<T>::get()?, BridgeFees::<T>::get(asset, dest)?))
 		}
 	}
 }

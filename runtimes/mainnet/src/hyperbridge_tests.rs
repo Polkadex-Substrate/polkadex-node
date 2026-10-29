@@ -219,6 +219,13 @@ fn register(asset: u128, contract: [u8; 20], decimals: u8) {
 	assert_ok!(HyperFungibleToken::register_token(RuntimeOrigin::root(), registration));
 }
 
+/// Sends of `asset` cost nothing and pay `collector`, the tests' sender, so the amounts below are
+/// the transfers alone.
+fn free_bridge(asset: u128, collector: &AccountId) {
+	assert_ok!(IsmpParams::set_bridge_fee(RuntimeOrigin::root(), asset, EVM, Some(0)));
+	assert_ok!(IsmpParams::set_fee_collector(RuntimeOrigin::root(), collector.clone()));
+}
+
 /// `send` through the runtime dispatch, which rolls a failed send back as a block would.
 fn send(who: &AccountId, asset: u128, amount: Balance) -> DispatchResult {
 	let recipient = vec![7u8; 20].try_into().unwrap();
@@ -271,6 +278,7 @@ fn timeout_refunds_in_full_after_the_contract_changes() {
 		frame_system::Pallet::<Runtime>::set_block_number(1);
 		let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&sender, 1_000 * PDEX);
 		register(POLKADEX_NATIVE_ASSET_ID, [0xaa; 20], 18);
+		free_bridge(POLKADEX_NATIVE_ASSET_ID, &sender);
 		assert_ok!(send(&sender, POLKADEX_NATIVE_ASSET_ID, 100 * PDEX));
 		let chain = ChainConfig { token_contract: [0xbb; 20].into(), decimals: 18 };
 		let rotate = TokenUpdate {
@@ -306,6 +314,7 @@ fn amounts_the_destination_cannot_represent_are_refused() {
 		assert_ok!(Assets::force_set_metadata(root, USDT.into(), name, symbol, 6, false));
 		assert_ok!(<Assets as fungibles::Mutate<AccountId>>::mint_into(USDT, &sender, 1_000));
 		register(USDT, [0xcc; 20], 4);
+		free_bridge(USDT, &sender);
 		let refused = pallet_hyper_fungible_token::Error::<Runtime>::AmountNotRepresentable;
 		assert_noop!(send(&sender, USDT, 101), refused);
 		assert_ok!(send(&sender, USDT, 100));
@@ -421,6 +430,7 @@ fn a_precision_update_keeps_the_refund_and_clears_its_terms() {
 		frame_system::Pallet::<Runtime>::set_block_number(1);
 		let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&sender, 1_000 * PDEX);
 		register(POLKADEX_NATIVE_ASSET_ID, [0xaa; 20], 18);
+		free_bridge(POLKADEX_NATIVE_ASSET_ID, &sender);
 		assert_ok!(send(&sender, POLKADEX_NATIVE_ASSET_ID, 100 * PDEX));
 		update(POLKADEX_NATIVE_ASSET_ID, [0xaa; 20], 19);
 	});
@@ -443,6 +453,7 @@ fn a_reused_contract_refunds_the_asset_that_was_sent() {
 		frame_system::Pallet::<Runtime>::set_block_number(1);
 		let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&sender, 1_000 * PDEX);
 		register(POLKADEX_NATIVE_ASSET_ID, [0xaa; 20], 18);
+		free_bridge(POLKADEX_NATIVE_ASSET_ID, &sender);
 		assert_ok!(send(&sender, POLKADEX_NATIVE_ASSET_ID, 100 * PDEX));
 		let remove_chains = vec![EVM];
 		let drop =
@@ -471,6 +482,7 @@ fn a_local_decimals_change_keeps_each_refund_exact() {
 		asset(TOKEN, 6, &sender);
 		assert_ok!(<Assets as fungibles::Mutate<AccountId>>::mint_into(TOKEN, &sender, 1_000_000));
 		register(TOKEN, [0xcc; 20], 6);
+		free_bridge(TOKEN, &sender);
 		assert_ok!(send(&sender, TOKEN, 100));
 		metadata(TOKEN, 8);
 		assert_ok!(send(&sender, TOKEN, 10_000));
@@ -495,6 +507,7 @@ fn a_transfer_without_terms_refunds_by_the_route() {
 		frame_system::Pallet::<Runtime>::set_block_number(1);
 		let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&sender, 1_000 * PDEX);
 		register(POLKADEX_NATIVE_ASSET_ID, [0xaa; 20], 18);
+		free_bridge(POLKADEX_NATIVE_ASSET_ID, &sender);
 		assert_ok!(send(&sender, POLKADEX_NATIVE_ASSET_ID, 100 * PDEX));
 	});
 	let requests = sent(&mut ext);
