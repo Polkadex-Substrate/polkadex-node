@@ -3467,6 +3467,9 @@ impl_runtime_apis! {
 }
 
 #[cfg(test)]
+mod bridge_fee_tests;
+
+#[cfg(test)]
 mod tests {
     use frame_system::offchain::CreateSignedTransaction;
     use frame_support::{assert_noop, assert_ok};
