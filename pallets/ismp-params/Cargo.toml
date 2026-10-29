@@ -4,7 +4,7 @@ version = "1.0.0"
 edition = "2021"
 authors = ["Polkadex Authors"]
 description = "Holds the ISMP coprocessor state machine, set by Root"
-license = "GPL-3.0-or-later"
+license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 
 [dependencies]
 parity-scale-codec = { workspace = true, default-features = false }
