@@ -578,8 +578,8 @@ impl pallet_hyper_fungible_token::Config for Runtime {
 	type CreateOrigin = EnsureRoot<AccountId>;
 	type Decimals = Decimals;
 	type EvmToSubstrate = ();
-	// The crate ships no benchmarks, only these placeholder weights.
-	type WeightInfo = ();
+	// The crate ships no benchmarks: its placeholder weights, plus the bridge fee hook on `send`.
+	type WeightInfo = weights::pallet_hyper_fungible_token::WeightInfo<Runtime>;
 	// Every send pays the fee IsmpParams holds for its (asset, destination); unset fails closed.
 	type BridgeFee = IsmpParams;
 }
