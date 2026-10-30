@@ -3,7 +3,7 @@ name = "pallet-ismp-params"
 version = "1.0.0"
 edition = "2021"
 authors = ["Polkadex Authors"]
-description = "Holds the ISMP coprocessor state machine, set by Root"
+description = "Holds the ISMP coprocessor state machine and the bridge fees, set by governance"
 license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 
 [dependencies]
@@ -12,6 +12,7 @@ scale-info = { workspace = true, default-features = false, features = ["derive"]
 frame-support = { workspace = true, default-features = false }
 frame-system = { workspace = true, default-features = false }
 ismp = { workspace = true, default-features = false }
+pallet-hyper-fungible-token = { workspace = true, default-features = false }
 
 [features]
 default = ["std"]
@@ -21,5 +22,10 @@ std = [
   "frame-support/std",
   "frame-system/std",
   "ismp/std",
+  "pallet-hyper-fungible-token/std",
 ]
-try-runtime = ["frame-support/try-runtime", "frame-system/try-runtime"]
+try-runtime = [
+  "frame-support/try-runtime",
+  "frame-system/try-runtime",
+  "pallet-hyper-fungible-token/try-runtime",
+]

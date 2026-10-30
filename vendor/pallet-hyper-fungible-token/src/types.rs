@@ -1,5 +1,6 @@
 // Copyright (C) Polytope Labs Ltd.
 // SPDX-License-Identifier: Apache-2.0
+// Modified by The Polkadex Authors in 2026; see CHANGES.md.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -110,6 +111,14 @@ pub struct SubstrateCalldata {
 	pub signature: Option<Vec<u8>>,
 	/// SCALE-encoded runtime call to execute
 	pub runtime_call: Vec<u8>,
+}
+
+/// Polkadex: the bridge fee and the `call_data` cap of `send`, set by governance
+pub trait BridgeFee<AccountId, AssetId, Balance> {
+	/// The collector and the fee for sending `asset` to `dest`; `None` while either is unset
+	fn fee(asset: &AssetId, dest: &StateMachine) -> Option<(AccountId, Balance)>;
+	/// The longest `call_data` a send may carry, in bytes
+	fn max_call_data() -> u32;
 }
 
 /// Converts an EVM address to a substrate AccountId

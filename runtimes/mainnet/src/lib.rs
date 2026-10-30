@@ -562,7 +562,12 @@ impl ismp_grandpa::Config for Runtime {
 	type RootOrigin = EnsureRoot<AccountId>;
 }
 
-impl pallet_ismp_params::Config for Runtime {}
+impl pallet_ismp_params::Config for Runtime {
+	type AssetId = u128;
+	type Balance = Balance;
+	// The council can reprice bridge fees when gas moves; the collector stays Root only.
+	type FeeOrigin = EnsureRootOrHalfCouncil;
+}
 
 impl pallet_hyper_fungible_token::Config for Runtime {
 	type Dispatcher = Ismp;
@@ -573,8 +578,10 @@ impl pallet_hyper_fungible_token::Config for Runtime {
 	type CreateOrigin = EnsureRoot<AccountId>;
 	type Decimals = Decimals;
 	type EvmToSubstrate = ();
-	// The crate ships no benchmarks, only these placeholder weights.
-	type WeightInfo = ();
+	// The crate ships no benchmarks: its placeholder weights, plus the bridge fee hook on `send`.
+	type WeightInfo = weights::pallet_hyper_fungible_token::WeightInfo<Runtime>;
+	// Every send pays the fee IsmpParams holds for its (asset, destination); unset fails closed.
+	type BridgeFee = IsmpParams;
 }
 
 /// Routes ISMP messages to modules; pallet-ismp handles `HYPR-FEE` before asking it.
@@ -3458,6 +3465,9 @@ impl_runtime_apis! {
 		}
 	}
 }
+
+#[cfg(test)]
+mod bridge_fee_tests;
 
 #[cfg(test)]
 mod tests {

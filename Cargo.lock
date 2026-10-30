@@ -10098,6 +10098,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "ismp",
+ "pallet-hyper-fungible-token",
  "parity-scale-codec",
  "scale-info",
 ]
