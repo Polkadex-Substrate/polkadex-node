@@ -54,7 +54,7 @@ use frame_support::{
 		EnsureOriginWithArg,
 		EqualPrivilegeOnly, Get, InstanceFilter, KeyOwnerProofSystem, LockIdentifier,
 		tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId}, ConstU32, ConstU16, ConstBool,
-		VariantCountOf, tokens::imbalance::{ResolveAssetTo, ResolveTo, OnUnbalanced}, Imbalance, Nothing, InsideBoth,
+		VariantCountOf, tokens::imbalance::{ResolveAssetTo, ResolveTo}, Nothing, InsideBoth,
 		Contains
 	},
 	weights::{
@@ -113,7 +113,7 @@ use scale_info::TypeInfo;
 use sp_npos_elections::ExtendedBalance;
 //pub use pallet_transaction_payment::{FungibleAdapter, Multiplier, TargetedFeeAdjustment};
 #[allow(deprecated)]
-pub use pallet_transaction_payment::{CurrencyAdapter, Multiplier, TargetedFeeAdjustment};
+pub use pallet_transaction_payment::{FungibleAdapter, Multiplier, TargetedFeeAdjustment};
 //use pallet_nomination_pools::PoolId;
 use pallet_tx_pause::RuntimeCallNameOf;
 use sp_consensus_beefy::{
@@ -654,17 +654,7 @@ impl Get<AccountId> for AssetAdmin {
 
 /// Native transaction fees and tips go entirely to the Treasury, as on mainnet spec 373.
 /// (The SDK template this runtime started from gave 20% of both to the block author.)
-pub struct DealWithFees;
-impl OnUnbalanced<NegativeImbalance> for DealWithFees {
-	fn on_unbalanceds(mut fees_then_tips: impl Iterator<Item = NegativeImbalance>) {
-		if let Some(mut fees) = fees_then_tips.next() {
-			for tips in fees_then_tips {
-				tips.merge_into(&mut fees);
-			}
-			Treasury::on_unbalanced(fees);
-		}
-	}
-}
+pub type DealWithFees = ResolveTo<TreasuryAccount, Balances>;
 
 /// Calls that cannot be paused by the tx-pause pallet.
 pub struct TxPauseWhitelistedCalls;
@@ -1035,7 +1025,9 @@ use sp_runtime::traits::Bounded;
 #[allow(deprecated)]
 impl pallet_transaction_payment::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type OnChargeTransaction = CurrencyAdapter<Balances, DealWithFees>;
+	// Fees respect locks on the whole balance, so a vote lock over staked PDEX (on a hold
+	// from 392) leaves the free part payable.
+	type OnChargeTransaction = FungibleAdapter<Balances, DealWithFees>;
 	type OperationalFeeMultiplier = OperationalFeeMultiplier;
 	type WeightToFee = IdentityFee<Balance>;
 	type LengthToFee = ConstantMultiplier<Balance, TransactionByteFee>;
@@ -3791,21 +3783,20 @@ mod tests {
     // gave 20% of both to the block author. Transaction payment hands DealWithFees the fee, then
     // the tip; the whole sum must land in the Treasury account and nothing may be burned.
     #[test]
-    #[allow(deprecated)]
     fn fees_and_tips_go_entirely_to_treasury() {
-        use frame_support::traits::Currency;
+        use frame_support::traits::{fungible::Balanced, OnUnbalanced};
 
         assert_eq!(
             core::any::TypeId::of::<<Runtime as pallet_transaction_payment::Config>::OnChargeTransaction>(),
-            core::any::TypeId::of::<CurrencyAdapter<Balances, DealWithFees>>(),
+            core::any::TypeId::of::<FungibleAdapter<Balances, DealWithFees>>(),
         );
         new_test_ext().execute_with(|| {
             frame_system::Pallet::<Runtime>::set_block_number(1);
             let treasury = Treasury::account_id();
             let issuance = pallet_balances::TotalIssuance::<Runtime>::get();
 
-            let fee = <Balances as Currency<AccountId>>::issue(3 * crate::constants::currency::PDEX);
-            let tip = <Balances as Currency<AccountId>>::issue(2 * crate::constants::currency::PDEX);
+            let fee = <Balances as Balanced<AccountId>>::issue(3 * crate::constants::currency::PDEX);
+            let tip = <Balances as Balanced<AccountId>>::issue(2 * crate::constants::currency::PDEX);
             DealWithFees::on_unbalanceds([fee, tip].into_iter());
 
             assert_eq!(
