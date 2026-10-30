@@ -24,8 +24,8 @@ cargo build --release -p polkadex-node
 
 Output lands in `dist/`:
 ```
-dist/polkadex-node_7.0.0_amd64.deb
-dist/polkadex-node-7.0.0-1.x86_64.rpm
+dist/polkadex-node_7.0.1_amd64.deb
+dist/polkadex-node-7.0.1-1.x86_64.rpm
 ```
 
 ## Install
