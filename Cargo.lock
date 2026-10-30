@@ -15722,8 +15722,6 @@ dependencies = [
 [[package]]
 name = "sc-client-db"
 version = "0.51.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7eaa7c985f95664abd59636ec4c7ae0b37a0e06746addb867ca32dc255a9be88"
 dependencies = [
  "hash-db",
  "kvdb",

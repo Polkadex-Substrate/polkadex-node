@@ -16,6 +16,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+// Changed in this copy for polkadex-node v7.0.1: open_kvdb_rocksdb caps the RocksDB write-ahead
+// logs at 1 GiB (max_total_wal_size). Otherwise this is sc-client-db 0.51.2 as published.
+
 //! Db-based backend utility structures and functions, used by both
 //! full and light storages.
 
@@ -345,6 +348,10 @@ fn open_kvdb_rocksdb<Block: BlockT>(
 		},
 	}
 	db_config.memory_budget = memory_budget;
+	// Without a cap, a column family whose memtable rarely fills keeps every later log file
+	// alive, and nodes collected tens of GB of logs. Past 1 GiB RocksDB flushes the column
+	// families holding the oldest log, so it can be deleted.
+	db_config.max_total_wal_size = Some(1 << 30);
 
 	let db = kvdb_rocksdb::Database::open(&db_config, path)?;
 	// write database version only after the database is successfully opened
