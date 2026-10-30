@@ -3990,3 +3990,6 @@ mod tests {
         });
     }
 }
+
+#[cfg(test)]
+mod vote_tests;
