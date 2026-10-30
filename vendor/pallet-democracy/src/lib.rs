@@ -15,6 +15,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Changed in this copy for polkadex-node runtime 393: votes and delegations are checked against
+// the free balance plus `Config::VotingHold` instead of the free balance alone. From runtime 392
+// staking keeps the bond on a hold, outside the free balance, so staked PDEX could not back a
+// vote; the runtime sets `VotingHold` to the staked amount. Otherwise this is pallet-democracy
+// 45.0.0 as published.
+
 //! # Democracy Pallet
 //!
 //! - [`Config`]
@@ -168,7 +174,7 @@ use frame_support::{
 };
 use frame_system::pallet_prelude::{BlockNumberFor, OriginFor};
 use sp_runtime::{
-	traits::{BadOrigin, Bounded as ArithBounded, One, Saturating, StaticLookup, Zero},
+	traits::{BadOrigin, Bounded as ArithBounded, Convert, One, Saturating, StaticLookup, Zero},
 	ArithmeticError, DispatchError, DispatchResult,
 };
 
@@ -239,6 +245,11 @@ pub mod pallet {
 		/// Currency type for this pallet.
 		type Currency: ReservableCurrency<Self::AccountId>
 			+ LockableCurrency<Self::AccountId, Moment = BlockNumberFor<Self>>;
+
+		/// Balance held from an account, outside its free balance, that still backs its votes,
+		/// such as funds held for staking. Votes and delegations may use the free balance plus
+		/// this amount.
+		type VotingHold: Convert<Self::AccountId, BalanceOf<Self>>;
 
 		/// The period between a proposal being approved and enacted.
 		///
@@ -1268,6 +1279,11 @@ impl<T: Config> Pallet<T> {
 		Self::ensure_ongoing(info)
 	}
 
+	/// The balance `who` can vote with: its free balance plus `T::VotingHold`.
+	fn voting_balance(who: &T::AccountId) -> BalanceOf<T> {
+		T::Currency::free_balance(who).saturating_add(T::VotingHold::convert(who.clone()))
+	}
+
 	/// Actually enact a vote, if legit.
 	fn try_vote(
 		who: &T::AccountId,
@@ -1275,7 +1291,7 @@ impl<T: Config> Pallet<T> {
 		vote: AccountVote<BalanceOf<T>>,
 	) -> DispatchResult {
 		let mut status = Self::referendum_status(ref_index)?;
-		ensure!(vote.balance() <= T::Currency::free_balance(who), Error::<T>::InsufficientFunds);
+		ensure!(vote.balance() <= Self::voting_balance(who), Error::<T>::InsufficientFunds);
 		VotingOf::<T>::try_mutate(who, |voting| -> DispatchResult {
 			if let Voting::Direct { ref mut votes, delegations, .. } = voting {
 				match votes.binary_search_by_key(&ref_index, |i| i.0) {
@@ -1425,7 +1441,7 @@ impl<T: Config> Pallet<T> {
 		balance: BalanceOf<T>,
 	) -> Result<u32, DispatchError> {
 		ensure!(who != target, Error::<T>::Nonsense);
-		ensure!(balance <= T::Currency::free_balance(&who), Error::<T>::InsufficientFunds);
+		ensure!(balance <= Self::voting_balance(&who), Error::<T>::InsufficientFunds);
 		let votes = VotingOf::<T>::try_mutate(&who, |voting| -> Result<u32, DispatchError> {
 			let mut old = Voting::Delegating {
 				balance,

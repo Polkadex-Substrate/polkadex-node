@@ -9797,8 +9797,6 @@ dependencies = [
 [[package]]
 name = "pallet-democracy"
 version = "45.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1cd5208c958ed0c0c263f75c93b60f26701d9dac9464ba22823d2a919856870"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -9929,8 +9927,6 @@ dependencies = [
 [[package]]
 name = "pallet-elections-phragmen"
 version = "46.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4a54cc67ffebc01d998a3411409190857284c719a38575dc0e95f5d623e4731"
 dependencies = [
  "frame-benchmarking",
  "frame-support",

@@ -1442,10 +1442,21 @@ impl pallet_collective::Config<CouncilCollective> for Runtime {
     >;
 }
 
+/// PDEX bonded for staking, which from runtime 392 sits on a hold outside the free balance.
+/// Democracy and Elections add it to the free balance when they check votes, as they counted
+/// the staking lock before.
+pub struct StakedBalance;
+impl sp_runtime::traits::Convert<AccountId, Balance> for StakedBalance {
+	fn convert(who: AccountId) -> Balance {
+		pallet_staking::asset::staked::<Runtime>(&who)
+	}
+}
+
 impl pallet_elections_phragmen::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type PalletId = ElectionsPhragmenPalletId;
 	type Currency = Balances;
+	type VotingHold = StakedBalance;
 	type ChangeMembers = Council;
 	// NOTE: this implies that council's genesis members cannot be set directly and must come from
 	// this module.
@@ -1583,6 +1594,7 @@ impl pallet_democracy::Config for Runtime {
 	type Scheduler = Scheduler;
 	type Preimages = Preimage;
 	type Currency = Balances;
+	type VotingHold = StakedBalance;
 	type EnactmentPeriod = EnactmentPeriod;
 	type LaunchPeriod = LaunchPeriod;
 	type VotingPeriod = VotingPeriod;

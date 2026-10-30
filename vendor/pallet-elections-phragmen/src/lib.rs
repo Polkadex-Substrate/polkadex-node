@@ -15,6 +15,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Changed in this copy for polkadex-node runtime 393: a vote's stake is capped at the free balance
+// plus `Config::VotingHold` instead of the free balance alone. From runtime 392 staking keeps the
+// bond on a hold, outside the free balance, so staked PDEX did not count in council votes; the
+// runtime sets `VotingHold` to the staked amount. Otherwise this is pallet-elections-phragmen
+// 46.0.0 as published.
+
 //! # Phragmén Election Module.
 //!
 //! An election module based on sequential phragmen.
@@ -115,7 +121,7 @@ use log;
 use scale_info::TypeInfo;
 use sp_npos_elections::{ElectionResult, ExtendedBalance};
 use sp_runtime::{
-	traits::{Saturating, StaticLookup, Zero},
+	traits::{Convert, Saturating, StaticLookup, Zero},
 	DispatchError, Perbill, RuntimeDebug,
 };
 use sp_staking::currency_to_vote::CurrencyToVote;
@@ -211,6 +217,11 @@ pub mod pallet {
 		/// The currency that people are electing with.
 		type Currency: LockableCurrency<Self::AccountId, Moment = BlockNumberFor<Self>>
 			+ ReservableCurrency<Self::AccountId>;
+
+		/// Balance held from an account, outside its free balance, that still backs its votes,
+		/// such as funds held for staking. A vote's stake is capped at the free balance plus this
+		/// amount.
+		type VotingHold: Convert<Self::AccountId, BalanceOf<Self>>;
 
 		/// What to do when the members change.
 		type ChangeMembers: ChangeMembers<Self::AccountId>;
@@ -354,7 +365,7 @@ pub mod pallet {
 		///   - be less than the number of possible candidates. Note that all current members and
 		///     runners-up are also automatically candidates for the next round.
 		///
-		/// If `value` is more than `who`'s free balance, then the maximum of the two is used.
+		/// If `value` is more than `who`'s free balance plus `T::VotingHold`, that sum is used.
 		///
 		/// The dispatch origin of this call must be signed.
 		///
@@ -415,7 +426,8 @@ pub mod pallet {
 			};
 
 			// Amount to be locked up.
-			let locked_stake = value.min(T::Currency::free_balance(&who));
+			let held = T::VotingHold::convert(who.clone());
+			let locked_stake = value.min(T::Currency::free_balance(&who).saturating_add(held));
 			T::Currency::set_lock(T::PalletId::get(), &who, locked_stake, WithdrawReasons::all());
 
 			Voting::<T>::insert(&who, Voter { votes, deposit: new_deposit, stake: locked_stake });
@@ -1390,6 +1402,7 @@ mod tests {
 		type PalletId = ElectionsPhragmenPalletId;
 		type RuntimeEvent = RuntimeEvent;
 		type Currency = Balances;
+		type VotingHold = ();
 		type CurrencyToVote = ();
 		type ChangeMembers = TestChangeMembers;
 		type InitializeMembers = ();
