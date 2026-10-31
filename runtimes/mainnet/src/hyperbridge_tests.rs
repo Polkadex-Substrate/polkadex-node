@@ -26,7 +26,10 @@ use ismp::{
 	messaging::{ConsensusMessage, Message, Proof, RequestMessage},
 	router::PostRequest,
 };
-use frame_support::traits::Currency;
+use frame_support::{
+	assert_noop,
+	traits::{fungibles, Currency},
+};
 use pallet_hyper_fungible_token::types::{ChainConfig, SendParams, TokenRegistration, TokenUpdate};
 use sp_runtime::{
 	traits::{Dispatchable, ValidateUnsigned},
@@ -264,5 +267,34 @@ fn timeout_refunds_in_full_after_the_contract_changes() {
 	ext.execute_with(|| {
 		assert_ok!(HyperFungibleToken::default().on_timeout(requests[0].clone()));
 		assert_eq!(Balances::free_balance(&sender), 1_000 * PDEX);
+	});
+}
+
+// Second regression case from the #29 review: with 6 local decimals and 4 on the destination, 101 units is refused before
+// anything moves, and 100 is sent and refunded exactly.
+#[test]
+fn amounts_the_destination_cannot_represent_are_refused() {
+	const USDT: u128 = 1_984;
+	let mut ext = new_test_ext();
+	let sender = account(82);
+	ext.execute_with(|| {
+		frame_system::Pallet::<Runtime>::set_block_number(1);
+		let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&sender, 10 * PDEX);
+		let owner = sp_runtime::MultiAddress::Id(sender.clone());
+		assert_ok!(Assets::force_create(RuntimeOrigin::root(), USDT.into(), owner, true, 1));
+		let (name, symbol) = (b"Tether USD".to_vec(), b"USDT".to_vec());
+		let root = RuntimeOrigin::root();
+		assert_ok!(Assets::force_set_metadata(root, USDT.into(), name, symbol, 6, false));
+		assert_ok!(<Assets as fungibles::Mutate<AccountId>>::mint_into(USDT, &sender, 1_000));
+		register(USDT, [0xcc; 20], 4);
+		let refused = pallet_hyper_fungible_token::Error::<Runtime>::AmountNotRepresentable;
+		assert_noop!(send(&sender, USDT, 101), refused);
+		assert_ok!(send(&sender, USDT, 100));
+		assert_eq!(Assets::balance(USDT, &sender), 900);
+	});
+	let requests = sent(&mut ext);
+	ext.execute_with(|| {
+		assert_ok!(HyperFungibleToken::default().on_timeout(requests[0].clone()));
+		assert_eq!(Assets::balance(USDT, &sender), 1_000);
 	});
 }

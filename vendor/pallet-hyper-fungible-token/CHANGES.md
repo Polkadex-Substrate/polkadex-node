@@ -17,3 +17,7 @@ say so in their headers, and the new code is marked "Polkadex".
   reads it instead of `ContractToAsset` and `Precisions`, so a transfer in flight refunds in full
   after its contract changes, while `on_accept` still trusts only the live maps. Files:
   `src/lib.rs`, `src/module.rs`.
+- Exact amounts: `send` refuses, with `AmountNotRepresentable` and before anything moves, an
+  amount that is not a whole multiple of 10^(local - remote) decimals, since `convert_to_erc20`
+  floored it and the timeout refunded the rounded amount. `local_decimals` replaces the three
+  copies of the decimals lookup. Files: `src/impls.rs`, `src/lib.rs`, `src/module.rs`.

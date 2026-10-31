@@ -87,13 +87,7 @@ where
 		let beneficiary: T::AccountId = beneficiary_bytes.into();
 
 		// Convert amount from ERC20 denomination to local
-		let decimals = if local_asset_id == T::NativeAssetId::get() {
-			T::Decimals::get()
-		} else {
-			<T::Assets as fungibles::metadata::Inspect<T::AccountId>>::decimals(
-				local_asset_id.clone(),
-			)
-		};
+		let decimals = Pallet::<T>::local_decimals(&local_asset_id);
 		let erc_decimals = Precisions::<T>::get(local_asset_id.clone(), source)
 			.ok_or(HftError::DecimalsNotConfigured(source))?;
 		let amount = convert_to_balance::<
@@ -251,13 +245,7 @@ where
 				let (local_asset_id, erc_decimals) = RefundRoutes::<T>::get(dest, &to)
 					.ok_or(HftError::UnknownContractOnTimeout)?;
 
-				let decimals = if local_asset_id == T::NativeAssetId::get() {
-					T::Decimals::get()
-				} else {
-					<T::Assets as fungibles::metadata::Inspect<T::AccountId>>::decimals(
-						local_asset_id.clone(),
-					)
-				};
+				let decimals = Pallet::<T>::local_decimals(&local_asset_id);
 				let amount = convert_to_balance::<
 					<<T as Config>::NativeCurrency as Currency<T::AccountId>>::Balance,
 				>(

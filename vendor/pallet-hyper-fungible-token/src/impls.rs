@@ -1,5 +1,6 @@
 // Copyright (C) Polytope Labs Ltd.
 // SPDX-License-Identifier: Apache-2.0
+// Modified by The Polkadex Authors in 2026; see CHANGES.md.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +20,8 @@ use alloc::string::ToString;
 use polkadot_sdk::*;
 use sp_core::U256;
 
-use crate::{Config, Pallet, PALLET_ID};
+use crate::{types::AssetId, Config, Pallet, PALLET_ID};
+use frame_support::traits::{fungibles, Get};
 
 impl<T: Config> Pallet<T> {
 	/// Returns the pallet's custodial account for holding native assets
@@ -33,6 +35,15 @@ impl<T: Config> Pallet<T> {
 	/// Used by the runtime's IsmpRouter to route messages to this pallet.
 	pub fn is_module(id: &[u8]) -> bool {
 		id == PALLET_ID.to_bytes()
+	}
+
+	/// Polkadex: the local decimals of an asset, the native one's from `Config::Decimals`
+	pub fn local_decimals(asset: &AssetId<T>) -> u8 {
+		if *asset == T::NativeAssetId::get() {
+			T::Decimals::get()
+		} else {
+			<T::Assets as fungibles::metadata::Inspect<T::AccountId>>::decimals(asset.clone())
+		}
 	}
 }
 
@@ -55,11 +66,13 @@ pub fn convert_to_balance<B: core::str::FromStr>(
 
 /// Converts a local u128 balance to an ERC20 U256 amount
 ///
-/// Scales the value between local and ERC20 decimal precision in both directions.
-pub fn convert_to_erc20(value: u128, erc_decimals: u8, local_decimals: u8) -> U256 {
+/// Scales the value between local and ERC20 decimal precision in both directions. Polkadex: `None`
+/// when the destination cannot hold it exactly, that is when scaling down leaves a remainder.
+pub fn convert_to_erc20(value: u128, erc_decimals: u8, local_decimals: u8) -> Option<U256> {
 	if erc_decimals >= local_decimals {
-		U256::from(value) * U256::from(10u128.pow((erc_decimals - local_decimals) as u32))
+		Some(U256::from(value) * U256::from(10u128.pow((erc_decimals - local_decimals) as u32)))
 	} else {
-		U256::from(value) / U256::from(10u128.pow((local_decimals - erc_decimals) as u32))
+		let factor = 10u128.pow((local_decimals - erc_decimals) as u32);
+		(value % factor == 0).then(|| U256::from(value / factor))
 	}
 }

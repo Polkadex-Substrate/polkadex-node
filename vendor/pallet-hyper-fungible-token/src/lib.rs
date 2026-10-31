@@ -227,6 +227,8 @@ pub mod pallet {
 		NonEvmPeerChain,
 		/// Kept for SCALE encoding compatibility; no longer emitted
 		ErcDecimalsBelowLocal,
+		/// Polkadex: the amount does not convert exactly to the destination's decimals
+		AmountNotRepresentable,
 	}
 
 	#[pallet::call]
@@ -259,9 +261,13 @@ pub mod pallet {
 					.ok_or(Error::<T>::TokenContractNotFound)?;
 			let erc_decimals = Precisions::<T>::get(params.asset_id.clone(), params.destination)
 				.ok_or(Error::<T>::DecimalsNotFound)?;
+			// Polkadex: an amount the destination cannot represent is refused before anything moves
+			let decimals = Self::local_decimals(&params.asset_id);
+			let erc20_amount = convert_to_erc20(params.amount.into(), erc_decimals, decimals)
+				.ok_or(Error::<T>::AmountNotRepresentable)?;
 
 			// Lock or burn the local asset
-			let decimals = if params.asset_id == T::NativeAssetId::get() {
+			if params.asset_id == T::NativeAssetId::get() {
 				// escrow the native asset
 				<T as Config>::NativeCurrency::transfer(
 					&who,
@@ -269,7 +275,6 @@ pub mod pallet {
 					params.amount,
 					ExistenceRequirement::AllowDeath,
 				)?;
-				T::Decimals::get()
 			} else {
 				let is_native = NativeAssets::<T>::get(params.asset_id.clone());
 				if is_native {
@@ -290,15 +295,10 @@ pub mod pallet {
 						Fortitude::Polite,
 					)?;
 				}
-				<T::Assets as fungibles::metadata::Inspect<T::AccountId>>::decimals(
-					params.asset_id.clone(),
-				)
-			};
+			}
 
 			// Encode the Message body
 			let sender: [u8; 32] = who.clone().into();
-			let amount: u128 = params.amount.into();
-			let erc20_amount = convert_to_erc20(amount, erc_decimals, decimals);
 
 			let token_message = Message {
 				from: sender.to_vec().into(),
