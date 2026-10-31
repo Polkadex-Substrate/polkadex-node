@@ -167,9 +167,9 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 393,
-    // 1: the rehearsal chain already runs 393/0; mainnet goes from 392 straight to 393/1.
-    impl_version: 1,
+    // 394: Hyperbridge; 393 is the voting fix.
+    spec_version: 394,
+    impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     // Bumped 2→3: TxExtension tuple changed vs old SignedExtra —
     // SkipCheckIfFeeless wrapper added around ChargeAssetTxPayment (pos 8),
