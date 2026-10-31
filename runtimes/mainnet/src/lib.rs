@@ -554,6 +554,11 @@ impl pallet_ismp::Config for Runtime {
 	// Delivery is unsigned in this version; the handler's result is discarded.
 	type FeeHandler = ();
 	type MigrationWeightInfo = weights::pallet_ismp::WeightInfo<Runtime>;
+	// Bounds on one unsigned call, checked in the pool and at import. The soak's consensus proofs
+	// were 6.6 to 23.7 KiB; a Polkadot GRANDPA proof (about 400 precommits) is about 55 KiB.
+	type MaxMessages = ConstU32<8>;
+	type MaxRequests = ConstU32<64>;
+	type MaxEncodedSize = ConstU32<{ 256 * 1024 }>;
 }
 
 impl ismp_grandpa::Config for Runtime {
@@ -3518,6 +3523,9 @@ impl_runtime_apis! {
 		}
 	}
 }
+
+#[cfg(test)]
+mod hyperbridge_tests;
 
 #[cfg(test)]
 mod tests {

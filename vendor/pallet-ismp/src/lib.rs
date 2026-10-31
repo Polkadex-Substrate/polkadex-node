@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Polytope Labs.
 // SPDX-License-Identifier: Apache-2.0
+// Modified by The Polkadex Authors in 2026; see CHANGES.md.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -102,7 +103,7 @@ pub mod pallet {
 		events::{RequestResponseHandled, TimeoutHandled},
 		handlers,
 		host::{IsmpHost, StateMachine},
-		messaging::{CreateConsensusState, Message},
+		messaging::{CreateConsensusState, Message, TimeoutMessage},
 		router::IsmpRouter,
 	};
 	use sp_core::{storage::ChildInfo, H256};
@@ -210,6 +211,18 @@ pub mod pallet {
 
 		/// Weight functions for legacy storage drain migrations.
 		type MigrationWeightInfo: crate::weights::MigrationWeightInfo;
+
+		/// Polkadex: the most messages one unsigned call may carry
+		#[pallet::constant]
+		type MaxMessages: Get<u32>;
+
+		/// Polkadex: the most requests, responses and timeouts one unsigned call may carry in all
+		#[pallet::constant]
+		type MaxRequests: Get<u32>;
+
+		/// Polkadex: the longest encoded batch of messages one unsigned call may carry, in bytes
+		#[pallet::constant]
+		type MaxEncodedSize: Get<u32>;
 	}
 
 	// Simple declaration of the `Pallet` type. It is placeholder we use to implement traits and
@@ -819,8 +832,12 @@ pub mod pallet {
 		type Call = Call<T>;
 
 		// empty pre-dispatch do we don't modify storage
-		fn pre_dispatch(_call: &Self::Call) -> Result<(), TransactionValidityError> {
-			Ok(())
+		fn pre_dispatch(call: &Self::Call) -> Result<(), TransactionValidityError> {
+			// Polkadex: the bounds hold at block import too, not only in the pool
+			match call {
+				Call::handle_unsigned { messages } => Self::check_bounds(messages),
+				_ => Ok(()),
+			}
 		}
 
 		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
@@ -832,6 +849,8 @@ pub mod pallet {
 				Call::handle_unsigned { messages } => messages,
 				_ => Err(TransactionValidityError::Invalid(InvalidTransaction::Call))?,
 			};
+			// Polkadex: only bounded calls, checked before their messages execute
+			Self::check_bounds(messages)?;
 
 			let events =
 				Self::execute(messages.clone()).map_err(|_| InvalidTransaction::BadProof)?;
@@ -969,6 +988,29 @@ pub mod pallet {
 		/// since both maps track the same heights per chain.
 		pub fn insert_bounded_update_time(height: StateMachineHeight, timestamp: u64) {
 			BoundedStateMachineUpdateTime::<T>::insert(height.id, height.height, timestamp);
+		}
+
+		/// Polkadex: refuses an unsigned call over MaxMessages, MaxRequests or MaxEncodedSize
+		pub fn check_bounds(messages: &[Message]) -> Result<(), TransactionValidityError> {
+			let requests: usize = messages.iter().map(requests_in).sum();
+			if messages.len() > T::MaxMessages::get() as usize ||
+				requests > T::MaxRequests::get() as usize ||
+				messages.encoded_size() > T::MaxEncodedSize::get() as usize
+			{
+				return Err(InvalidTransaction::ExhaustsResources.into());
+			}
+			Ok(())
+		}
+	}
+
+	/// Polkadex: the requests, responses or timeouts a message carries
+	fn requests_in(message: &Message) -> usize {
+		match message {
+			Message::Request(message) => message.requests.len(),
+			Message::Response(message) => message.requests.len(),
+			Message::Timeout(TimeoutMessage::Post { requests, .. }) => requests.len(),
+			Message::Timeout(TimeoutMessage::Get { requests }) => requests.len(),
+			Message::Consensus(_) | Message::FraudProof(_) => 0,
 		}
 	}
 }
