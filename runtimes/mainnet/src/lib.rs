@@ -1444,6 +1444,62 @@ impl sp_runtime::traits::Convert<AccountId, Balance> for StakedBalance {
 	}
 }
 
+/// What a `StakedBalance` lookup costs: one read of `Balances::Holds`. The proof size is the
+/// benchmark CLI's estimate for a first read of that item at its upstream size of 427 bytes:
+/// the item, 5 map layers and 2 top-level layers of 15 * 33 bytes each.
+fn staked_balance_read() -> Weight {
+	<Runtime as frame_system::Config>::DbWeight::get()
+		.reads(1)
+		.saturating_add(Weight::from_parts(0, 3_892))
+}
+
+/// Upstream weights with `staked_balance_read()` added to the calls in `read`, the ones that
+/// look up `VotingHold`. The calls in `same` keep their upstream weight.
+macro_rules! weights_with_staked_balance_read {
+	($name:ident, $info:path, $upstream:ty,
+	 read: [$($r:ident($($ra:ident),*)),*],
+	 same: [$($s:ident($($sa:ident),*)),*]) => {
+		pub struct $name;
+		impl $info for $name {
+			$(fn $r($($ra: u32),*) -> Weight {
+				<$upstream as $info>::$r($($ra),*).saturating_add(staked_balance_read())
+			})*
+			$(fn $s($($sa: u32),*) -> Weight {
+				<$upstream as $info>::$s($($sa),*)
+			})*
+		}
+	};
+}
+
+weights_with_staked_balance_read!(
+	DemocracyWeights,
+	pallet_democracy::WeightInfo,
+	pallet_democracy::weights::SubstrateWeight<Runtime>,
+	read: [vote_new(), vote_existing(), delegate(r)],
+	same: [
+		propose(), second(), emergency_cancel(), blacklist(), external_propose(),
+		external_propose_majority(), external_propose_default(), fast_track(), veto_external(),
+		cancel_proposal(), cancel_referendum(), on_initialize_base(r),
+		on_initialize_base_with_launch_period(r), undelegate(r), clear_public_proposals(),
+		unlock_remove(r), unlock_set(r), remove_vote(r), remove_other_vote(r),
+		set_external_metadata(), clear_external_metadata(), set_proposal_metadata(),
+		clear_proposal_metadata(), set_referendum_metadata(), clear_referendum_metadata()
+	]
+);
+
+weights_with_staked_balance_read!(
+	ElectionsWeights,
+	pallet_elections_phragmen::WeightInfo,
+	pallet_elections_phragmen::weights::SubstrateWeight<Runtime>,
+	read: [vote_equal(v), vote_more(v), vote_less(v)],
+	same: [
+		remove_voter(), submit_candidacy(c), renounce_candidacy_candidate(c),
+		renounce_candidacy_members(), renounce_candidacy_runners_up(),
+		remove_member_without_replacement(), remove_member_with_replacement(),
+		clean_defunct_voters(v, d), election_phragmen(c, v, e)
+	]
+);
+
 impl pallet_elections_phragmen::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type PalletId = ElectionsPhragmenPalletId;
@@ -1465,7 +1521,7 @@ impl pallet_elections_phragmen::Config for Runtime {
 	type MaxCandidates = MaxCandidates;
 	type MaxVoters = MaxVoters;
 	type MaxVotesPerVoter = MaxVotesPerVoter;
-	type WeightInfo = pallet_elections_phragmen::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = ElectionsWeights;
 }
 
 type TechnicalCollective = pallet_collective::Instance2;
@@ -1581,7 +1637,7 @@ impl pallet_treasury::Config for Runtime {
 }
 
 impl pallet_democracy::Config for Runtime {
-	type WeightInfo = pallet_democracy::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = DemocracyWeights;
 	type RuntimeEvent = RuntimeEvent;
 	type Scheduler = Scheduler;
 	type Preimages = Preimage;

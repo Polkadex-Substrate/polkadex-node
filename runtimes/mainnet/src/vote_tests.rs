@@ -356,3 +356,37 @@ fn migrate_currency_clears_a_lock_left_beside_the_hold() {
 		));
 	});
 }
+
+#[test]
+fn vote_weights_include_the_staked_balance_read() {
+	use frame_support::traits::StorageInfoTrait;
+	use pallet_democracy::WeightInfo as _;
+	use pallet_elections_phragmen::WeightInfo as _;
+	type DemocracyUpstream = pallet_democracy::weights::SubstrateWeight<Runtime>;
+	type ElectionsUpstream = pallet_elections_phragmen::weights::SubstrateWeight<Runtime>;
+
+	// One database read, with room in the proof for this runtime's `Balances::Holds` item at
+	// the benchmark CLI's worst case: the item, 5 map layers and 2 top-level layers.
+	let read = staked_balance_read();
+	let holds = Balances::storage_info()
+		.into_iter()
+		.find(|item| item.storage_name == b"Holds")
+		.and_then(|item| item.max_size)
+		.expect("Balances::Holds has a max size");
+	assert_eq!(read.ref_time(), RocksDbWeight::get().reads(1).ref_time());
+	assert!(read.proof_size() >= u64::from(holds) + 7 * 15 * 33);
+
+	// The calls that look up the staked balance carry the read; the others keep upstream.
+	assert_eq!(DemocracyWeights::vote_new(), DemocracyUpstream::vote_new() + read);
+	assert_eq!(DemocracyWeights::vote_existing(), DemocracyUpstream::vote_existing() + read);
+	assert_eq!(DemocracyWeights::propose(), DemocracyUpstream::propose());
+	assert_eq!(ElectionsWeights::remove_voter(), ElectionsUpstream::remove_voter());
+	for n in [0, 1, 16, 100] {
+		assert_eq!(DemocracyWeights::delegate(n), DemocracyUpstream::delegate(n) + read);
+		assert_eq!(ElectionsWeights::vote_equal(n), ElectionsUpstream::vote_equal(n) + read);
+		assert_eq!(ElectionsWeights::vote_more(n), ElectionsUpstream::vote_more(n) + read);
+		assert_eq!(ElectionsWeights::vote_less(n), ElectionsUpstream::vote_less(n) + read);
+		assert_eq!(DemocracyWeights::undelegate(n), DemocracyUpstream::undelegate(n));
+		assert_eq!(ElectionsWeights::submit_candidacy(n), ElectionsUpstream::submit_candidacy(n));
+	}
+}
