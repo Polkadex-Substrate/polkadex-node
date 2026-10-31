@@ -1,5 +1,6 @@
 // Copyright (C) Polytope Labs Ltd.
 // SPDX-License-Identifier: Apache-2.0
+// Modified by The Polkadex Authors in 2026; see CHANGES.md.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +28,7 @@ use frame_support::traits::{
 	tokens::Preservation,
 	Contains, Currency, ExistenceRequirement,
 };
+use frame_support::dispatch::GetDispatchInfo;
 use frame_system::RawOrigin;
 use ismp::{
 	module::IsmpModule,
@@ -37,6 +39,19 @@ use sp_core::{Get, H160, U256};
 use sp_runtime::{MultiSignature, Weight};
 
 use crate::types::EvmToSubstrate;
+
+impl<T: Config> Pallet<T> {
+	/// Polkadex: the declared weight of the runtime call an arriving transfer carries, which
+	/// `on_accept` dispatches unmetered; zero for a transfer without one.
+	pub fn runtime_call_weight(body: &[u8]) -> Weight {
+		let call = Message::abi_decode(body)
+			.ok()
+			.filter(|message| !message.data.is_empty())
+			.and_then(|message| SubstrateCalldata::decode(&mut &message.data[..]).ok())
+			.and_then(|data| T::RuntimeCall::decode(&mut &*data.runtime_call).ok());
+		call.map_or(Weight::zero(), |call| call.get_dispatch_info().call_weight)
+	}
+}
 
 impl<T: Config> IsmpModule for Pallet<T>
 where

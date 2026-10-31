@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Polytope Labs.
 // SPDX-License-Identifier: Apache-2.0
+// Modified by The Polkadex Authors in 2026; see CHANGES.md.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,6 +55,24 @@ pub trait WeightProvider {
 impl WeightProvider for () {
 	fn module_callback(_dest_module: ModuleId) -> Option<Box<dyn IsmpModuleWeight>> {
 		None
+	}
+}
+
+/// Polkadex: weights of the unsigned message kinds, benchmarked by the runtime
+pub trait MessageWeightInfo {
+	/// A consensus update whose proof carries `k` signatures
+	fn handle_consensus(k: u32) -> Weight;
+	/// A batch of `n` requests with a `b`-byte proof, a benchmarked module callback each
+	fn handle_requests(n: u32, b: u32) -> Weight;
+}
+
+/// Upstream's flat weight per call, for runtimes without benchmarks
+impl MessageWeightInfo for () {
+	fn handle_consensus(_k: u32) -> Weight {
+		Weight::from_parts(300_000_000, 0)
+	}
+	fn handle_requests(_n: u32, _b: u32) -> Weight {
+		Weight::from_parts(300_000_000, 0)
 	}
 }
 

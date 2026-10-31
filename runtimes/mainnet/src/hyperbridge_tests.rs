@@ -20,6 +20,8 @@
 //! change and refuse amounts the destination cannot represent.
 
 use super::*;
+use frame_support::dispatch::GetDispatchInfo;
+use sp_core::U256;
 use ismp::{
 	messaging::{ConsensusMessage, Message, Proof, RequestMessage},
 	router::PostRequest,
@@ -44,7 +46,8 @@ fn max_encoded_size() -> usize {
 
 fn consensus(bytes: usize) -> Message {
 	let consensus_proof = vec![0; bytes];
-	Message::Consensus(ConsensusMessage { consensus_proof, consensus_state_id: *b"ksma", signer: vec![] })
+	let consensus_state_id = *b"ksma";
+	Message::Consensus(ConsensusMessage { consensus_proof, consensus_state_id, signer: vec![] })
 }
 
 fn post(nonce: u64) -> PostRequest {
@@ -60,13 +63,24 @@ fn post(nonce: u64) -> PostRequest {
 }
 
 fn requests(n: u64) -> Message {
+	requests_with_proof(n, 0)
+}
+
+fn requests_with_proof(n: u64, proof_bytes: usize) -> Message {
 	let id = StateMachineId { state_id: StateMachine::Kusama(4009), consensus_state_id: *b"ksma" };
-	let proof = Proof { height: StateMachineHeight { id, height: 1 }, proof: vec![] };
+	let proof = Proof { height: StateMachineHeight { id, height: 1 }, proof: vec![0; proof_bytes] };
 	Message::Request(RequestMessage { requests: (0..n).map(post).collect(), proof, signer: vec![] })
 }
 
+/// The declared weight of an unsigned call.
+fn declared(messages: Vec<Message>) -> Weight {
+	pallet_ismp::Call::<Runtime>::handle_unsigned { messages }.get_dispatch_info().call_weight
+}
+
+type Check = Result<(), TransactionValidityError>;
+
 /// What the pool (`validate_unsigned`) and block import (`pre_dispatch`) say about a call.
-fn checks(messages: Vec<Message>) -> (Result<(), TransactionValidityError>, Result<(), TransactionValidityError>) {
+fn checks(messages: Vec<Message>) -> (Check, Check) {
 	let call = pallet_ismp::Call::<Runtime>::handle_unsigned { messages };
 	let validate = Ismp::validate_unsigned(TransactionSource::External, &call).map(|_| ());
 	(validate, Ismp::pre_dispatch(&call))
@@ -98,5 +112,41 @@ fn rehearsal_sized_calls_fit_the_bounds_with_margin() {
 		assert!(soak.encoded_size() * 4 < max_encoded_size());
 		let polkadot = vec![consensus(400 * 136 + 8 * 1024)];
 		assert!(polkadot.encoded_size() * 4 < max_encoded_size());
+	});
+}
+
+// A consensus proof is weighed at one signature per 136 bytes; a batch per request and proof byte,
+// plus the runtime call a transfer carries into the HFT pallet. The heaviest calls the bounds allow
+// still fit in one block.
+#[test]
+fn unsigned_ismp_weight_follows_the_messages() {
+	type Weights = <Runtime as pallet_ismp::Config>::MessageWeightInfo;
+	use pallet_ismp::weights::MessageWeightInfo;
+	new_test_ext().execute_with(|| {
+		let bytes = 24 * 1024;
+		let signatures = bytes as u32 / 136 + 1;
+		assert_eq!(declared(vec![consensus(bytes)]), Weights::handle_consensus(signatures));
+		let small = declared(vec![consensus(1)]).ref_time();
+		assert!(small < declared(vec![consensus(bytes)]).ref_time());
+		assert_eq!(declared(vec![requests_with_proof(2, 100)]), Weights::handle_requests(2, 100));
+
+		let remark = RuntimeCall::System(frame_system::Call::remark { remark: vec![0; 64] });
+		let data = pallet_hyper_fungible_token::types::SubstrateCalldata {
+			signature: None,
+			runtime_call: remark.encode(),
+		};
+		let amount = U256::from(1u64);
+		let body = crate::ismp_fixtures::transfer_body(&[1; 20], &[2; 32], amount, &data.encode());
+		let Message::Request(mut carried) = requests(2) else { unreachable!() };
+		carried.requests[0].body = body;
+		let call_weight = remark.get_dispatch_info().call_weight;
+		assert!(call_weight.any_gt(Weight::zero()));
+		let expected = Weights::handle_requests(2, 0).saturating_add(call_weight);
+		assert_eq!(declared(vec![Message::Request(carried)]), expected);
+
+		let normal = RuntimeBlockWeights::get().get(DispatchClass::Normal).max_extrinsic.unwrap();
+		let max = max_encoded_size();
+		assert!(declared(vec![consensus(max - 16)]).all_lte(normal));
+		assert!(declared(vec![requests_with_proof(64, max - 64 * 128)]).all_lte(normal));
 	});
 }

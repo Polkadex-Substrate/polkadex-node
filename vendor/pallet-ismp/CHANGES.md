@@ -10,3 +10,8 @@ changed it as follows; the changed files say so in their headers, and the new co
   timeouts over all messages) and `MaxEncodedSize`. `check_bounds` refuses a call over any of them
   with `ExhaustsResources`, first in `validate_unsigned`, before the messages execute, and in
   `pre_dispatch`, which runs at block import. File: `src/lib.rs`.
+- Weights of `handle_unsigned` from its messages, replacing the flat 300M with no proof size:
+  `Config::MessageWeightInfo` prices a consensus or fraud proof at one signature per 136 bytes
+  (`PRECOMMIT_BYTES`) and a request, response or timeout batch per request and proof byte, and
+  `Config::WeightProvider` (upstream's unused trait) adds each module callback's declared weight.
+  Files: `src/lib.rs`, `src/weights.rs`.

@@ -86,6 +86,8 @@ pub mod pallet {
 		errors::HandlingError,
 		fee_handler::FeeHandler,
 	};
+	// Polkadex: the weight traits, for their functions on the Config types
+	use crate::weights::{MessageWeightInfo as _, WeightProvider as _};
 	use codec::{Codec, Encode};
 	use core::fmt::Debug;
 	use frame_support::{
@@ -223,6 +225,12 @@ pub mod pallet {
 		/// Polkadex: the longest encoded batch of messages one unsigned call may carry, in bytes
 		#[pallet::constant]
 		type MaxEncodedSize: Get<u32>;
+
+		/// Polkadex: weights of the unsigned message kinds, benchmarked by the runtime
+		type MessageWeightInfo: crate::weights::MessageWeightInfo;
+
+		/// Polkadex: weights of the module callbacks that unsigned messages trigger
+		type WeightProvider: crate::weights::WeightProvider;
 	}
 
 	// Simple declaration of the `Pallet` type. It is placeholder we use to implement traits and
@@ -621,7 +629,7 @@ pub mod pallet {
 		/// - `messages`: the messages to handle or process.
 		///
 		/// Emits different message events based on the Message received if successful.
-		#[pallet::weight(weight())]
+		#[pallet::weight(Pallet::<T>::unsigned_weight(messages))]
 		#[pallet::call_index(0)]
 		#[frame_support::transactional]
 		pub fn handle_unsigned(
@@ -955,10 +963,9 @@ pub mod pallet {
 		}
 	}
 
-	/// Static weights because these should get overridden by the FeeHandler
-	fn weight() -> Weight {
-		Weight::from_parts(300_000_000, 0)
-	}
+	/// Polkadex: bytes per GRANDPA precommit (target, signature, authority), the signature density
+	/// at which consensus and fraud proofs are weighed
+	pub const PRECOMMIT_BYTES: usize = 136;
 
 	impl<T: Config> Pallet<T> {
 		/// Insert a state commitment into the bounded map. ISMP does not allow
@@ -1001,6 +1008,67 @@ pub mod pallet {
 			}
 			Ok(())
 		}
+
+		/// Polkadex: the weight of an unsigned call: each message as benchmarked for its kind and
+		/// size, plus the module callbacks it triggers
+		pub fn unsigned_weight(messages: &[Message]) -> Weight {
+			total(messages.iter().map(Self::message_weight))
+		}
+
+		fn message_weight(message: &Message) -> Weight {
+			use ismp::router::{GetResponse, Request};
+			let consensus = |bytes: usize| {
+				T::MessageWeightInfo::handle_consensus((bytes / PRECOMMIT_BYTES + 1) as u32)
+			};
+			let batch = |n: usize, proof: &[u8], callbacks: Weight| {
+				T::MessageWeightInfo::handle_requests(n as u32, proof.len() as u32)
+					.saturating_add(callbacks)
+			};
+			match message {
+				Message::Consensus(m) => consensus(m.consensus_proof.len()),
+				Message::FraudProof(m) => consensus(m.proof_1.len() + m.proof_2.len()),
+				Message::Request(m) => {
+					let calls = m.requests.iter();
+					let calls = calls.map(|post| Self::callback(&post.to, |cb| cb.on_accept(post)));
+					batch(m.requests.len(), &m.proof.proof, total(calls))
+				},
+				Message::Response(m) => {
+					let calls = m.requests.iter().map(|get| {
+						let response = GetResponse { get: get.clone(), values: Default::default() };
+						Self::callback(&get.from, |cb| cb.on_response(&response))
+					});
+					batch(m.requests.len(), &m.proof.proof, total(calls))
+				},
+				Message::Timeout(TimeoutMessage::Post { requests, timeout_proof }) => {
+					let calls = requests.iter().map(|post| {
+						Self::callback(&post.from, |cb| cb.on_timeout(&Request::Post(post.clone())))
+					});
+					batch(requests.len(), &timeout_proof.proof, total(calls))
+				},
+				Message::Timeout(TimeoutMessage::Get { requests }) => {
+					let calls = requests.iter().map(|get| {
+						Self::callback(&get.from, |cb| cb.on_timeout(&Request::Get(get.clone())))
+					});
+					batch(requests.len(), &[], total(calls))
+				},
+			}
+		}
+
+		/// Polkadex: the declared weight of a module's callback, zero for a module without one
+		fn callback(
+			module: &[u8],
+			weigh: impl FnOnce(&dyn crate::weights::IsmpModuleWeight) -> Weight,
+		) -> Weight {
+			ModuleId::from_bytes(module)
+				.ok()
+				.and_then(T::WeightProvider::module_callback)
+				.map_or(Weight::zero(), |weights| weigh(&*weights))
+		}
+	}
+
+	/// Polkadex: the saturating sum of some weights
+	fn total(weights: impl Iterator<Item = Weight>) -> Weight {
+		weights.fold(Weight::zero(), |sum, weight| sum.saturating_add(weight))
 	}
 
 	/// Polkadex: the requests, responses or timeouts a message carries

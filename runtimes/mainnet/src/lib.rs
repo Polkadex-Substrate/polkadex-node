@@ -559,6 +559,35 @@ impl pallet_ismp::Config for Runtime {
 	type MaxMessages = ConstU32<8>;
 	type MaxRequests = ConstU32<64>;
 	type MaxEncodedSize = ConstU32<{ 256 * 1024 }>;
+	// Each message is weighed for its kind and size as benchmarked, plus its module callbacks.
+	type MessageWeightInfo = weights::ismp_messages::WeightInfo<Runtime>;
+	type WeightProvider = IsmpCallbackWeights;
+}
+
+/// Callback weights for unsigned ISMP messages. A transfer into the HFT pallet may carry a runtime
+/// call that `on_accept` dispatches unmetered, so that call's declared weight is added; the rest
+/// of the callback is in the benchmarked batch weight.
+pub struct IsmpCallbackWeights;
+impl pallet_ismp::weights::WeightProvider for IsmpCallbackWeights {
+	fn module_callback(
+		module: pallet_ismp::ModuleId,
+	) -> Option<Box<dyn pallet_ismp::weights::IsmpModuleWeight>> {
+		let hft = module.to_bytes() == pallet_hyper_fungible_token::PALLET_ID.to_bytes();
+		hft.then(|| Box::new(HftCallbackWeight) as Box<dyn pallet_ismp::weights::IsmpModuleWeight>)
+	}
+}
+
+struct HftCallbackWeight;
+impl pallet_ismp::weights::IsmpModuleWeight for HftCallbackWeight {
+	fn on_accept(&self, request: &ismp::router::PostRequest) -> Weight {
+		HyperFungibleToken::runtime_call_weight(&request.body)
+	}
+	fn on_timeout(&self, _request: &Request) -> Weight {
+		Weight::zero()
+	}
+	fn on_response(&self, _response: &GetResponse) -> Weight {
+		Weight::zero()
+	}
 }
 
 impl ismp_grandpa::Config for Runtime {
@@ -3526,6 +3555,9 @@ impl_runtime_apis! {
 
 #[cfg(test)]
 mod hyperbridge_tests;
+
+#[cfg(any(test, feature = "runtime-benchmarks"))]
+mod ismp_fixtures;
 
 #[cfg(test)]
 mod tests {
