@@ -26,15 +26,21 @@ use ismp::{
 	messaging::{ConsensusMessage, Message, Proof, RequestMessage},
 	router::PostRequest,
 };
+use frame_support::traits::Currency;
+use pallet_hyper_fungible_token::types::{ChainConfig, SendParams, TokenRegistration, TokenUpdate};
 use sp_runtime::{
-	traits::ValidateUnsigned,
+	traits::{Dispatchable, ValidateUnsigned},
 	transaction_validity::{InvalidTransaction, TransactionValidityError},
+	DispatchResult,
 };
 
 const EXHAUSTED: TransactionValidityError =
 	TransactionValidityError::Invalid(InvalidTransaction::ExhaustsResources);
 const BAD_PROOF: TransactionValidityError =
 	TransactionValidityError::Invalid(InvalidTransaction::BadProof);
+
+const PDEX: Balance = crate::constants::currency::PDEX;
+const EVM: StateMachine = StateMachine::Evm(1);
 
 fn new_test_ext() -> sp_io::TestExternalities {
 	frame_system::GenesisConfig::<Runtime>::default().build_storage().unwrap().into()
@@ -177,5 +183,86 @@ fn ismp_benchmark_scenarios_succeed() {
 		for i in 0..3 {
 			assert_eq!(Balances::free_balance(AccountId::from(beneficiary(i))), TRANSFER);
 		}
+	});
+}
+
+fn account(n: u8) -> AccountId {
+	AccountId::from([n; 32])
+}
+
+fn register(asset: u128, contract: [u8; 20], decimals: u8) {
+	let chain = ChainConfig { token_contract: contract.into(), decimals };
+	let native = asset == POLKADEX_NATIVE_ASSET_ID;
+	let registration = TokenRegistration { local_id: asset, native, chains: [(EVM, chain)].into() };
+	assert_ok!(HyperFungibleToken::register_token(RuntimeOrigin::root(), registration));
+}
+
+/// `send` through the runtime dispatch, which rolls a failed send back as a block would.
+fn send(who: &AccountId, asset: u128, amount: Balance) -> DispatchResult {
+	let recipient = vec![7u8; 20].try_into().unwrap();
+	let params = SendParams {
+		asset_id: asset,
+		destination: EVM,
+		recipient,
+		amount,
+		timeout: 0,
+		relayer_fee: 0,
+		call_data: None,
+	};
+	let call = RuntimeCall::HyperFungibleToken(pallet_hyper_fungible_token::Call::send { params });
+	call.dispatch(RuntimeOrigin::signed(who.clone())).map(|_| ()).map_err(|e| e.error)
+}
+
+/// The requests sent so far, read back from the offchain index as a relayer would.
+fn sent(ext: &mut sp_io::TestExternalities) -> Vec<Request> {
+	use pallet_ismp::offchain::{leaf_default_key, Leaf};
+	let commitments: Vec<H256> = ext.execute_with(|| {
+		let events = frame_system::Pallet::<Runtime>::events().into_iter();
+		events
+			.filter_map(|record| match record.event {
+				RuntimeEvent::HyperFungibleToken(
+					pallet_hyper_fungible_token::Event::TokenSent { commitment, .. },
+				) => Some(commitment),
+				_ => None,
+			})
+			.collect()
+	});
+	ext.persist_offchain_overlay();
+	let db = ext.offchain_db();
+	let read = |commitment: &H256| {
+		let leaf = db.get(&leaf_default_key(*commitment)).expect("an indexed request");
+		match Leaf::decode(&mut &leaf[..]).expect("a leaf") {
+			Leaf::Request(request) => request,
+			Leaf::GetResponse(_) => panic!("a request leaf"),
+		}
+	};
+	commitments.iter().map(read).collect()
+}
+
+// First regression case from the #29 review: a refund follows the route recorded at registration, so after the contract
+// changes a transfer still in flight refunds in full, and the old contract can no longer deliver.
+#[test]
+fn timeout_refunds_in_full_after_the_contract_changes() {
+	let mut ext = new_test_ext();
+	let sender = account(81);
+	ext.execute_with(|| {
+		frame_system::Pallet::<Runtime>::set_block_number(1);
+		let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&sender, 1_000 * PDEX);
+		register(POLKADEX_NATIVE_ASSET_ID, [0xaa; 20], 18);
+		assert_ok!(send(&sender, POLKADEX_NATIVE_ASSET_ID, 100 * PDEX));
+		let chain = ChainConfig { token_contract: [0xbb; 20].into(), decimals: 18 };
+		let rotate = TokenUpdate {
+			asset_id: POLKADEX_NATIVE_ASSET_ID,
+			add_chains: [(EVM, chain)].into(),
+			remove_chains: vec![],
+		};
+		assert_ok!(HyperFungibleToken::update_token(RuntimeOrigin::root(), rotate));
+		use pallet_hyper_fungible_token::ContractToAsset;
+		assert!(ContractToAsset::<Runtime>::get(EVM, [0xaa; 20].to_vec()).is_none());
+	});
+	let requests = sent(&mut ext);
+	ext.execute_with(|| {
+		assert_ok!(HyperFungibleToken::default().on_timeout(requests[0].clone()));
+		assert_eq!(Balances::free_balance(&sender), 1_000 * PDEX);
 	});
 }

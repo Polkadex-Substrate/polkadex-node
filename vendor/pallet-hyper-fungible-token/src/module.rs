@@ -247,8 +247,8 @@ where
 				}
 				let beneficiary: T::AccountId = sender_bytes.into();
 
-				// Look up the asset from the destination contract address
-				let local_asset_id = ContractToAsset::<T>::get(dest, &to)
+				// Polkadex: the route recorded at registration, which outlives a contract change
+				let (local_asset_id, erc_decimals) = RefundRoutes::<T>::get(dest, &to)
 					.ok_or(HftError::UnknownContractOnTimeout)?;
 
 				let decimals = if local_asset_id == T::NativeAssetId::get() {
@@ -258,8 +258,6 @@ where
 						local_asset_id.clone(),
 					)
 				};
-				let erc_decimals = Precisions::<T>::get(local_asset_id.clone(), dest)
-					.ok_or(HftError::DecimalsNotConfigured(dest))?;
 				let amount = convert_to_balance::<
 					<<T as Config>::NativeCurrency as Currency<T::AccountId>>::Balance,
 				>(

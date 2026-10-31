@@ -12,3 +12,8 @@ say so in their headers, and the new code is marked "Polkadex".
 - Callback weight: `runtime_call_weight` returns the declared weight of the runtime call an
   arriving transfer carries, which `on_accept` dispatches unmetered, so the runtime can charge it
   to the unsigned ISMP call. File: `src/module.rs`.
+- Refund routes: `RefundRoutes` keeps the local asset and ERC-20 decimals of every (chain,
+  contract) that `register_token` or `update_token` adds, and nothing removes it. `on_timeout`
+  reads it instead of `ContractToAsset` and `Precisions`, so a transfer in flight refunds in full
+  after its contract changes, while `on_accept` still trusts only the live maps. Files:
+  `src/lib.rs`, `src/module.rs`.

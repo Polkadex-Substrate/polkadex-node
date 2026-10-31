@@ -1,5 +1,6 @@
 // Copyright (C) Polytope Labs Ltd.
 // SPDX-License-Identifier: Apache-2.0
+// Modified by The Polkadex Authors in 2026; see CHANGES.md.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -143,6 +144,20 @@ pub mod pallet {
 		Blake2_128Concat,
 		StateMachine,
 		u8,
+		OptionQuery,
+	>;
+
+	/// Polkadex: the local asset and ERC-20 decimals behind every (chain, contract) ever registered,
+	/// for timeout refunds. `update_token` never removes an entry, so a transfer in flight refunds
+	/// in full after its contract changes; `on_accept` trusts only the live maps above.
+	#[pallet::storage]
+	pub type RefundRoutes<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		StateMachine,
+		Blake2_128Concat,
+		Vec<u8>,
+		(AssetId<T>, u8),
 		OptionQuery,
 	>;
 
@@ -338,6 +353,7 @@ pub mod pallet {
 					registration.local_id.clone(),
 					token_contract.clone(),
 				);
+				Self::route(chain, &token_contract, &registration.local_id, config.decimals);
 				ContractToAsset::<T>::insert(
 					chain,
 					token_contract,
@@ -380,6 +396,7 @@ pub mod pallet {
 					update.asset_id.clone(),
 					token_contract.clone(),
 				);
+				Self::route(chain, &token_contract, &update.asset_id, config.decimals);
 				ContractToAsset::<T>::insert(chain, token_contract, update.asset_id.clone());
 				Precisions::<T>::insert(update.asset_id.clone(), chain, config.decimals);
 			}
@@ -394,6 +411,13 @@ pub mod pallet {
 			}
 
 			Ok(())
+		}
+	}
+
+	impl<T: Config> Pallet<T> {
+		/// Polkadex: records the refund route of a (chain, contract); never removed
+		fn route(chain: StateMachine, contract: &[u8], asset: &AssetId<T>, decimals: u8) {
+			RefundRoutes::<T>::insert(chain, contract, (asset.clone(), decimals));
 		}
 	}
 
