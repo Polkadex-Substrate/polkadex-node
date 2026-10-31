@@ -2935,6 +2935,7 @@ mod benches {
 		[pallet_multisig, Multisig]
 		[pallet_ismp, Ismp]
 		[ismp_grandpa, IsmpGrandpa]
+		[ismp_messages, crate::ismp_benchmarks::Pallet::<Runtime>]
 	);
 }
 
@@ -3558,6 +3559,9 @@ mod hyperbridge_tests;
 
 #[cfg(any(test, feature = "runtime-benchmarks"))]
 mod ismp_fixtures;
+
+#[cfg(feature = "runtime-benchmarks")]
+mod ismp_benchmarks;
 
 #[cfg(test)]
 mod tests {

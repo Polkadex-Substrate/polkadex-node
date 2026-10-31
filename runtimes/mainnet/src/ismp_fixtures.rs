@@ -19,8 +19,43 @@
 //! ISMP messages built as relayers deliver them, for the runtime tests and the `ismp_messages`
 //! benchmarks.
 
-use sp_core::U256;
+use crate::{
+	constants::currency::PDEX, Balance, Balances, HyperFungibleToken, Ismp, PolkadexAssetId,
+	Runtime, RuntimeOrigin,
+};
+use finality_grandpa::{Commit, Message as Vote, Precommit, SignedPrecommit};
+use frame_support::{assert_ok, traits::Currency};
+use grandpa_verifier_primitives::{
+	justification::GrandpaJustification, ConsensusState, FinalityProof,
+};
+use ismp::{
+	consensus::{StateCommitment, StateMachineHeight, StateMachineId},
+	host::StateMachine,
+	messaging::{
+		hash_request, ConsensusMessage, CreateConsensusState, Message, Proof, RequestMessage,
+		StateCommitmentHeight,
+	},
+	router::{PostRequest, Request},
+};
+use ismp_grandpa::{
+	consensus::GRANDPA_CONSENSUS_ID,
+	messages::{ConsensusMessage as GrandpaMessage, RelayChainMessage, SubstrateHeader},
+};
+use pallet_hyper_fungible_token::types::{ChainConfig, TokenRegistration};
+use parity_scale_codec::Encode;
+use sp_consensus_grandpa::{AuthorityId, AuthoritySignature};
+use sp_core::{ed25519, H160, H256, U256};
+use sp_runtime::traits::{BlakeTwo256, Header as _};
 use sp_std::{vec, vec::Vec};
+
+/// The coprocessor whose proofs carry requests here, and the consensus state that tracks it.
+pub const COPROCESSOR: StateMachine = StateMachine::Kusama(4009);
+pub const STATE_ID: [u8; 4] = *b"ksma";
+/// The token contract on the source chain whose transfers in release PDEX from escrow.
+pub const SOURCE: StateMachine = StateMachine::Evm(1);
+pub const CONTRACT: [u8; 20] = [0xaa; 20];
+/// Each transfer in: 10 PDEX, which has 18 decimals on the EVM side.
+pub const TRANSFER: Balance = 10 * PDEX;
 
 /// A 32-byte ABI word holding `n`.
 fn word(n: usize) -> Vec<u8> {
@@ -51,4 +86,126 @@ pub fn transfer_body(from: &[u8], to: &[u8], amount: U256, data: &[u8]) -> Vec<u
 	body.extend(to);
 	body.extend(data);
 	body
+}
+
+/// A consensus client for a relay chain finalised by `authorities`, at block 0.
+pub fn grandpa_client(authorities: &[ed25519::Public]) -> CreateConsensusState {
+	let state = ConsensusState {
+		current_authorities: authorities.iter().map(|key| (AuthorityId::from(*key), 1)).collect(),
+		current_set_id: 0,
+		latest_height: 0,
+		latest_hash: H256::repeat_byte(1),
+		slot_duration: 6000,
+		state_machine: COPROCESSOR,
+	};
+	CreateConsensusState {
+		consensus_state: state.encode(),
+		consensus_client_id: GRANDPA_CONSENSUS_ID,
+		consensus_state_id: STATE_ID,
+		unbonding_period: 7 * 24 * 60 * 60,
+		challenge_periods: [(COPROCESSOR, 0)].into(),
+		state_machine_commitments: vec![],
+	}
+}
+
+/// The update that finalises block 1 above that client, with a precommit from each authority.
+pub fn grandpa_update(
+	authorities: &[ed25519::Public],
+	sign: impl Fn(&ed25519::Public, &[u8]) -> ed25519::Signature,
+) -> Message {
+	let parent = H256::repeat_byte(1);
+	let header = SubstrateHeader::new(1, H256::zero(), H256::zero(), parent, Default::default());
+	let precommit = Precommit { target_hash: header.hash(), target_number: 1 };
+	let (round, set_id) = (1u64, 0u64);
+	let payload = (Vote::Precommit(precommit.clone()), round, set_id).encode();
+	let signed = |key: &ed25519::Public| SignedPrecommit {
+		precommit: precommit.clone(),
+		signature: AuthoritySignature::from(sign(key, &payload)),
+		id: AuthorityId::from(*key),
+	};
+	let precommits = authorities.iter().map(signed).collect();
+	let commit = Commit { target_hash: header.hash(), target_number: 1, precommits };
+	let votes_ancestries = vec![];
+	let justification = GrandpaJustification::<SubstrateHeader> { round, commit, votes_ancestries };
+	let justification = justification.encode();
+	let block = header.hash();
+	let finality_proof = FinalityProof { block, justification, unknown_headers: vec![header] };
+	let relay = RelayChainMessage { finality_proof, parachain_headers: Default::default() };
+	let consensus_proof = GrandpaMessage::Polkadot(relay).encode();
+	let consensus_state_id = STATE_ID;
+	Message::Consensus(ConsensusMessage { consensus_proof, consensus_state_id, signer: vec![] })
+}
+
+/// The beneficiary of transfer `i`.
+pub fn beneficiary(i: u32) -> [u8; 32] {
+	let mut account = [0x77; 32];
+	account[..4].copy_from_slice(&i.to_le_bytes());
+	account
+}
+
+/// `n` transfers of 10 PDEX into the HFT pallet from `SOURCE`, proved through the coprocessor, with
+/// `extra` bytes of unrelated proof nodes on top. Returns the message and the state commitment its
+/// proof checks against.
+pub fn transfers_in(n: u32, extra: u32) -> (Message, StateCommitmentHeight) {
+	let amount = U256::from(TRANSFER) * U256::from(1_000_000u64); // 12 local decimals to 18
+	let post = |i: u32| PostRequest {
+		source: SOURCE,
+		dest: StateMachine::Substrate(*b"PDEX"),
+		nonce: i.into(),
+		from: CONTRACT.to_vec(),
+		to: pallet_hyper_fungible_token::PALLET_ID.to_bytes(),
+		timeout_timestamp: 0,
+		body: transfer_body(&[0x11; 20], &beneficiary(i), amount, &[]),
+	};
+	let requests: Vec<PostRequest> = (0..n).map(post).collect();
+	let key = |post: &PostRequest| {
+		let commitment = hash_request::<Ismp>(&Request::Post(post.clone()));
+		pallet_ismp::child_trie::RequestCommitments::<Runtime>::storage_key(commitment)
+	};
+	let keys: Vec<Vec<u8>> = requests.iter().map(key).collect();
+	let (state_root, mut nodes) = trie(&keys);
+	let unrelated = |i: u32| [i.to_le_bytes().to_vec(), vec![0xee; 1020]].concat();
+	nodes.extend((0..extra.div_ceil(1024)).map(unrelated));
+	// substrate-state-machine's StateMachineProof { hasher: Blake2, storage_proof }
+	let proof = (1u8, nodes).encode();
+	let id = StateMachineId { state_id: COPROCESSOR, consensus_state_id: STATE_ID };
+	let proof = Proof { height: StateMachineHeight { id, height: 1 }, proof };
+	let message = Message::Request(RequestMessage { requests, proof, signer: vec![] });
+	let commitment = StateCommitment { timestamp: 1, overlay_root: None, state_root };
+	(message, StateCommitmentHeight { commitment, height: 1 })
+}
+
+/// A V0 trie holding `keys`, and all its nodes, which prove every key.
+fn trie(keys: &[Vec<u8>]) -> (H256, Vec<Vec<u8>>) {
+	use sp_trie::{LayoutV0, MemoryDB, TrieDBMutBuilder, TrieMut};
+	// default() exists only for std's hasher builder; new(&[0u8]) is the same empty database.
+	let mut db = MemoryDB::<BlakeTwo256>::new(&[0u8]);
+	let mut root = H256::zero();
+	{
+		let mut trie =
+			TrieDBMutBuilder::<LayoutV0<BlakeTwo256>>::new(&mut db, &mut root).build();
+		for key in keys {
+			trie.insert(key, &[1]).expect("an in-memory trie takes any key");
+		}
+	}
+	let live = db.drain().into_values().filter(|(_, references)| *references > 0);
+	(root, live.map(|(node, _)| node).collect())
+}
+
+/// What `n` transfers in need: the coprocessor and a consensus client with `commitment`, the
+/// registered contract, and an escrow that holds the transfers.
+pub fn setup_transfers_in(n: u32, commitment: StateCommitmentHeight) {
+	pallet_ismp_params::Coprocessor::<Runtime>::put(COPROCESSOR);
+	ismp_grandpa::SupportedStateMachines::<Runtime>::insert(COPROCESSOR, 6000);
+	let mut client = grandpa_client(&[]);
+	let id = StateMachineId { state_id: COPROCESSOR, consensus_state_id: STATE_ID };
+	client.state_machine_commitments = vec![(id, commitment)];
+	assert_ok!(Ismp::create_consensus_client(RuntimeOrigin::root(), client));
+	let chain = ChainConfig { token_contract: H160::from(CONTRACT), decimals: 18 };
+	let local_id = PolkadexAssetId::get();
+	let chains = [(SOURCE, chain)].into();
+	let registration = TokenRegistration { local_id, native: true, chains };
+	assert_ok!(HyperFungibleToken::register_token(RuntimeOrigin::root(), registration));
+	let escrow = HyperFungibleToken::pallet_account();
+	let _ = <Balances as Currency<_>>::make_free_balance_be(&escrow, TRANSFER * (n as Balance + 1));
 }

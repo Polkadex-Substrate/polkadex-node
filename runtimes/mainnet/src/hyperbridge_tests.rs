@@ -20,7 +20,7 @@
 //! change and refuse amounts the destination cannot represent.
 
 use super::*;
-use frame_support::dispatch::GetDispatchInfo;
+use frame_support::{assert_ok, dispatch::GetDispatchInfo};
 use sp_core::U256;
 use ismp::{
 	messaging::{ConsensusMessage, Message, Proof, RequestMessage},
@@ -148,5 +148,34 @@ fn unsigned_ismp_weight_follows_the_messages() {
 		let max = max_encoded_size();
 		assert!(declared(vec![consensus(max - 16)]).all_lte(normal));
 		assert!(declared(vec![requests_with_proof(64, max - 64 * 128)]).all_lte(normal));
+	});
+}
+
+// The benchmarks' two scenarios succeed here as they must there: a GRANDPA update finalised by five
+// authorities, and a batch of three transfers in with unrelated proof nodes on top.
+#[test]
+fn ismp_benchmark_scenarios_succeed() {
+	use crate::ismp_fixtures::*;
+	use sp_core::{ed25519, Pair};
+	new_test_ext().execute_with(|| {
+		frame_system::Pallet::<Runtime>::set_block_number(1);
+		let pair = |i: u8| ed25519::Pair::from_seed(&[i; 32]);
+		let pairs: Vec<ed25519::Pair> = (1..=5u8).map(pair).collect();
+		let keys: Vec<ed25519::Public> = pairs.iter().map(|pair| pair.public()).collect();
+		assert_ok!(Ismp::create_consensus_client(RuntimeOrigin::root(), grandpa_client(&keys)));
+		let sign = |key: &ed25519::Public, payload: &[u8]| {
+			pairs.iter().find(|pair| pair.public() == *key).expect("one of the five").sign(payload)
+		};
+		assert_ok!(Ismp::handle_unsigned(RuntimeOrigin::none(), vec![grandpa_update(&keys, sign)]));
+		let state = pallet_ismp::ConsensusStates::<Runtime>::get(STATE_ID).expect("stored");
+		let state = grandpa_verifier_primitives::ConsensusState::decode(&mut &state[..]).unwrap();
+		assert_eq!(state.latest_height, 1);
+
+		let (message, commitment) = transfers_in(3, 2048);
+		setup_transfers_in(3, commitment);
+		assert_ok!(Ismp::handle_unsigned(RuntimeOrigin::none(), vec![message]));
+		for i in 0..3 {
+			assert_eq!(Balances::free_balance(AccountId::from(beneficiary(i))), TRANSFER);
+		}
 	});
 }
