@@ -275,3 +275,5 @@ pallet-elections-phragmen = { path = "vendor/pallet-elections-phragmen" }
 # Copy of the crates.io release that caps the RocksDB write-ahead logs (node issue #27); see
 # the note at the top of vendor/sc-client-db/src/utils.rs.
 sc-client-db = { path = "vendor/sc-client-db" }
+# Bounds and argument-based weights for unsigned ISMP calls (vendor/pallet-ismp/CHANGES.md).
+pallet-ismp = { path = "vendor/pallet-ismp" }

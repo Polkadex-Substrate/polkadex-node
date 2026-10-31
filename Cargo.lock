@@ -10071,8 +10071,6 @@ dependencies = [
 [[package]]
 name = "pallet-ismp"
 version = "2512.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcddc9b37ccb02dd9bfc88c455f98ab4d74b66a727d04c28b72742d5b35fb6bb"
 dependencies = [
  "anyhow",
  "crypto-utils",
