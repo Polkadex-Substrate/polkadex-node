@@ -11,6 +11,7 @@ The plain-words version for holders is [runtime-393.md](runtime-393.md). This pa
 | `runtime: fees through FungibleAdapter, ...` | `OnChargeTransaction` moves from the deprecated `CurrencyAdapter<Balances, DealWithFees>` to `FungibleAdapter<Balances, ResolveTo<TreasuryAccount, Balances>>`. |
 | `runtime: tests for votes and fees with staked PDEX` | `runtimes/mainnet/src/vote_tests.rs`, seven tests. |
 | `runtime: spec_version 393` | `impl_version` 0; `transaction_version` stays 3, since no call changes. |
+| `runtime: add the staked balance read to vote weights` | `DemocracyWeights` and `ElectionsWeights` wrap the upstream `SubstrateWeight`s and add `staked_balance_read()` to `vote_new`, `vote_existing`, `delegate`, `vote_equal`, `vote_more` and `vote_less`, the weights of the calls that look up `VotingHold`. That is one database read (`RocksDbWeight`, 25 µs) and 3,892 bytes of proof: the benchmark CLI's estimate (frame-benchmarking-cli 53.0.0, `MaxEncodedLen` mode) for a first read of `Balances::Holds` at its upstream size of 427 bytes, which is the item plus 5 map layers and 2 top-level layers of 15 × 33 bytes. Every other weight is the upstream one. |
 
 ## Why
 
@@ -22,16 +23,17 @@ The plain-words version for holders is [runtime-393.md](runtime-393.md). This pa
 
 - `FungibleAdapter` in pallet-transaction-payment 45.0.0 parks the withdrawn fee in `TxPaymentCredit` between withdrawal and settlement; this is the upstream design. Fees and tips are resolved into the Treasury account. A per-fee `Treasury::Deposit` event is no longer emitted; the `Balances::Deposit` to the Treasury account remains. For an account with nothing reserved, the fee check is the same as before.
 - The 392 one-off migrations stay in `Migrations` and skip on this upgrade: each checks `last_runtime_upgrade_spec_version() > 391` or a storage version. No migration is added.
-- Host functions (release procedure 4.1): 393 imports one function that 392 does not, `ext_misc_print_num_version_1`. Runtime 373, live on mainnet until 29 Oct 2026, imported it, so every client provides it. No node upgrade is needed.
+- Host functions (release procedure 4.1): 393 imports the same 44 host functions as 392. No node upgrade is needed.
+- Weights: the six weights above carry a conservative allowance for the `VotingHold` read, not a benchmark of the runtime provider. The pallets' own benchmarks run with `VotingHold = ()`, so they cannot measure it.
 - With `VotingHold = ()` the vendored pallets behave exactly as published.
 - Outside the runtime, stashes that carry the old staking lock beside the hold are cleaned with `staking.migrate_currency`, which is permissionless and fee-free when it succeeds.
 
 ## How it was tested
 
-- **Runtime tests:** 31 pass (24 existing, 7 new). The new ones cover a stash fully bonded on the hold by `migrate_currency` voting and delegating its whole bond; a staker's council stake (free plus staked, less the voting bond) and the election that uses it; vote locks and holds together (transfers and fees from what the vote leaves free, unbond and withdraw under the lock, unlock after the conviction period); accounts without stake voting exactly as before, with deposits not counting; votes cast before the upgrade keeping their weight through the upgrade and `migrate_currency`; and `migrate_currency` clearing an old staking lock left beside the hold without trimming the bond.
+- **Runtime tests:** 32 pass (24 existing, 8 new). The new ones cover a stash fully bonded on the hold by `migrate_currency` voting and delegating its whole bond; a staker's council stake (free plus staked, less the voting bond) and the election that uses it; vote locks and holds together (transfers and fees from what the vote leaves free, unbond and withdraw under the lock, unlock after the conviction period); accounts without stake voting exactly as before, with deposits not counting; votes cast before the upgrade keeping their weight through the upgrade and `migrate_currency`; `migrate_currency` clearing an old staking lock left beside the hold without trimming the bond; and the vote weights, each the upstream weight plus one `Balances::Holds` read, with a proof allowance that covers this runtime's `Balances::Holds` item.
 - **Upstream suites:** 134 tests (democracy 63, elections-phragmen 71) pass in polkadot-sdk at `ac2b0e3fd86a23cc33b2f4d6f46ac9d0ecb05115`, the commit in the crates' `.cargo_vcs_info.json`. That tree's sources equal the published crates, and our changed sources replace them for the run.
-- **CI checks** on a clean build box: the pin check, `cargo check -p polkadex-node`, and the node checks with `try-runtime` and with `runtime-benchmarks`.
-- **try-runtime:** try-runtime-cli 0.10.1, `on-runtime-upgrade --checks all --disable-mbm-checks`, on a mainnet snapshot at block 13,348,369 taken from an archive node. Exit 0, no errors, no panics, the 392 migrations skip, the whole state decodes, and the try-state checks of every pallet pass.
+- **CI checks** on a clean build box: the pin check. At `4ae9c34`, the head before the weight commit, also `cargo check -p polkadex-node` and the node checks with `try-runtime` and with `runtime-benchmarks`; the weight commit changes runtime code only.
+- **try-runtime:** try-runtime-cli 0.10.1, `on-runtime-upgrade --checks all --disable-mbm-checks`, on a mainnet snapshot at block 13,354,649 taken from an archive node. Exit 0, no errors, no panics, the 392 migrations skip, the whole state decodes, and the try-state checks of every pallet pass.
 - **Mainnet fork (chopsticks), 15 of 15 checks.**
   - On 392, a real staker's referendum vote and delegation with its staked PDEX fail with `InsufficientFunds`, and its council stake counts only the free balance. A stash whose pre-392 vote lock exceeds its free balance cannot pay a fee. A referendum is started by external majority and fast track.
   - The 393 `set_code` preimage is noted with the hash below.
@@ -41,11 +43,11 @@ The plain-words version for holders is [runtime-393.md](runtime-393.md). This pa
 
 ## Release artifacts
 
-Built on Ubuntu 24.04 with Rust 1.91.0 (from `rust-toolchain.toml`), in `/root/polkadex-node`, with `cargo build --release --locked -p node-polkadex-runtime --features on-chain-release-build` and the workspace `Cargo.lock`.
+Built on Ubuntu 26.04 with Rust 1.91.0 (from `rust-toolchain.toml`), in `/root/polkadex-node`, with `cargo build --release --locked -p node-polkadex-runtime --features on-chain-release-build` and the workspace `Cargo.lock`.
 
 | | Bytes | Hash |
 |---|---|---|
-| `node_polkadex_runtime.compact.compressed.wasm` | 1,271,837 | sha256 `56214f30d7055b855dcd2f26e1a81b6ffcacee7ece4c314cd4b38057189fa6ac`<br>blake2_256 `0x4454ce899e3f1830615cb4af7209be6955dd767546340bbea8d48abf5b9882cd` |
-| `System.set_code` preimage (call `0x0002`, the compact length, the code) | 1,271,843 | blake2_256 `0x54358d0e51f3e66a0c51a95bab347e9b323cd666db2d9f16cf2d94c267e587b9` |
+| `node_polkadex_runtime.compact.compressed.wasm` | 1,271,710 | sha256 `66e8dd005d6020510694253a65aba5e17a6082bb6fa6833f766ffc1476ff1fe2`<br>blake2_256 `0x9937e36a13254d40b3fe1bcee5da0e6b803c4ab818094233fd519b1f76d1c7b7` |
+| `System.set_code` preimage (call `0x0002`, the compact length, the code) | 1,271,716 | blake2_256 `0xe463c230ff613a96570c88e7230e8f8b20973b8deb2b090641195af5f8fb3510` |
 
 The runtime reports spec `node` 393, impl 0, transaction version 3. The same method gives the preimage of the 392 referendum from the live 392 wasm.
