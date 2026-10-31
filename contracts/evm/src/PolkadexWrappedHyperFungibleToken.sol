@@ -233,9 +233,10 @@ contract PolkadexWrappedHyperFungibleToken is
         emit HostSet(newHost);
     }
 
-    /// @notice Polkadex: sets the fee for sends to `dest`, in the underlying token; zero makes them free
-    function setFee(bytes calldata dest, uint256 amount) external onlyOwner {
-        _bridgeFees.setFee(dest, amount);
+    /// @notice Polkadex: sets the fee for sends to `dest`, in the underlying token (zero makes them free), and the
+    /// unit amounts sent there must be multiples of: 10^(decimals here - decimals there), 1 when they match
+    function setFee(bytes calldata dest, uint256 amount, uint256 unit) external onlyOwner {
+        _bridgeFees.setFee(dest, amount, unit);
     }
 
     /// @notice Polkadex: removes the fee for `dest`, so sends there revert
@@ -253,10 +254,10 @@ contract PolkadexWrappedHyperFungibleToken is
         _bridgeFees.setMaxDataLength(newMaxDataLength);
     }
 
-    /// @notice Polkadex: the fee for sends to `dest`, and whether one is set
-    function feeOf(bytes calldata dest) external view returns (bool set, uint256 amount) {
+    /// @notice Polkadex: the fee for sends to `dest`, whether one is set, and the unit amounts must be multiples of
+    function feeOf(bytes calldata dest) external view returns (bool set, uint256 amount, uint256 unit) {
         BridgeFees.Fee storage fee = _bridgeFees.fees[dest];
-        return (fee.set, fee.amount);
+        return (fee.set, fee.amount, fee.unit);
     }
 
     /// @notice Polkadex: the account the fees go to
@@ -355,7 +356,7 @@ contract PolkadexWrappedHyperFungibleToken is
     function send(PolkadexHyperFungibleToken.SendParams calldata params) external payable whenNotPaused {
         // Polkadex: size caps, then the bridge fee, before the lock
         _bridgeFees.checkSize(params.to, params.data);
-        (address collector, uint256 fee) = _bridgeFees.charge(params.dest);
+        (address collector, uint256 fee) = _bridgeFees.charge(params.dest, params.amount);
         if (fee > 0) IERC20(_underlying).safeTransferFrom(msg.sender, collector, fee);
         IERC20(_underlying).safeTransferFrom(msg.sender, address(this), params.amount);
 

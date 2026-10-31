@@ -16,6 +16,9 @@ The two copies keep Polytope's Apache-2.0 notice and add one line saying they we
 - A send pays the owner-set fee for its destination chain to the fee collector, in the token sent and on top
   of the amount, before the burn or lock. It reverts while that fee or the collector is unset; a zero fee is
   allowed.
+- Each destination has an amount unit, 10^(decimals here - decimals there), for example 10^6 from 18 to 12
+  decimals: a send whose amount is not a multiple of it reverts, since it could not arrive exactly. A unit
+  of 0 refuses every send.
 - `to` is capped at 32 bytes and `data` at an owner-set length, which is 0 until set.
 - The owner can switch the host contract with `setHost`; `onlyHost` reads it on every call.
 - The wrapper pulls the amount plus the fee through the allowance and does not support WETH: `configure`
@@ -57,4 +60,6 @@ HFT_PROXY=<token proxy> WHFT_PROXY=<wrapper proxy> \
 | `FEE_COLLECTOR` | the account the fees go to | the ProxyAdmin owner |
 | `HFT_FEE` | fee per send to Polkadex, in the token's units | `6e18` |
 | `WHFT_FEE` | fee per send to Polkadex, in the wrapped token's units | `1e6` |
+| `HFT_UNIT` | the token's amount unit to Polkadex | `1e6` (18 decimals to 12) |
+| `WHFT_UNIT` | the wrapped token's amount unit to Polkadex | `1` (same decimals) |
 | `MAX_DATA_LENGTH` | the longest `data` a send may carry, in bytes | `0` |

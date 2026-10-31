@@ -17,7 +17,8 @@ import {PolkadexWrappedHyperFungibleToken as WHFT} from "../src/PolkadexWrappedH
 /// without --broadcast it is a dry run:
 ///     HFT_PROXY=0x... WHFT_PROXY=0x... forge script script/StageFees.s.sol --rpc-url <rpc> --sender <owner>
 /// Env: HFT_PROXY and WHFT_PROXY (required), FEE_COLLECTOR (default the owner), HFT_FEE (default 6e18),
-/// WHFT_FEE (default 1e6), MAX_DATA_LENGTH (default 0).
+/// WHFT_FEE (default 1e6), HFT_UNIT (default 1e6, 18 decimals here to 12), WHFT_UNIT (default 1),
+/// MAX_DATA_LENGTH (default 0).
 contract StageFees is Script {
     function run() external {
         address hft = vm.envAddress("HFT_PROXY");
@@ -28,6 +29,8 @@ contract StageFees is Script {
         address collector = vm.envOr("FEE_COLLECTOR", owner);
         uint256 hftFee = vm.envOr("HFT_FEE", uint256(6e18));
         uint256 whftFee = vm.envOr("WHFT_FEE", uint256(1e6));
+        uint256 hftUnit = vm.envOr("HFT_UNIT", uint256(1e6));
+        uint256 whftUnit = vm.envOr("WHFT_UNIT", uint256(1));
         uint256 maxDataLength = vm.envOr("MAX_DATA_LENGTH", uint256(0));
         IERC20 wrapped = IERC20(WHFT(whft).underlying());
         bytes32 hftKept = kept(hft, polkadex, IERC20(hft).totalSupply());
@@ -36,10 +39,10 @@ contract StageFees is Script {
         vm.startBroadcast();
         upgrade(hft, address(new HFT()));
         upgrade(whft, address(new WHFT()));
-        HFT(hft).setFee(polkadex, hftFee);
+        HFT(hft).setFee(polkadex, hftFee, hftUnit);
         HFT(hft).setFeeCollector(collector);
         HFT(hft).setMaxDataLength(maxDataLength);
-        WHFT(whft).setFee(polkadex, whftFee);
+        WHFT(whft).setFee(polkadex, whftFee, whftUnit);
         WHFT(whft).setFeeCollector(collector);
         WHFT(whft).setMaxDataLength(maxDataLength);
         vm.stopBroadcast();
@@ -69,11 +72,12 @@ contract StageFees is Script {
     }
 
     function report(string memory name, address proxy, bytes memory polkadex, uint256 held) internal view {
-        (bool set, uint256 fee) = HFT(proxy).feeOf(polkadex);
+        (bool set, uint256 fee, uint256 unit) = HFT(proxy).feeOf(polkadex);
         address implementation = address(uint160(uint256(vm.load(proxy, ERC1967Utils.IMPLEMENTATION_SLOT))));
         console.log(name, proxy);
         console.log("  implementation", implementation);
         console.log("  fee to Polkadex set", set, fee);
+        console.log("  amount unit", unit);
         console.log("  collector", HFT(proxy).feeCollector());
         console.log("  max data length", HFT(proxy).maxDataLength());
         console.log("  supply or locked, unchanged", held);

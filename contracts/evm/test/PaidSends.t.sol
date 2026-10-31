@@ -53,12 +53,12 @@ contract MockFeeToken is ERC20 {
 /// What both Polkadex token contracts share.
 interface IPaidSends {
     function send(HFT.SendParams calldata params) external payable;
-    function setFee(bytes calldata dest, uint256 amount) external;
+    function setFee(bytes calldata dest, uint256 amount, uint256 unit) external;
     function removeFee(bytes calldata dest) external;
     function setFeeCollector(address collector) external;
     function setMaxDataLength(uint256 maxDataLength) external;
     function setHost(address newHost) external;
-    function feeOf(bytes calldata dest) external view returns (bool set, uint256 amount);
+    function feeOf(bytes calldata dest) external view returns (bool set, uint256 amount, uint256 unit);
     function feeCollector() external view returns (address);
     function maxDataLength() external view returns (uint256);
     function host() external view returns (address);
@@ -115,7 +115,7 @@ abstract contract PaidSendsTest is Test {
 
     function setFees() internal {
         vm.startPrank(owner);
-        token.setFee(polkadex, FEE);
+        token.setFee(polkadex, FEE, 1);
         token.setFeeCollector(collector);
         vm.stopPrank();
     }
@@ -165,11 +165,11 @@ abstract contract PaidSendsTest is Test {
     // Fail closed: no fee for the destination, or no collector, and the send reverts. A zero fee is a set fee.
     function test_RevertWhen_FeeOrCollectorUnset() public {
         fund(user, 10e6);
-        (bool set,) = token.feeOf(polkadex);
+        (bool set,,) = token.feeOf(polkadex);
         assertFalse(set);
         expectRevertedSend(BridgeFees.FeeNotSet.selector, params(1e6));
         vm.prank(owner);
-        token.setFee(polkadex, FEE);
+        token.setFee(polkadex, FEE, 1);
         expectRevertedSend(BridgeFees.FeeNotSet.selector, params(1e6));
         vm.startPrank(owner);
         token.setFeeCollector(collector);
@@ -177,7 +177,7 @@ abstract contract PaidSendsTest is Test {
         vm.stopPrank();
         expectRevertedSend(BridgeFees.FeeNotSet.selector, params(1e6));
         vm.prank(owner);
-        token.setFee(polkadex, 0);
+        token.setFee(polkadex, 0, 1);
         send(user, params(1e6));
         assertEq(sent().balanceOf(user), 9e6);
         assertEq(sent().balanceOf(collector), 0);
@@ -203,12 +203,28 @@ abstract contract PaidSendsTest is Test {
         assertEq(sent().balanceOf(collector), 2 * FEE);
     }
 
+    // An amount that is not a multiple of the destination's unit cannot arrive exactly, so the send reverts; a
+    // unit of 0 refuses every amount.
+    function test_RevertWhen_AmountIsNotAMultipleOfTheUnit() public {
+        setFees();
+        vm.prank(owner);
+        token.setFee(polkadex, FEE, 1e6); // for example 18 decimals here and 12 on Polkadex
+        fund(user, 3e6 + FEE);
+        expectRevertedSend(BridgeFees.AmountNotRepresentable.selector, params(1e6 + 1));
+        send(user, params(3e6));
+        assertEq(sent().balanceOf(user), 0);
+        vm.prank(owner);
+        token.setFee(polkadex, FEE, 0);
+        fund(user, 1e6 + FEE);
+        expectRevertedSend(BridgeFees.AmountNotRepresentable.selector, params(1e6));
+    }
+
     // Every new setter is owner-only and emits its event; zero addresses are refused.
     function test_SettersAreOwnerOnly() public {
         bytes memory notOwner = abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, user);
         vm.startPrank(user);
         vm.expectRevert(notOwner);
-        token.setFee(polkadex, FEE);
+        token.setFee(polkadex, FEE, 1);
         vm.expectRevert(notOwner);
         token.removeFee(polkadex);
         vm.expectRevert(notOwner);
@@ -222,8 +238,8 @@ abstract contract PaidSendsTest is Test {
         bytes memory dest = polkadex;
         vm.startPrank(owner);
         vm.expectEmit(address(token));
-        emit BridgeFees.FeeSet(string(dest), FEE);
-        token.setFee(polkadex, FEE);
+        emit BridgeFees.FeeSet(string(dest), FEE, 1);
+        token.setFee(polkadex, FEE, 1);
         vm.expectEmit(address(token));
         emit BridgeFees.FeeRemoved(string(dest));
         token.removeFee(polkadex);
@@ -315,6 +331,7 @@ abstract contract PaidSendsTest is Test {
         bytes32 entry = keccak256(abi.encodePacked(dest, base));
         assertEq(vm.load(proxy, entry), bytes32(uint256(1))); // Fee.set
         assertEq(vm.load(proxy, bytes32(uint256(entry) + 1)), bytes32(FEE)); // Fee.amount
+        assertEq(vm.load(proxy, bytes32(uint256(entry) + 2)), bytes32(uint256(1))); // Fee.unit
         assertEq(vm.load(proxy, bytes32(base + 1)), bytes32(uint256(uint160(collector))));
         assertEq(vm.load(proxy, bytes32(base + 2)), bytes32(0)); // no data allowed yet
     }
