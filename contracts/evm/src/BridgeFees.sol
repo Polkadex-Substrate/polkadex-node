@@ -94,6 +94,7 @@ library BridgeFees {
         if (!fee.set || collector == address(0)) revert FeeNotSet();
         if (fee.unit == 0 || sent % fee.unit != 0) revert AmountNotRepresentable();
         amount = fee.amount;
-        emit FeePaid(msg.sender, collector, string(dest), amount);
+        // Match the pallet: a zero fee moves nothing, so it emits nothing.
+        if (amount != 0) emit FeePaid(msg.sender, collector, string(dest), amount);
     }
 }

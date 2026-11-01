@@ -3,6 +3,7 @@
 pragma solidity ^0.8.17;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
@@ -217,6 +218,24 @@ abstract contract PaidSendsTest is Test {
         token.setFee(polkadex, FEE, 0);
         fund(user, 1e6 + FEE);
         expectRevertedSend(BridgeFees.AmountNotRepresentable.selector, params(1e6));
+    }
+
+    // A zero fee moves nothing and, matching the pallet, emits no FeePaid.
+    function test_ZeroFeeEmitsNoFeePaid() public {
+        vm.startPrank(owner);
+        token.setFeeCollector(collector);
+        token.setFee(polkadex, 0, 1);
+        vm.stopPrank();
+        fund(user, 1e6);
+        vm.recordLogs();
+        send(user, params(1e6));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 feePaid = keccak256("FeePaid(address,address,string,uint256)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(logs[i].topics[0] != feePaid, "a zero fee must not emit FeePaid");
+        }
+        assertEq(sent().balanceOf(collector), 0);
+        assertEq(sent().balanceOf(user), 0);
     }
 
     // Every new setter is owner-only and emits its event; zero addresses are refused.
