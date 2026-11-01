@@ -180,12 +180,31 @@ fn ismp_benchmark_scenarios_succeed() {
 		let state = grandpa_verifier_primitives::ConsensusState::decode(&mut &state[..]).unwrap();
 		assert_eq!(state.latest_height, 1);
 
-		let (message, commitment) = transfers_in(3, 2048);
+		let (message, commitment) = transfers_in(3, 2048, None);
 		setup_transfers_in(3, commitment);
 		assert_ok!(Ismp::handle_unsigned(RuntimeOrigin::none(), vec![message]));
 		for i in 0..3 {
 			assert_eq!(Balances::free_balance(AccountId::from(beneficiary(i))), TRANSFER);
 		}
+	});
+}
+
+// The benchmark's signed batch: each transfer carries an ECDSA-signed remark from its own
+// recipient at nonce 0, and each delivery verifies it, dispatches it and bumps that nonce. Any
+// mismatch with on_accept fails the batch here, before a benchmark run.
+#[test]
+fn a_signed_transfer_batch_is_delivered() {
+	use crate::ismp_fixtures::*;
+	use sp_core::{ecdsa, Pair};
+	new_test_ext().execute_with(|| {
+		frame_system::Pallet::<Runtime>::set_block_number(1);
+		let pairs: Vec<ecdsa::Pair> = (1..=3u8).map(|i| ecdsa::Pair::from_seed(&[i; 32])).collect();
+		let sign = |i: u32, msg: &[u8; 32]| pairs[i as usize].sign_prehashed(msg);
+		let (message, commitment) = transfers_in(3, 2048, Some(&sign));
+		setup_transfers_in(3, commitment);
+		assert_ok!(Ismp::handle_unsigned(RuntimeOrigin::none(), vec![message]));
+		// The escrow held four transfers' worth; three went out.
+		assert_eq!(Balances::free_balance(HyperFungibleToken::pallet_account()), TRANSFER);
 	});
 }
 
@@ -296,5 +315,71 @@ fn amounts_the_destination_cannot_represent_are_refused() {
 	ext.execute_with(|| {
 		assert_ok!(HyperFungibleToken::default().on_timeout(requests[0].clone()));
 		assert_eq!(Assets::balance(USDT, &sender), 1_000);
+	});
+}
+
+use crate::ismp_bounds::{consensus_within_cap, MAX_VOTE_ANCESTRIES};
+use ismp_grandpa::messages::{ConsensusMessage as GrandpaMessage, RelayChainMessage, SubstrateHeader};
+
+/// A GRANDPA consensus proof whose justification carries `ancestries` vote-ancestry headers.
+fn grandpa_proof_with_ancestries(ancestries: usize) -> Vec<u8> {
+	use finality_grandpa::Commit;
+	use grandpa_verifier_primitives::{justification::GrandpaJustification, FinalityProof};
+	use parity_scale_codec::Encode;
+	use sp_runtime::traits::Header as _;
+	let header = |n: u32| SubstrateHeader::new(n, H256::zero(), H256::zero(), H256::zero(), Default::default());
+	let commit = Commit { target_hash: H256::zero(), target_number: 1, precommits: vec![] };
+	let justification = GrandpaJustification::<SubstrateHeader> {
+		round: 1,
+		commit,
+		votes_ancestries: (0..ancestries as u32).map(header).collect(),
+	};
+	let finality_proof =
+		FinalityProof { block: H256::zero(), justification: justification.encode(), unknown_headers: vec![] };
+	let relay = RelayChainMessage { finality_proof, parachain_headers: Default::default() };
+	GrandpaMessage::Polkadot(relay).encode()
+}
+
+// One over the cap is refused; the cap itself is accepted. The DoS is the per-precommit ancestry
+// walk, so the vote-ancestry count is what must be bounded.
+#[test]
+fn consensus_over_the_ancestry_cap_is_refused() {
+	assert!(!consensus_within_cap(&grandpa_proof_with_ancestries(MAX_VOTE_ANCESTRIES + 1)));
+	assert!(consensus_within_cap(&grandpa_proof_with_ancestries(MAX_VOTE_ANCESTRIES)));
+}
+
+// A Polkadot-sized proof (about 560 headers of 327 bytes plus a 54 KiB justification) fits the
+// 256 KiB encoded bound with room, so the cap does not reject real finality. unknown_headers stay
+// bounded only by that size and are priced by byte.
+#[test]
+fn a_polkadot_sized_consensus_proof_fits_the_bounds() {
+	new_test_ext().execute_with(|| {
+		let proof = vec![0u8; 560 * 327 + 54 * 1024];
+		let message = ConsensusMessage {
+			consensus_proof: proof,
+			consensus_state_id: *b"ksma",
+			signer: vec![],
+		};
+		assert!(Message::Consensus(message).encoded_size() < max_encoded_size());
+		assert_eq!(Ismp::check_bounds(&[consensus(560 * 327 + 54 * 1024)]), Ok(()));
+	});
+}
+
+// A transfer carries an untrusted runtime call; it is decoded with the extrinsic depth limit, so a
+// call nested past the limit is dropped (zero weight) instead of recursing without bound.
+#[test]
+fn a_call_nested_past_the_depth_limit_is_dropped() {
+	use pallet_hyper_fungible_token::types::SubstrateCalldata;
+	let body = |depth: u32| {
+		let mut call = RuntimeCall::System(frame_system::Call::remark { remark: vec![] });
+		for _ in 0..depth {
+			call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
+		}
+		let data = SubstrateCalldata { signature: None, runtime_call: call.encode() };
+		crate::ismp_fixtures::transfer_body(&[1; 20], &[2; 32], U256::from(1u64), &data.encode())
+	};
+	new_test_ext().execute_with(|| {
+		assert_eq!(HyperFungibleToken::runtime_call_weight(&body(400)), Weight::zero());
+		assert!(HyperFungibleToken::runtime_call_weight(&body(2)).any_gt(Weight::zero()));
 	});
 }

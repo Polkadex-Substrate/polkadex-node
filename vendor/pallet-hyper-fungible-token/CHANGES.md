@@ -21,3 +21,8 @@ say so in their headers, and the new code is marked "Polkadex".
   amount that is not a whole multiple of 10^(local - remote) decimals, since `convert_to_erc20`
   floored it and the timeout refunded the rounded amount. `local_decimals` replaces the three
   copies of the decimals lookup. Files: `src/impls.rs`, `src/lib.rs`, `src/module.rs`.
+- Depth-limited call decoding: the untrusted `runtime_call` an arriving transfer carries is decoded
+  with `decode_with_depth_limit(MAX_EXTRINSIC_DEPTH)` in both `runtime_call_weight` and `on_accept`,
+  so a nested call cannot recurse without bound. File: `src/module.rs`.
+
+The new error is appended, so existing indices and `TokenSent` do not change.

@@ -24,7 +24,7 @@
 use crate::{ismp_fixtures::*, Ismp, Runtime, RuntimeOrigin};
 use frame_benchmarking::v2::*;
 use frame_support::assert_ok;
-use sp_core::{crypto::KeyTypeId, ed25519};
+use sp_core::{crypto::KeyTypeId, ecdsa, ed25519};
 use sp_std::{vec, vec::Vec};
 
 /// The benchmarks' own pallet type; they drive `pallet_ismp` directly.
@@ -48,6 +48,26 @@ fn authorities(k: u32) -> Vec<ed25519::Public> {
 mod benchmarks {
 	use super::*;
 
+	// Runs first: its signed-call_data setup is quick, so a fixture error fails in a minute
+	// rather than after the long consensus run.
+	#[benchmark]
+	fn handle_requests(n: Linear<1, 64>, b: Linear<0, 262_144>) {
+		// Signed call_data, one keystore key per transfer: on_accept runs its ECDSA verify and
+		// dispatch, the heaviest path.
+		let keys: Vec<ecdsa::Public> =
+			(0..n).map(|_| sp_io::crypto::ecdsa_generate(ECDSA_KEYS, None)).collect();
+		let sign = |i: u32, msg: &[u8; 32]| {
+			sp_io::crypto::ecdsa_sign_prehashed(ECDSA_KEYS, &keys[i as usize], msg)
+				.expect("a keystore key")
+		};
+		let (message, commitment) = transfers_in(n, b, Some(&sign));
+		setup_transfers_in(n, commitment);
+		#[block]
+		{
+			assert_ok!(Ismp::handle_unsigned(RuntimeOrigin::none(), vec![message]));
+		}
+	}
+
 	#[benchmark]
 	fn handle_consensus(k: Linear<1, 1928>) {
 		let keys = authorities(k);
@@ -59,16 +79,6 @@ mod benchmarks {
 		#[block]
 		{
 			assert_ok!(Ismp::handle_unsigned(RuntimeOrigin::none(), vec![update]));
-		}
-	}
-
-	#[benchmark]
-	fn handle_requests(n: Linear<1, 64>, b: Linear<0, 262_144>) {
-		let (message, commitment) = transfers_in(n, b);
-		setup_transfers_in(n, commitment);
-		#[block]
-		{
-			assert_ok!(Ismp::handle_unsigned(RuntimeOrigin::none(), vec![message]));
 		}
 	}
 }

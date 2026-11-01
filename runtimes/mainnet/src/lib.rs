@@ -549,7 +549,8 @@ impl pallet_ismp::Config for Runtime {
 	type Router = Router;
 	// Set by governance (Gargantua Kusama(4009), Nexus Polkadot(3367)); None until then.
 	type Coprocessor = IsmpParams;
-	type ConsensusClients = (ismp_grandpa::consensus::GrandpaConsensusClient<Runtime>,);
+	// Wrapped to cap GRANDPA vote ancestries before verification (see `ismp_bounds`).
+	type ConsensusClients = (ismp_bounds::BoundedGrandpa,);
 	type OffchainDB = ();
 	// Delivery is unsigned in this version; the handler's result is discarded.
 	type FeeHandler = ();
@@ -558,6 +559,9 @@ impl pallet_ismp::Config for Runtime {
 	// were 6.6 to 23.7 KiB; a Polkadot GRANDPA proof (about 400 precommits) is about 55 KiB.
 	type MaxMessages = ConstU32<8>;
 	type MaxRequests = ConstU32<64>;
+	// 256 KiB fits a Polkadot finality proof (up to ~629 headers of 327 B plus the justification).
+	// The relayer's grandpa prover must stay under it: max_block_range 560 for Polkadot (Nexus),
+	// 700 for Paseo (Gargantua); see the vendored pallet-ismp CHANGES.md and the relayer notes.
 	type MaxEncodedSize = ConstU32<{ 256 * 1024 }>;
 	// Each message is weighed for its kind and size as benchmarked, plus its module callbacks.
 	type MessageWeightInfo = weights::ismp_messages::WeightInfo<Runtime>;
@@ -3556,6 +3560,8 @@ impl_runtime_apis! {
 
 #[cfg(test)]
 mod hyperbridge_tests;
+
+mod ismp_bounds;
 
 #[cfg(any(test, feature = "runtime-benchmarks"))]
 mod ismp_fixtures;

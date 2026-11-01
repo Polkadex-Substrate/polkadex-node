@@ -105,9 +105,10 @@ sp-npos-elections = { workspace = true }
 ismp = { workspace = true }
 pallet-ismp = { workspace = true }
 ismp-grandpa = { workspace = true }
+# grandpa-verifier-primitives decodes justifications for the ancestry cap (ismp_bounds).
+grandpa-verifier-primitives = { workspace = true }
 # The ismp_messages benchmarks build GRANDPA justifications and trie proofs.
 finality-grandpa = { workspace = true, optional = true }
-grandpa-verifier-primitives = { workspace = true, optional = true }
 sp-trie = { workspace = true, optional = true }
 pallet-ismp-runtime-api = { workspace = true }
 pallet-hyper-fungible-token = { workspace = true }
@@ -128,7 +129,6 @@ pallet-ocex-runtime-api = { workspace = true }
 [dev-dependencies]
 finality-grandpa = { workspace = true }
 grandpa-verifier = { workspace = true }
-grandpa-verifier-primitives = { workspace = true }
 sp-trie = { workspace = true }
 
 [build-dependencies]
@@ -203,7 +203,7 @@ std = [
 	"sp-consensus-babe/std",
 	"sp-core/std",
 	"finality-grandpa?/std",
-	"grandpa-verifier-primitives?/std",
+	"grandpa-verifier-primitives/std",
 	"sp-trie?/std",
 	"sp-inherents/std",
 	"sp-staking/std",
@@ -257,7 +257,6 @@ runtime-benchmarks = [
 	"frame-system/runtime-benchmarks",
 	"frame-benchmarking/runtime-benchmarks",
 	"finality-grandpa",
-	"grandpa-verifier-primitives",
 	"sp-trie",
 	"frame-system-benchmarking/runtime-benchmarks",
 	"frame-election-provider-support/runtime-benchmarks",

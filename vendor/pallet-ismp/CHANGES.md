@@ -15,3 +15,9 @@ changed it as follows; the changed files say so in their headers, and the new co
   (`PRECOMMIT_BYTES`) and a request, response or timeout batch per request and proof byte, and
   `Config::WeightProvider` (upstream's unused trait) adds each module callback's declared weight.
   Files: `src/lib.rs`, `src/weights.rs`.
+- Sizing of `MaxEncodedSize` (a runtime value, 256 KiB): it fits a Polkadot GRANDPA finality proof
+  (up to ~629 headers of 327 B plus the justification), so the relayer's grandpa prover must stay
+  under it, `max_block_range` 560 for Polkadot (Nexus) and 700 for Paseo (Gargantua). The per-call
+  GRANDPA vote-ancestry cap the DoS bound needs is enforced in the runtime consensus-client wrapper
+  (`runtimes/mainnet/src/ismp_bounds.rs`), not here, since this crate does not decode the GRANDPA
+  message format.

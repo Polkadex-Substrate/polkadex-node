@@ -22,7 +22,7 @@ use crate::{
 };
 use alloc::{format, vec};
 use alloy_sol_types::SolValue;
-use codec::{Decode, Encode};
+use codec::{Decode, DecodeLimit, Encode};
 use frame_support::traits::{
 	fungibles::{self, Mutate},
 	tokens::Preservation,
@@ -48,7 +48,14 @@ impl<T: Config> Pallet<T> {
 			.ok()
 			.filter(|message| !message.data.is_empty())
 			.and_then(|message| SubstrateCalldata::decode(&mut &message.data[..]).ok())
-			.and_then(|data| T::RuntimeCall::decode(&mut &*data.runtime_call).ok());
+			// Polkadex: depth-limited like extrinsic decoding, so a nested call cannot blow the stack
+			.and_then(|data| {
+				T::RuntimeCall::decode_with_depth_limit(
+					frame_support::MAX_EXTRINSIC_DEPTH,
+					&mut &*data.runtime_call,
+				)
+				.ok()
+			});
 		call.map_or(Weight::zero(), |call| call.get_dispatch_info().call_weight)
 	}
 }
@@ -195,8 +202,12 @@ where
 				}
 			};
 
-			let runtime_call = T::RuntimeCall::decode(&mut &*substrate_data.runtime_call)
-				.map_err(HftError::RuntimeCallDecodeError)?;
+			// Polkadex: depth-limited like extrinsic decoding, so a nested call cannot blow the stack
+			let runtime_call = T::RuntimeCall::decode_with_depth_limit(
+				frame_support::MAX_EXTRINSIC_DEPTH,
+				&mut &*substrate_data.runtime_call,
+			)
+			.map_err(HftError::RuntimeCallDecodeError)?;
 			// Apply the runtime's base call filter so that cross-chain calls cannot
 			// reach dispatchables that the runtime has otherwise filtered out (e.g.
 			// during a maintenance mode or a SafeMode period).

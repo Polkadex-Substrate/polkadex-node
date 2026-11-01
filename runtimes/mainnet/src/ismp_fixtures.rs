@@ -143,19 +143,56 @@ pub fn beneficiary(i: u32) -> [u8; 32] {
 	account
 }
 
+/// The keystore key type the benchmark's ECDSA signers use.
+pub const ECDSA_KEYS: sp_core::crypto::KeyTypeId = sp_core::crypto::KeyTypeId(*b"isme");
+
+/// Signs a prehashed message with transfer `i`'s own ECDSA key: the keystore in the benchmark, an
+/// `ecdsa::Pair` in the native test.
+pub type EcdsaSigner<'a> = &'a dyn Fn(u32, &[u8; 32]) -> sp_core::ecdsa::Signature;
+
+/// Transfer `i`'s ECDSA-signed empty `System::remark` and the recipient that authorises it, as
+/// `on_accept`'s heaviest path expects: the recipient is the signer's Ethereum address
+/// (`EvmToSubstrate` = `()`), signing `keccak(prefix || len || (nonce, call))` at nonce 0. Each
+/// transfer has its own signer, since a signed delivery bumps its recipient's nonce.
+fn signed_remark(i: u32, sign: EcdsaSigner) -> ([u8; 32], Vec<u8>) {
+	use pallet_hyper_fungible_token::types::SubstrateCalldata;
+	let call = crate::RuntimeCall::System(frame_system::Call::remark { remark: vec![] }).encode();
+	let nonce = <<Runtime as frame_system::Config>::Nonce>::default();
+	let payload = (nonce, call.clone()).encode();
+	let prefix = alloc::format!("\x19Ethereum Signed Message:\n{}", payload.len());
+	let msg = sp_io::hashing::keccak_256(&[prefix.into_bytes(), payload].concat());
+	let sig = sign(i, &msg);
+	let recovered = sp_io::crypto::secp256k1_ecdsa_recover(&sig.0, &msg).ok().expect("recoverable");
+	let mut recipient = [0u8; 32];
+	recipient[12..].copy_from_slice(&sp_io::hashing::keccak_256(&recovered)[12..]);
+	let signature = Some(sp_runtime::MultiSignature::Ecdsa(sig).encode());
+	(recipient, SubstrateCalldata { signature, runtime_call: call }.encode())
+}
+
 /// `n` transfers of 10 PDEX into the HFT pallet from `SOURCE`, proved through the coprocessor, with
-/// `extra` bytes of unrelated proof nodes on top. Returns the message and the state commitment its
-/// proof checks against.
-pub fn transfers_in(n: u32, extra: u32) -> (Message, StateCommitmentHeight) {
+/// `extra` bytes of unrelated proof nodes on top. With a signer, each transfer carries its own
+/// ECDSA-signed `System::remark`, so `on_accept` runs its signature-verify and dispatch path.
+/// Returns the message and the state commitment its proof checks against.
+pub fn transfers_in(
+	n: u32,
+	extra: u32,
+	sign: Option<EcdsaSigner>,
+) -> (Message, StateCommitmentHeight) {
 	let amount = U256::from(TRANSFER) * U256::from(1_000_000u64); // 12 local decimals to 18
-	let post = |i: u32| PostRequest {
-		source: SOURCE,
-		dest: StateMachine::Substrate(*b"PDEX"),
-		nonce: i.into(),
-		from: CONTRACT.to_vec(),
-		to: pallet_hyper_fungible_token::PALLET_ID.to_bytes(),
-		timeout_timestamp: 0,
-		body: transfer_body(&[0x11; 20], &beneficiary(i), amount, &[]),
+	let post = |i: u32| {
+		let (to, data) = match sign {
+			Some(sign) => signed_remark(i, sign),
+			None => (beneficiary(i), Vec::new()),
+		};
+		PostRequest {
+			source: SOURCE,
+			dest: StateMachine::Substrate(*b"PDEX"),
+			nonce: i.into(),
+			from: CONTRACT.to_vec(),
+			to: pallet_hyper_fungible_token::PALLET_ID.to_bytes(),
+			timeout_timestamp: 0,
+			body: transfer_body(&[0x11; 20], &to, amount, &data),
+		}
 	};
 	let requests: Vec<PostRequest> = (0..n).map(post).collect();
 	let key = |post: &PostRequest| {
@@ -164,8 +201,9 @@ pub fn transfers_in(n: u32, extra: u32) -> (Message, StateCommitmentHeight) {
 	};
 	let keys: Vec<Vec<u8>> = requests.iter().map(key).collect();
 	let (state_root, mut nodes) = trie(&keys);
-	let unrelated = |i: u32| [i.to_le_bytes().to_vec(), vec![0xee; 1020]].concat();
-	nodes.extend((0..extra.div_ceil(1024)).map(unrelated));
+	// Distinct 5-byte nodes: `into_memory_db` hashes each, so tiny nodes are the worst case per byte.
+	let unrelated = |i: u32| [i.to_le_bytes().to_vec(), vec![0]].concat();
+	nodes.extend((0..extra / 5).map(unrelated));
 	// substrate-state-machine's StateMachineProof { hasher: Blake2, storage_proof }
 	let proof = (1u8, nodes).encode();
 	let id = StateMachineId { state_id: COPROCESSOR, consensus_state_id: STATE_ID };
