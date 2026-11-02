@@ -54,7 +54,7 @@ use frame_support::{
 		EnsureOriginWithArg,
 		EqualPrivilegeOnly, Get, InstanceFilter, KeyOwnerProofSystem, LockIdentifier,
 		tokens::pay::PayFromAccount, fungible::{NativeFromLeft, NativeOrWithId}, ConstU32, ConstU16, ConstBool,
-		VariantCountOf, tokens::imbalance::{ResolveAssetTo, ResolveTo, OnUnbalanced}, Imbalance, Nothing, InsideBoth,
+		VariantCountOf, tokens::imbalance::{ResolveAssetTo, ResolveTo}, Nothing, InsideBoth,
 		Contains
 	},
 	weights::{
@@ -113,7 +113,7 @@ use scale_info::TypeInfo;
 use sp_npos_elections::ExtendedBalance;
 //pub use pallet_transaction_payment::{FungibleAdapter, Multiplier, TargetedFeeAdjustment};
 #[allow(deprecated)]
-pub use pallet_transaction_payment::{CurrencyAdapter, Multiplier, TargetedFeeAdjustment};
+pub use pallet_transaction_payment::{FungibleAdapter, Multiplier, TargetedFeeAdjustment};
 //use pallet_nomination_pools::PoolId;
 use pallet_tx_pause::RuntimeCallNameOf;
 use sp_consensus_beefy::{
@@ -169,7 +169,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // and set impl_version to 0. If only runtime
     // implementation changes and behavior does not, then leave spec_version as
     // is and increment impl_version.
-    spec_version: 392,
+    spec_version: 393,
     impl_version: 0,
     apis: RUNTIME_API_VERSIONS,
     // Bumped 2→3: TxExtension tuple changed vs old SignedExtra —
@@ -654,17 +654,7 @@ impl Get<AccountId> for AssetAdmin {
 
 /// Native transaction fees and tips go entirely to the Treasury, as on mainnet spec 373.
 /// (The SDK template this runtime started from gave 20% of both to the block author.)
-pub struct DealWithFees;
-impl OnUnbalanced<NegativeImbalance> for DealWithFees {
-	fn on_unbalanceds(mut fees_then_tips: impl Iterator<Item = NegativeImbalance>) {
-		if let Some(mut fees) = fees_then_tips.next() {
-			for tips in fees_then_tips {
-				tips.merge_into(&mut fees);
-			}
-			Treasury::on_unbalanced(fees);
-		}
-	}
-}
+pub type DealWithFees = ResolveTo<TreasuryAccount, Balances>;
 
 /// Calls that cannot be paused by the tx-pause pallet.
 pub struct TxPauseWhitelistedCalls;
@@ -1035,7 +1025,9 @@ use sp_runtime::traits::Bounded;
 #[allow(deprecated)]
 impl pallet_transaction_payment::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type OnChargeTransaction = CurrencyAdapter<Balances, DealWithFees>;
+	// Fees respect locks on the whole balance, so a vote lock over staked PDEX (on a hold
+	// from 392) leaves the free part payable.
+	type OnChargeTransaction = FungibleAdapter<Balances, DealWithFees>;
 	type OperationalFeeMultiplier = OperationalFeeMultiplier;
 	type WeightToFee = IdentityFee<Balance>;
 	type LengthToFee = ConstantMultiplier<Balance, TransactionByteFee>;
@@ -1442,10 +1434,77 @@ impl pallet_collective::Config<CouncilCollective> for Runtime {
     >;
 }
 
+/// PDEX bonded for staking, which from runtime 392 sits on a hold outside the free balance.
+/// Democracy and Elections add it to the free balance when they check votes, as they counted
+/// the staking lock before.
+pub struct StakedBalance;
+impl sp_runtime::traits::Convert<AccountId, Balance> for StakedBalance {
+	fn convert(who: AccountId) -> Balance {
+		pallet_staking::asset::staked::<Runtime>(&who)
+	}
+}
+
+/// What a `StakedBalance` lookup costs: one read of `Balances::Holds`. The proof size is the
+/// benchmark CLI's estimate for a first read of that item at its upstream size of 427 bytes:
+/// the item, 5 map layers and 2 top-level layers of 15 * 33 bytes each.
+fn staked_balance_read() -> Weight {
+	<Runtime as frame_system::Config>::DbWeight::get()
+		.reads(1)
+		.saturating_add(Weight::from_parts(0, 3_892))
+}
+
+/// Upstream weights with `staked_balance_read()` added to the calls in `read`, the ones that
+/// look up `VotingHold`. The calls in `same` keep their upstream weight.
+macro_rules! weights_with_staked_balance_read {
+	($name:ident, $info:path, $upstream:ty,
+	 read: [$($r:ident($($ra:ident),*)),*],
+	 same: [$($s:ident($($sa:ident),*)),*]) => {
+		pub struct $name;
+		impl $info for $name {
+			$(fn $r($($ra: u32),*) -> Weight {
+				<$upstream as $info>::$r($($ra),*).saturating_add(staked_balance_read())
+			})*
+			$(fn $s($($sa: u32),*) -> Weight {
+				<$upstream as $info>::$s($($sa),*)
+			})*
+		}
+	};
+}
+
+weights_with_staked_balance_read!(
+	DemocracyWeights,
+	pallet_democracy::WeightInfo,
+	pallet_democracy::weights::SubstrateWeight<Runtime>,
+	read: [vote_new(), vote_existing(), delegate(r)],
+	same: [
+		propose(), second(), emergency_cancel(), blacklist(), external_propose(),
+		external_propose_majority(), external_propose_default(), fast_track(), veto_external(),
+		cancel_proposal(), cancel_referendum(), on_initialize_base(r),
+		on_initialize_base_with_launch_period(r), undelegate(r), clear_public_proposals(),
+		unlock_remove(r), unlock_set(r), remove_vote(r), remove_other_vote(r),
+		set_external_metadata(), clear_external_metadata(), set_proposal_metadata(),
+		clear_proposal_metadata(), set_referendum_metadata(), clear_referendum_metadata()
+	]
+);
+
+weights_with_staked_balance_read!(
+	ElectionsWeights,
+	pallet_elections_phragmen::WeightInfo,
+	pallet_elections_phragmen::weights::SubstrateWeight<Runtime>,
+	read: [vote_equal(v), vote_more(v), vote_less(v)],
+	same: [
+		remove_voter(), submit_candidacy(c), renounce_candidacy_candidate(c),
+		renounce_candidacy_members(), renounce_candidacy_runners_up(),
+		remove_member_without_replacement(), remove_member_with_replacement(),
+		clean_defunct_voters(v, d), election_phragmen(c, v, e)
+	]
+);
+
 impl pallet_elections_phragmen::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type PalletId = ElectionsPhragmenPalletId;
 	type Currency = Balances;
+	type VotingHold = StakedBalance;
 	type ChangeMembers = Council;
 	// NOTE: this implies that council's genesis members cannot be set directly and must come from
 	// this module.
@@ -1462,7 +1521,7 @@ impl pallet_elections_phragmen::Config for Runtime {
 	type MaxCandidates = MaxCandidates;
 	type MaxVoters = MaxVoters;
 	type MaxVotesPerVoter = MaxVotesPerVoter;
-	type WeightInfo = pallet_elections_phragmen::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = ElectionsWeights;
 }
 
 type TechnicalCollective = pallet_collective::Instance2;
@@ -1578,11 +1637,12 @@ impl pallet_treasury::Config for Runtime {
 }
 
 impl pallet_democracy::Config for Runtime {
-	type WeightInfo = pallet_democracy::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = DemocracyWeights;
 	type RuntimeEvent = RuntimeEvent;
 	type Scheduler = Scheduler;
 	type Preimages = Preimage;
 	type Currency = Balances;
+	type VotingHold = StakedBalance;
 	type EnactmentPeriod = EnactmentPeriod;
 	type LaunchPeriod = LaunchPeriod;
 	type VotingPeriod = VotingPeriod;
@@ -3779,21 +3839,20 @@ mod tests {
     // gave 20% of both to the block author. Transaction payment hands DealWithFees the fee, then
     // the tip; the whole sum must land in the Treasury account and nothing may be burned.
     #[test]
-    #[allow(deprecated)]
     fn fees_and_tips_go_entirely_to_treasury() {
-        use frame_support::traits::Currency;
+        use frame_support::traits::{fungible::Balanced, OnUnbalanced};
 
         assert_eq!(
             core::any::TypeId::of::<<Runtime as pallet_transaction_payment::Config>::OnChargeTransaction>(),
-            core::any::TypeId::of::<CurrencyAdapter<Balances, DealWithFees>>(),
+            core::any::TypeId::of::<FungibleAdapter<Balances, DealWithFees>>(),
         );
         new_test_ext().execute_with(|| {
             frame_system::Pallet::<Runtime>::set_block_number(1);
             let treasury = Treasury::account_id();
             let issuance = pallet_balances::TotalIssuance::<Runtime>::get();
 
-            let fee = <Balances as Currency<AccountId>>::issue(3 * crate::constants::currency::PDEX);
-            let tip = <Balances as Currency<AccountId>>::issue(2 * crate::constants::currency::PDEX);
+            let fee = <Balances as Balanced<AccountId>>::issue(3 * crate::constants::currency::PDEX);
+            let tip = <Balances as Balanced<AccountId>>::issue(2 * crate::constants::currency::PDEX);
             DealWithFees::on_unbalanceds([fee, tip].into_iter());
 
             assert_eq!(
@@ -3987,3 +4046,6 @@ mod tests {
         });
     }
 }
+
+#[cfg(test)]
+mod vote_tests;
