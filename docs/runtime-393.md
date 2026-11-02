@@ -1,12 +1,13 @@
 # Runtime 393: staked PDEX votes again, and stuck stakers can pay fees again
 
-Plan as of 30 Oct 2026.
+Plan as of 30 Oct 2026, updated 2 Nov 2026.
 
 ## In short
 
 - Since runtime 392 went live on 29 Oct, staked PDEX cannot be used to vote once it has moved into the new staking compartment (explained below). @LegoMatrix spotted this and reported it in the main Telegram group before 392 went live. Thank you, Lego. We let 392 go ahead and promised a small, separate fix.
 - While building that fix, we found a second problem caused by the same change. About 300 staking accounts cannot send any transaction, because the fee check refuses them. Their PDEX is safe: nothing is lost and nothing has left their accounts.
 - Runtime 393 fixes both problems and changes nothing else. A free cleanup call fixes most of the stuck accounts even before 393.
+- We also found 1,541 staked accounts with only about 1 PDEX free, too little for any fee. Each of them has now received 0.5 PDEX.
 - No other vote runs before 393 is live.
 
 ## What changed in 392
@@ -47,13 +48,13 @@ Nothing else changes.
 
 - **Now:** a free cleanup call that removes the old sticker and keeps the whole stake bonded. It fixes almost all of the first group right away. Anyone can send it for any stash, and it costs nothing when it succeeds.
 - **Right after 393:** the same cleanup for about 1,500 stashes that still have only the old sticker, so they never get stuck. We wait for 393 because some of them also carry a vote lock, and today's fee check would catch them.
-- **About 25 of the stuck accounts have only the 1 PDEX minimum free.** They need someone to send them a little PDEX, even after 393. Receiving PDEX costs nothing.
+- **Done: 0.5 PDEX each for 1,541 staked accounts that had only about 1 PDEX free.** 1 PDEX is the minimum every account must keep, so these accounts could not pay any fee, and 393 would not have changed that. Most of them got there when their stake moved into the compartment and took everything above the 1 PDEX minimum. 21 of them also carry a vote lock larger than their free PDEX, so they can pay only once 393 is live. Thanks to @LegoMatrix, whose review flagged the first of them.
 
 ## What you need to do
 
 - **No node upgrade is expected for 393.** The fix adds no new node functions, and we will confirm this before the vote. Node v7.0.1, a separate release planned for the same week, will be recommended because it limits disk use.
-- **If your account cannot pay fees now,** the cleanup call or 393 will fix it. If you have only 1 PDEX free, ask someone to send you a little PDEX.
-- **After 393,** you can vote and delegate with your staked PDEX. Keep a little PDEX outside any vote to pay fees: if every PDEX you have is locked by a vote, nothing is left for a fee. That was already true before 392.
+- **If your account cannot pay fees now,** the cleanup call or 393 will fix it. If you have only 1 PDEX free and did not get the top-up, tell us in the main group.
+- **After 393, you can vote and delegate with your staked PDEX. Keep at least 1 PDEX out of every vote.** A vote locks what it uses, and fees can only come from what it leaves free. Vote with everything and you cannot pay any fee, not even the fee to remove the vote, until someone sends you PDEX or, once the referendum and its lock period are over, clears the vote for you. This was already true before 392 for free PDEX; once stake counts too, it is easier to lock everything by mistake.
 
 ## The steps
 
