@@ -62,6 +62,6 @@ Nothing else changes.
 2. Code review by the team and an outside reviewer.
 3. The council proposes 393, and the technical committee fast-tracks it.
 4. A 2-day referendum. It still runs under today's rule, so staked PDEX that is already in the compartment cannot vote in it yet.
-5. 393 goes live about an hour after the vote ends.
+5. 393 goes live about 6 hours after the vote ends.
 
 We will post the exact times in the main group before the vote opens.
