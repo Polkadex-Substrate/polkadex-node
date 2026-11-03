@@ -586,8 +586,9 @@ impl pallet_ismp::weights::IsmpModuleWeight for HftCallbackWeight {
 	fn on_accept(&self, request: &ismp::router::PostRequest) -> Weight {
 		HyperFungibleToken::runtime_call_weight(&request.body)
 	}
+	// The refund terms are read and removed; the refund itself is priced by the batch weight.
 	fn on_timeout(&self, _request: &Request) -> Weight {
-		Weight::zero()
+		<Runtime as frame_system::Config>::DbWeight::get().reads_writes(1, 1)
 	}
 	fn on_response(&self, _response: &GetResponse) -> Weight {
 		Weight::zero()
@@ -611,8 +612,8 @@ impl pallet_hyper_fungible_token::Config for Runtime {
 	type CreateOrigin = EnsureRoot<AccountId>;
 	type Decimals = Decimals;
 	type EvmToSubstrate = ();
-	// The crate ships no benchmarks, only these placeholder weights.
-	type WeightInfo = ();
+	// The crate ships no benchmarks: its placeholder weights, plus the refund-terms write on `send`.
+	type WeightInfo = weights::pallet_hyper_fungible_token::WeightInfo<Runtime>;
 }
 
 /// Routes ISMP messages to modules; pallet-ismp handles `HYPR-FEE` before asking it.
