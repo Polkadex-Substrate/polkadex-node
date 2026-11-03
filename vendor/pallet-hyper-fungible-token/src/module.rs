@@ -31,6 +31,7 @@ use frame_support::traits::{
 use frame_support::dispatch::GetDispatchInfo;
 use frame_system::RawOrigin;
 use ismp::{
+	messaging::hash_request,
 	module::IsmpModule,
 	router::{GetResponse, PostRequest, Request},
 };
@@ -237,7 +238,10 @@ where
 
 	fn on_timeout(&self, request: Request) -> Result<Weight, anyhow::Error> {
 		match request {
-			Request::Post(PostRequest { body, to, dest, .. }) => {
+			Request::Post(post) => {
+				// Polkadex: the commitment `send` got from the dispatcher, which keys the terms
+				let commitment = hash_request::<pallet_ismp::Pallet<T>>(&Request::Post(post.clone()));
+				let PostRequest { body, to, dest, .. } = post;
 				let message = Message::abi_decode(&body).map_err(HftError::DecodeError)?;
 
 				// Refund the original sender
@@ -252,19 +256,25 @@ where
 				}
 				let beneficiary: T::AccountId = sender_bytes.into();
 
-				// Polkadex: the route recorded at registration, which outlives a contract change
-				let (local_asset_id, erc_decimals) = RefundRoutes::<T>::get(dest, &to)
-					.ok_or(HftError::UnknownContractOnTimeout)?;
-
-				let decimals = Pallet::<T>::local_decimals(&local_asset_id);
-				let amount = convert_to_balance::<
-					<<T as Config>::NativeCurrency as Currency<T::AccountId>>::Balance,
-				>(
-					U256::from_big_endian(&message.amount.to_be_bytes::<32>()),
-					erc_decimals,
-					decimals,
-				)
-				.map_err(|e| HftError::InvalidAmountConversion(format!("{e:?}")))?;
+				// Polkadex: the terms recorded at send; a transfer sent before them refunds by the route
+				// recorded at registration
+				let (local_asset_id, amount) = match RefundTerms::<T>::take(commitment) {
+					Some(terms) => terms,
+					None => {
+						let (asset, erc_decimals) = RefundRoutes::<T>::get(dest, &to)
+							.ok_or(HftError::UnknownContractOnTimeout)?;
+						let decimals = Pallet::<T>::local_decimals(&asset);
+						let amount = convert_to_balance::<
+							<<T as Config>::NativeCurrency as Currency<T::AccountId>>::Balance,
+						>(
+							U256::from_big_endian(&message.amount.to_be_bytes::<32>()),
+							erc_decimals,
+							decimals,
+						)
+						.map_err(|e| HftError::InvalidAmountConversion(format!("{e:?}")))?;
+						(asset, amount)
+					},
+				};
 
 				// Refund: release escrowed tokens back to the original sender
 				if local_asset_id == T::NativeAssetId::get() {
@@ -301,7 +311,8 @@ where
 					amount: amount.into(),
 					dest,
 				});
-				Ok(T::DbWeight::get().reads_writes(5, 2))
+				// Polkadex: plus the refund terms, read and removed
+				Ok(T::DbWeight::get().reads_writes(6, 3))
 			},
 			Request::Get(_) => Err(HftError::UnsupportedTimeoutType)?,
 		}

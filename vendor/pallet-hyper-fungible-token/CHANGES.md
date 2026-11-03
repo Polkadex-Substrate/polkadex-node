@@ -24,5 +24,10 @@ say so in their headers, and the new code is marked "Polkadex".
 - Depth-limited call decoding: the untrusted `runtime_call` an arriving transfer carries is decoded
   with `decode_with_depth_limit(MAX_EXTRINSIC_DEPTH)` in both `runtime_call_weight` and `on_accept`,
   so a nested call cannot recurse without bound. File: `src/module.rs`.
+- Refund terms: `send` records the asset and local amount it debited in `RefundTerms`, keyed by the
+  request commitment, and `on_timeout` takes them and refunds exactly that, so a precision update,
+  a contract reused for another asset or a local metadata change cannot alter a pending refund.
+  Transfers sent before the upgrade have no terms and refund by `RefundRoutes` as before. Files:
+  `src/lib.rs`, `src/module.rs`.
 
 The new error is appended, so existing indices and `TokenSent` do not change.

@@ -148,8 +148,8 @@ pub mod pallet {
 	>;
 
 	/// Polkadex: the local asset and ERC-20 decimals behind every (chain, contract) ever registered,
-	/// for timeout refunds. `update_token` never removes an entry, so a transfer in flight refunds
-	/// in full after its contract changes; `on_accept` trusts only the live maps above.
+	/// the refund fallback for transfers sent before `RefundTerms` existed. `update_token` never
+	/// removes an entry; `on_accept` trusts only the live maps above.
 	#[pallet::storage]
 	pub type RefundRoutes<T: Config> = StorageDoubleMap<
 		_,
@@ -158,6 +158,18 @@ pub mod pallet {
 		Blake2_128Concat,
 		Vec<u8>,
 		(AssetId<T>, u8),
+		OptionQuery,
+	>;
+
+	/// Polkadex: the asset and local amount each transfer debited, by request commitment, written
+	/// at `send` and taken by its timeout, so the refund ignores later contract, precision or
+	/// metadata changes.
+	#[pallet::storage]
+	pub type RefundTerms<T: Config> = StorageMap<
+		_,
+		Identity,
+		H256,
+		(AssetId<T>, <<T as Config>::NativeCurrency as Currency<T::AccountId>>::Balance),
 		OptionQuery,
 	>;
 
@@ -319,6 +331,8 @@ pub mod pallet {
 			let commitment = dispatcher
 				.dispatch_request(DispatchRequest::Post(dispatch_post), metadata)
 				.map_err(|_| Error::<T>::DispatchError)?;
+			// Polkadex: what this transfer debited, which its timeout refunds as is
+			RefundTerms::<T>::insert(commitment, (params.asset_id.clone(), params.amount));
 
 			Self::deposit_event(Event::<T>::TokenSent {
 				from: who,

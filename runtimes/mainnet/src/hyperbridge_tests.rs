@@ -23,7 +23,7 @@ use super::*;
 use frame_support::{assert_ok, dispatch::GetDispatchInfo};
 use sp_core::U256;
 use ismp::{
-	messaging::{ConsensusMessage, Message, Proof, RequestMessage},
+	messaging::{hash_request, ConsensusMessage, Message, Proof, RequestMessage},
 	router::PostRequest,
 };
 use frame_support::{
@@ -261,7 +261,7 @@ fn sent(ext: &mut sp_io::TestExternalities) -> Vec<Request> {
 	commitments.iter().map(read).collect()
 }
 
-// First regression case from the #29 review: a refund follows the route recorded at registration, so after the contract
+// First regression case from the #29 review: a refund follows the terms recorded at send, so after the contract
 // changes a transfer still in flight refunds in full, and the old contract can no longer deliver.
 #[test]
 fn timeout_refunds_in_full_after_the_contract_changes() {
@@ -381,5 +381,127 @@ fn a_call_nested_past_the_depth_limit_is_dropped() {
 	new_test_ext().execute_with(|| {
 		assert_eq!(HyperFungibleToken::runtime_call_weight(&body(400)), Weight::zero());
 		assert!(HyperFungibleToken::runtime_call_weight(&body(2)).any_gt(Weight::zero()));
+	});
+}
+
+/// Creates asset `id` with `decimals` local decimals, owned by `owner`.
+fn asset(id: u128, decimals: u8, owner: &AccountId) {
+	let owner = sp_runtime::MultiAddress::Id(owner.clone());
+	assert_ok!(Assets::force_create(RuntimeOrigin::root(), id.into(), owner, true, 1));
+	metadata(id, decimals);
+}
+
+/// Sets asset `id`'s local decimals.
+fn metadata(id: u128, decimals: u8) {
+	let (name, symbol) = (b"Token".to_vec(), b"TKN".to_vec());
+	let root = RuntimeOrigin::root();
+	assert_ok!(Assets::force_set_metadata(root, id.into(), name, symbol, decimals, false));
+}
+
+/// Points `asset` on the EVM chain at `contract` with `decimals` remote decimals.
+fn update(asset: u128, contract: [u8; 20], decimals: u8) {
+	let chain = ChainConfig { token_contract: contract.into(), decimals };
+	let add_chains = [(EVM, chain)].into();
+	let update = TokenUpdate { asset_id: asset, add_chains, remove_chains: vec![] };
+	assert_ok!(HyperFungibleToken::update_token(RuntimeOrigin::root(), update));
+}
+
+/// The refund terms recorded for a sent request.
+fn terms(request: &Request) -> Option<(u128, Balance)> {
+	pallet_hyper_fungible_token::RefundTerms::<Runtime>::get(hash_request::<Ismp>(request))
+}
+
+// A precision update on the same contract changes the route, not a pending refund: sent at 18
+// remote decimals and updated to 19, the transfer refunds the 100 PDEX sent, and its terms go.
+#[test]
+fn a_precision_update_keeps_the_refund_and_clears_its_terms() {
+	let mut ext = new_test_ext();
+	let sender = account(83);
+	ext.execute_with(|| {
+		frame_system::Pallet::<Runtime>::set_block_number(1);
+		let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&sender, 1_000 * PDEX);
+		register(POLKADEX_NATIVE_ASSET_ID, [0xaa; 20], 18);
+		assert_ok!(send(&sender, POLKADEX_NATIVE_ASSET_ID, 100 * PDEX));
+		update(POLKADEX_NATIVE_ASSET_ID, [0xaa; 20], 19);
+	});
+	let requests = sent(&mut ext);
+	ext.execute_with(|| {
+		assert_eq!(terms(&requests[0]), Some((POLKADEX_NATIVE_ASSET_ID, 100 * PDEX)));
+		assert_ok!(HyperFungibleToken::default().on_timeout(requests[0].clone()));
+		assert_eq!(Balances::free_balance(&sender), 1_000 * PDEX);
+		assert_eq!(terms(&requests[0]), None);
+	});
+}
+
+// A contract reused for another asset leaves a pending refund in the asset that was sent.
+#[test]
+fn a_reused_contract_refunds_the_asset_that_was_sent() {
+	const OTHER: u128 = 1_985;
+	let mut ext = new_test_ext();
+	let sender = account(84);
+	ext.execute_with(|| {
+		frame_system::Pallet::<Runtime>::set_block_number(1);
+		let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&sender, 1_000 * PDEX);
+		register(POLKADEX_NATIVE_ASSET_ID, [0xaa; 20], 18);
+		assert_ok!(send(&sender, POLKADEX_NATIVE_ASSET_ID, 100 * PDEX));
+		let remove_chains = vec![EVM];
+		let drop =
+			TokenUpdate { asset_id: POLKADEX_NATIVE_ASSET_ID, add_chains: Default::default(), remove_chains };
+		assert_ok!(HyperFungibleToken::update_token(RuntimeOrigin::root(), drop));
+		asset(OTHER, 18, &sender);
+		register(OTHER, [0xaa; 20], 18);
+	});
+	let requests = sent(&mut ext);
+	ext.execute_with(|| {
+		assert_ok!(HyperFungibleToken::default().on_timeout(requests[0].clone()));
+		assert_eq!(Balances::free_balance(&sender), 1_000 * PDEX);
+		assert_eq!(Assets::balance(OTHER, &sender), 0);
+	});
+}
+
+// A local decimals change between two sends (6 to 8) leaves each refund exact.
+#[test]
+fn a_local_decimals_change_keeps_each_refund_exact() {
+	const TOKEN: u128 = 1_986;
+	let mut ext = new_test_ext();
+	let sender = account(85);
+	ext.execute_with(|| {
+		frame_system::Pallet::<Runtime>::set_block_number(1);
+		let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&sender, 10 * PDEX);
+		asset(TOKEN, 6, &sender);
+		assert_ok!(<Assets as fungibles::Mutate<AccountId>>::mint_into(TOKEN, &sender, 1_000_000));
+		register(TOKEN, [0xcc; 20], 6);
+		assert_ok!(send(&sender, TOKEN, 100));
+		metadata(TOKEN, 8);
+		assert_ok!(send(&sender, TOKEN, 10_000));
+		assert_eq!(Assets::balance(TOKEN, &sender), 1_000_000 - 10_100);
+	});
+	let requests = sent(&mut ext);
+	ext.execute_with(|| {
+		for request in &requests {
+			assert_ok!(HyperFungibleToken::default().on_timeout(request.clone()));
+		}
+		assert_eq!(Assets::balance(TOKEN, &sender), 1_000_000);
+	});
+}
+
+// A transfer sent before the upgrade has no terms and refunds by the route recorded at
+// registration.
+#[test]
+fn a_transfer_without_terms_refunds_by_the_route() {
+	let mut ext = new_test_ext();
+	let sender = account(86);
+	ext.execute_with(|| {
+		frame_system::Pallet::<Runtime>::set_block_number(1);
+		let _ = <Balances as Currency<AccountId>>::make_free_balance_be(&sender, 1_000 * PDEX);
+		register(POLKADEX_NATIVE_ASSET_ID, [0xaa; 20], 18);
+		assert_ok!(send(&sender, POLKADEX_NATIVE_ASSET_ID, 100 * PDEX));
+	});
+	let requests = sent(&mut ext);
+	ext.execute_with(|| {
+		let commitment = hash_request::<Ismp>(&requests[0]);
+		pallet_hyper_fungible_token::RefundTerms::<Runtime>::remove(commitment);
+		assert_ok!(HyperFungibleToken::default().on_timeout(requests[0].clone()));
+		assert_eq!(Balances::free_balance(&sender), 1_000 * PDEX);
 	});
 }
