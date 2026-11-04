@@ -42,7 +42,9 @@ use frame_support::{
 use pallet_ismp::ModuleId;
 use polkadot_sdk::*;
 use primitive_types::H256;
-use types::{AssetId, EvmToSubstrate, Message, SendParams, TokenRegistration, TokenUpdate};
+use types::{
+	AssetId, BridgeFee, EvmToSubstrate, Message, SendParams, TokenRegistration, TokenUpdate,
+};
 
 use alloc::{vec, vec::Vec};
 
@@ -102,6 +104,13 @@ pub mod pallet {
 
 		/// Weight information for extrinsics in this pallet
 		type WeightInfo: WeightInfo;
+
+		/// Polkadex: the bridge fee and the `call_data` cap of `send`, set by governance
+		type BridgeFee: BridgeFee<
+			Self::AccountId,
+			AssetId<Self>,
+			<Self::NativeCurrency as Currency<Self::AccountId>>::Balance,
+		>;
 	}
 
 	/// Maps (StateMachine, AssetId) → EVM contract address of the token on that chain.
@@ -219,6 +228,20 @@ pub mod pallet {
 			/// The chains this token was registered on
 			chains: Vec<StateMachine>,
 		},
+
+		/// Polkadex: a send paid its bridge fee to the fee collector
+		BridgeFeePaid {
+			/// Source account
+			from: T::AccountId,
+			/// Fee collector
+			collector: T::AccountId,
+			/// The asset sent, which the fee is paid in
+			asset_id: AssetId<T>,
+			/// Destination chain
+			dest: StateMachine,
+			/// Fee paid (local denomination)
+			fee: <T::NativeCurrency as Currency<T::AccountId>>::Balance,
+		},
 	}
 
 	#[pallet::error]
@@ -241,6 +264,10 @@ pub mod pallet {
 		ErcDecimalsBelowLocal,
 		/// Polkadex: the amount does not convert exactly to the destination's decimals
 		AmountNotRepresentable,
+		/// Polkadex: no bridge fee or no fee collector is set for this asset and destination
+		BridgeFeeNotSet,
+		/// Polkadex: `call_data` is longer than the governance cap
+		CallDataTooLong,
 	}
 
 	#[pallet::call]
@@ -266,6 +293,12 @@ pub mod pallet {
 			>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
+			// Polkadex: call_data within the governance cap (MaxCallData; the default 0 allows none)
+			let call_data_len = params.call_data.as_ref().map_or(0, |data| data.len());
+			ensure!(
+				call_data_len <= T::BridgeFee::max_call_data() as usize,
+				Error::<T>::CallDataTooLong
+			);
 			let dispatcher = <T as Config>::Dispatcher::default();
 
 			let token_contract =
@@ -277,6 +310,9 @@ pub mod pallet {
 			let decimals = Self::local_decimals(&params.asset_id);
 			let erc20_amount = convert_to_erc20(params.amount.into(), erc_decimals, decimals)
 				.ok_or(Error::<T>::AmountNotRepresentable)?;
+
+			// Polkadex: the bridge fee goes to the collector, on top of the amount
+			Self::pay_bridge_fee(&who, params.asset_id.clone(), params.destination)?;
 
 			// Lock or burn the local asset
 			if params.asset_id == T::NativeAssetId::get() {
@@ -432,6 +468,51 @@ pub mod pallet {
 		/// Polkadex: records the refund route of a (chain, contract); never removed
 		fn route(chain: StateMachine, contract: &[u8], asset: &AssetId<T>, decimals: u8) {
 			RefundRoutes::<T>::insert(chain, contract, (asset.clone(), decimals));
+		}
+	}
+
+	impl<T: Config> Pallet<T>
+	where
+		<<T as Config>::Assets as fungibles::Inspect<T::AccountId>>::Balance:
+			From<<<T as Config>::NativeCurrency as Currency<T::AccountId>>::Balance>,
+	{
+		/// Polkadex: moves the fee for `asset` to `dest` from `who` to the collector, in the asset
+		/// being sent; fails closed while the fee or the collector is unset.
+		fn pay_bridge_fee(
+			who: &T::AccountId,
+			asset: AssetId<T>,
+			dest: StateMachine,
+		) -> DispatchResult {
+			let (collector, fee) =
+				T::BridgeFee::fee(&asset, &dest).ok_or(Error::<T>::BridgeFeeNotSet)?;
+			// Record only fees that move: BridgeFeePaid events sum to the collector's income.
+			if fee.is_zero() || who == &collector {
+				return Ok(());
+			}
+			if asset == T::NativeAssetId::get() {
+				<T as Config>::NativeCurrency::transfer(
+					who,
+					&collector,
+					fee,
+					ExistenceRequirement::AllowDeath,
+				)?;
+			} else {
+				<T as Config>::Assets::transfer(
+					asset.clone(),
+					who,
+					&collector,
+					fee.into(),
+					Preservation::Expendable,
+				)?;
+			}
+			Self::deposit_event(Event::<T>::BridgeFeePaid {
+				from: who.clone(),
+				collector,
+				asset_id: asset,
+				dest,
+				fee,
+			});
+			Ok(())
 		}
 	}
 
