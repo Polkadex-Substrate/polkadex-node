@@ -164,8 +164,8 @@ fn unsigned_ismp_weight_follows_the_messages() {
 	});
 }
 
-// The benchmarks' two scenarios succeed here as they must there: a GRANDPA update finalised by five
-// authorities, and a batch of three transfers in with unrelated proof nodes on top.
+// The ismp benchmarks' scenarios succeed here as they must there: a GRANDPA update finalised by
+// five authorities, and a batch of three transfers in with unrelated proof nodes on top.
 #[test]
 fn ismp_benchmark_scenarios_succeed() {
 	use crate::ismp_fixtures::*;
@@ -548,4 +548,28 @@ fn hft_calls_are_weighed_by_path_length_and_chains() {
 	let remove_chains = vec![StateMachine::Evm(2), StateMachine::Evm(3)];
 	let update = TokenUpdate { asset_id: 1_987, add_chains: [(EVM, chain)].into(), remove_chains };
 	assert_eq!(declared(Call::update_token { update }), Weights::update_token(3));
+}
+
+// The HFT benchmarks' scenarios succeed here as they must there, at their largest components: a
+// send down each path pays the bridge fee and records its refund terms; an update repoints every
+// chain of a registration over the most chains.
+#[test]
+fn hft_benchmark_scenarios_succeed() {
+	use crate::hft_benchmarks::*;
+	for asset in [POLKADEX_NATIVE_ASSET_ID, TOKEN] {
+		new_test_ext().execute_with(|| {
+			frame_system::Pallet::<Runtime>::set_block_number(1);
+			let sender = account(87);
+			let (collector, params) = priced_send(&sender, asset, MAX_CALL_DATA);
+			assert_ok!(HyperFungibleToken::send(RuntimeOrigin::signed(sender), params));
+			assert_sent(&collector, asset);
+		});
+	}
+	new_test_ext().execute_with(|| {
+		register_chains(TOKEN, false, MAX_CHAINS);
+		assert_contracts(TOKEN, MAX_CHAINS, 0);
+		let update = replace_chains(TOKEN, MAX_CHAINS);
+		assert_ok!(HyperFungibleToken::update_token(RuntimeOrigin::root(), update));
+		assert_contracts(TOKEN, MAX_CHAINS, REPLACED);
+	});
 }
