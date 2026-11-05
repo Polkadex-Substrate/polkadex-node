@@ -1,5 +1,6 @@
 // Copyright (C) Polytope Labs Ltd.
 // SPDX-License-Identifier: Apache-2.0
+// Modified by The Polkadex Authors in 2026; see CHANGES.md.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,7 +42,9 @@ use frame_support::{
 use pallet_ismp::ModuleId;
 use polkadot_sdk::*;
 use primitive_types::H256;
-use types::{AssetId, EvmToSubstrate, Message, SendParams, TokenRegistration, TokenUpdate};
+use types::{
+	AssetId, BridgeFee, EvmToSubstrate, Message, SendParams, TokenRegistration, TokenUpdate,
+};
 
 use alloc::{vec, vec::Vec};
 
@@ -101,6 +104,13 @@ pub mod pallet {
 
 		/// Weight information for extrinsics in this pallet
 		type WeightInfo: WeightInfo;
+
+		/// Polkadex: the bridge fee and the `call_data` cap of `send`, set by governance
+		type BridgeFee: BridgeFee<
+			Self::AccountId,
+			AssetId<Self>,
+			<Self::NativeCurrency as Currency<Self::AccountId>>::Balance,
+		>;
 	}
 
 	/// Maps (StateMachine, AssetId) → EVM contract address of the token on that chain.
@@ -143,6 +153,32 @@ pub mod pallet {
 		Blake2_128Concat,
 		StateMachine,
 		u8,
+		OptionQuery,
+	>;
+
+	/// Polkadex: the local asset and ERC-20 decimals behind every (chain, contract) ever registered,
+	/// the refund fallback for transfers sent before `RefundTerms` existed. `update_token` never
+	/// removes an entry; `on_accept` trusts only the live maps above.
+	#[pallet::storage]
+	pub type RefundRoutes<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		StateMachine,
+		Blake2_128Concat,
+		Vec<u8>,
+		(AssetId<T>, u8),
+		OptionQuery,
+	>;
+
+	/// Polkadex: the asset and local amount each transfer debited, by request commitment, written
+	/// at `send` and taken by its timeout, so the refund ignores later contract, precision or
+	/// metadata changes.
+	#[pallet::storage]
+	pub type RefundTerms<T: Config> = StorageMap<
+		_,
+		Identity,
+		H256,
+		(AssetId<T>, <<T as Config>::NativeCurrency as Currency<T::AccountId>>::Balance),
 		OptionQuery,
 	>;
 
@@ -192,6 +228,20 @@ pub mod pallet {
 			/// The chains this token was registered on
 			chains: Vec<StateMachine>,
 		},
+
+		/// Polkadex: a send paid its bridge fee to the fee collector
+		BridgeFeePaid {
+			/// Source account
+			from: T::AccountId,
+			/// Fee collector
+			collector: T::AccountId,
+			/// The asset sent, which the fee is paid in
+			asset_id: AssetId<T>,
+			/// Destination chain
+			dest: StateMachine,
+			/// Fee paid (local denomination)
+			fee: <T::NativeCurrency as Currency<T::AccountId>>::Balance,
+		},
 	}
 
 	#[pallet::error]
@@ -212,6 +262,12 @@ pub mod pallet {
 		NonEvmPeerChain,
 		/// Kept for SCALE encoding compatibility; no longer emitted
 		ErcDecimalsBelowLocal,
+		/// Polkadex: the amount does not convert exactly to the destination's decimals
+		AmountNotRepresentable,
+		/// Polkadex: no bridge fee or no fee collector is set for this asset and destination
+		BridgeFeeNotSet,
+		/// Polkadex: `call_data` is longer than the governance cap
+		CallDataTooLong,
 	}
 
 	#[pallet::call]
@@ -237,6 +293,12 @@ pub mod pallet {
 			>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
+			// Polkadex: call_data within the governance cap (MaxCallData; the default 0 allows none)
+			let call_data_len = params.call_data.as_ref().map_or(0, |data| data.len());
+			ensure!(
+				call_data_len <= T::BridgeFee::max_call_data() as usize,
+				Error::<T>::CallDataTooLong
+			);
 			let dispatcher = <T as Config>::Dispatcher::default();
 
 			let token_contract =
@@ -244,9 +306,16 @@ pub mod pallet {
 					.ok_or(Error::<T>::TokenContractNotFound)?;
 			let erc_decimals = Precisions::<T>::get(params.asset_id.clone(), params.destination)
 				.ok_or(Error::<T>::DecimalsNotFound)?;
+			// Polkadex: an amount the destination cannot represent is refused before anything moves
+			let decimals = Self::local_decimals(&params.asset_id);
+			let erc20_amount = convert_to_erc20(params.amount.into(), erc_decimals, decimals)
+				.ok_or(Error::<T>::AmountNotRepresentable)?;
+
+			// Polkadex: the bridge fee goes to the collector, on top of the amount
+			Self::pay_bridge_fee(&who, params.asset_id.clone(), params.destination)?;
 
 			// Lock or burn the local asset
-			let decimals = if params.asset_id == T::NativeAssetId::get() {
+			if params.asset_id == T::NativeAssetId::get() {
 				// escrow the native asset
 				<T as Config>::NativeCurrency::transfer(
 					&who,
@@ -254,7 +323,6 @@ pub mod pallet {
 					params.amount,
 					ExistenceRequirement::AllowDeath,
 				)?;
-				T::Decimals::get()
 			} else {
 				let is_native = NativeAssets::<T>::get(params.asset_id.clone());
 				if is_native {
@@ -275,15 +343,10 @@ pub mod pallet {
 						Fortitude::Polite,
 					)?;
 				}
-				<T::Assets as fungibles::metadata::Inspect<T::AccountId>>::decimals(
-					params.asset_id.clone(),
-				)
-			};
+			}
 
 			// Encode the Message body
 			let sender: [u8; 32] = who.clone().into();
-			let amount: u128 = params.amount.into();
-			let erc20_amount = convert_to_erc20(amount, erc_decimals, decimals);
 
 			let token_message = Message {
 				from: sender.to_vec().into(),
@@ -304,6 +367,8 @@ pub mod pallet {
 			let commitment = dispatcher
 				.dispatch_request(DispatchRequest::Post(dispatch_post), metadata)
 				.map_err(|_| Error::<T>::DispatchError)?;
+			// Polkadex: what this transfer debited, which its timeout refunds as is
+			RefundTerms::<T>::insert(commitment, (params.asset_id.clone(), params.amount));
 
 			Self::deposit_event(Event::<T>::TokenSent {
 				from: who,
@@ -338,6 +403,7 @@ pub mod pallet {
 					registration.local_id.clone(),
 					token_contract.clone(),
 				);
+				Self::route(chain, &token_contract, &registration.local_id, config.decimals);
 				ContractToAsset::<T>::insert(
 					chain,
 					token_contract,
@@ -380,6 +446,7 @@ pub mod pallet {
 					update.asset_id.clone(),
 					token_contract.clone(),
 				);
+				Self::route(chain, &token_contract, &update.asset_id, config.decimals);
 				ContractToAsset::<T>::insert(chain, token_contract, update.asset_id.clone());
 				Precisions::<T>::insert(update.asset_id.clone(), chain, config.decimals);
 			}
@@ -393,6 +460,58 @@ pub mod pallet {
 				Precisions::<T>::remove(update.asset_id.clone(), chain);
 			}
 
+			Ok(())
+		}
+	}
+
+	impl<T: Config> Pallet<T> {
+		/// Polkadex: records the refund route of a (chain, contract); never removed
+		fn route(chain: StateMachine, contract: &[u8], asset: &AssetId<T>, decimals: u8) {
+			RefundRoutes::<T>::insert(chain, contract, (asset.clone(), decimals));
+		}
+	}
+
+	impl<T: Config> Pallet<T>
+	where
+		<<T as Config>::Assets as fungibles::Inspect<T::AccountId>>::Balance:
+			From<<<T as Config>::NativeCurrency as Currency<T::AccountId>>::Balance>,
+	{
+		/// Polkadex: moves the fee for `asset` to `dest` from `who` to the collector, in the asset
+		/// being sent; fails closed while the fee or the collector is unset.
+		fn pay_bridge_fee(
+			who: &T::AccountId,
+			asset: AssetId<T>,
+			dest: StateMachine,
+		) -> DispatchResult {
+			let (collector, fee) =
+				T::BridgeFee::fee(&asset, &dest).ok_or(Error::<T>::BridgeFeeNotSet)?;
+			// Record only fees that move: BridgeFeePaid events sum to the collector's income.
+			if fee.is_zero() || who == &collector {
+				return Ok(());
+			}
+			if asset == T::NativeAssetId::get() {
+				<T as Config>::NativeCurrency::transfer(
+					who,
+					&collector,
+					fee,
+					ExistenceRequirement::AllowDeath,
+				)?;
+			} else {
+				<T as Config>::Assets::transfer(
+					asset.clone(),
+					who,
+					&collector,
+					fee.into(),
+					Preservation::Expendable,
+				)?;
+			}
+			Self::deposit_event(Event::<T>::BridgeFeePaid {
+				from: who.clone(),
+				collector,
+				asset_id: asset,
+				dest,
+				fee,
+			});
 			Ok(())
 		}
 	}

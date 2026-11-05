@@ -1,0 +1,99 @@
+// Copyright (c) 2025 Polytope Labs.
+// SPDX-License-Identifier: Apache-2.0
+// Modified by The Polkadex Authors in 2026; see CHANGES.md.
+
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// 	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Utilities for providing the static weights for module callbacks
+use polkadot_sdk::*;
+
+use crate::utils::ModuleId;
+use alloc::boxed::Box;
+use frame_support::weights::Weight;
+use ismp::router::{GetResponse, PostRequest, Request};
+
+/// Interface for providing the weight information about [`IsmpModule`](ismp::module::IsmpModule)
+/// callbacks
+pub trait IsmpModuleWeight {
+	/// Should return the weight used in processing this request
+	fn on_accept(&self, request: &PostRequest) -> Weight;
+	/// Should return the weight used in processing this timeout
+	fn on_timeout(&self, request: &Request) -> Weight;
+	/// Should return the weight used in processing this response
+	fn on_response(&self, response: &GetResponse) -> Weight;
+}
+
+impl IsmpModuleWeight for () {
+	fn on_accept(&self, _request: &PostRequest) -> Weight {
+		Weight::zero()
+	}
+	fn on_timeout(&self, _request: &Request) -> Weight {
+		Weight::zero()
+	}
+	fn on_response(&self, _response: &GetResponse) -> Weight {
+		Weight::zero()
+	}
+}
+
+/// An interface for querying the [`IsmpModuleWeight`] for a given
+/// [`IsmpModule`](ismp::module::IsmpModule)
+pub trait WeightProvider {
+	/// Returns a reference to the weight provider for a module
+	fn module_callback(dest_module: ModuleId) -> Option<Box<dyn IsmpModuleWeight>>;
+}
+
+impl WeightProvider for () {
+	fn module_callback(_dest_module: ModuleId) -> Option<Box<dyn IsmpModuleWeight>> {
+		None
+	}
+}
+
+/// Polkadex: weights of the unsigned message kinds, benchmarked by the runtime
+pub trait MessageWeightInfo {
+	/// A consensus update whose proof carries `k` signatures
+	fn handle_consensus(k: u32) -> Weight;
+	/// A batch of `n` requests with a `b`-byte proof, a benchmarked module callback each
+	fn handle_requests(n: u32, b: u32) -> Weight;
+}
+
+/// Upstream's flat weight per call, for runtimes without benchmarks
+impl MessageWeightInfo for () {
+	fn handle_consensus(_k: u32) -> Weight {
+		Weight::from_parts(300_000_000, 0)
+	}
+	fn handle_requests(_n: u32, _b: u32) -> Weight {
+		Weight::from_parts(300_000_000, 0)
+	}
+}
+
+/// Weight functions for legacy storage drain migrations.
+pub trait MigrationWeightInfo {
+	/// Weight to clear n entries from `StateCommitments`.
+	fn drain_state_commitments_step(n: u32) -> Weight;
+	/// Weight to clear n entries from `StateMachineUpdateTime`.
+	fn drain_state_machine_update_time_step(n: u32) -> Weight;
+	/// Weight to drain n entries from the child trie.
+	fn drain_child_trie_state_commitments_step(n: u32) -> Weight;
+}
+
+impl MigrationWeightInfo for () {
+	fn drain_state_commitments_step(_n: u32) -> Weight {
+		Weight::zero()
+	}
+	fn drain_state_machine_update_time_step(_n: u32) -> Weight {
+		Weight::zero()
+	}
+	fn drain_child_trie_state_commitments_step(_n: u32) -> Weight {
+		Weight::zero()
+	}
+}
