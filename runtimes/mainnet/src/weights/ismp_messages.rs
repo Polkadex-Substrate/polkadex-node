@@ -25,10 +25,9 @@
 //! WASM-EXECUTION: `Compiled`, CHAIN: `Some("/root/polkadex-node/target/bench/dev-code-only.json")`, DB CACHE: 1024
 //!
 //! handle_consensus is kept from the 2026-10-31 run (steps 50, repeat 20); its benchmark
-//! body is unchanged. handle_requests is the envelope of this run's least-squares and
-//! median-slopes fits: the least-squares base with the median-slopes n and b slopes, since the
-//! least-squares n slope was fitted under ~100 ms of proof hashing. The next run sweeps n at
-//! b = 0 and b at n = 1.
+//! body is unchanged. handle_requests and handle_proof split this run's envelope of the
+//! least-squares and median-slopes fits (the least-squares base with the median-slopes n and b
+//! slopes) until the next run, which benchmarks n at a minimal proof and b at one request.
 
 // Executed Command:
 // /root/polkadex-node/target/bench/release/polkadex-node
@@ -115,21 +114,24 @@ impl<T: frame_system::Config> pallet_ismp::weights::MessageWeightInfo for Weight
 	/// Storage: UNKNOWN KEY child-trie `RequestReceipts` entries, one per request (r:1 w:1 each). The signed
 	/// scenario signs with fresh keys each run, so the benchmark listed 96080 distinct keys; collapsed here.
 	/// The range of component `n` is `[1, 64]`.
-	/// The range of component `b` is `[0, 262144]`.
-	fn handle_requests(n: u32, b: u32, ) -> Weight {
+	fn handle_requests(n: u32, ) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `804`
 		//  Estimated: `6744 + n * (2603 ±0)`
 		// Minimum execution time: 14_947_499_000 picoseconds.
-		// Envelope of the least-squares and median-slopes fits (see the header).
+		// The per-request part of the envelope (see the header).
 		Weight::from_parts(16_592_033_000, 0)
 			.saturating_add(Weight::from_parts(0, 6744))
 			.saturating_add(Weight::from_parts(308_100_000, 0).saturating_mul(n.into()))
-			.saturating_add(Weight::from_parts(380_000, 0).saturating_mul(b.into()))
 			.saturating_add(T::DbWeight::get().reads(14))
 			.saturating_add(T::DbWeight::get().reads((2_u64).saturating_mul(n.into())))
 			.saturating_add(T::DbWeight::get().writes(1))
 			.saturating_add(T::DbWeight::get().writes((2_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 2603).saturating_mul(n.into()))
+	}
+	/// The range of component `b` is `[0, 262144]`.
+	fn handle_proof(b: u32, ) -> Weight {
+		// The per-proof-byte part of the envelope (see the header); only its growth is charged.
+		Weight::from_parts(380_000, 0).saturating_mul(b.into())
 	}
 }
