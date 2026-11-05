@@ -9797,8 +9797,6 @@ dependencies = [
 [[package]]
 name = "pallet-democracy"
 version = "45.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1cd5208c958ed0c0c263f75c93b60f26701d9dac9464ba22823d2a919856870"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -9929,8 +9927,6 @@ dependencies = [
 [[package]]
 name = "pallet-elections-phragmen"
 version = "46.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4a54cc67ffebc01d998a3411409190857284c719a38575dc0e95f5d623e4731"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -12010,7 +12006,7 @@ dependencies = [
 
 [[package]]
 name = "polkadex-node"
-version = "7.0.0"
+version = "7.0.1"
 dependencies = [
  "array-bytes 6.2.3",
  "bls-primitives",
@@ -15722,8 +15718,6 @@ dependencies = [
 [[package]]
 name = "sc-client-db"
 version = "0.51.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7eaa7c985f95664abd59636ec4c7ae0b37a0e06746addb867ca32dc255a9be88"
 dependencies = [
  "hash-db",
  "kvdb",
