@@ -94,7 +94,7 @@ Alice_Node_Key=$(subkey generate --scheme Ed25519 --output-type Json | jq -r '.s
   --ws-port 9945 \
   --rpc-port 9933 \
   --node-key $Alice_Node_Key \
-  --telemetry-url 'wss://telemetry.polkadot.io/submit/ 0' \
+  --no-telemetry \
   --validator
 ```
 
@@ -134,7 +134,7 @@ Now that Alice's node is up and running, Bob can join the network by bootstrappi
   --port 30334 \
   --ws-port 9946 \
   --rpc-port 9934 \
-  --telemetry-url 'wss://telemetry.polkadot.io/submit/ 0' \
+  --no-telemetry \
   --validator \
   --bootnodes /ip4/127.0.0.1/tcp/30333/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp
 ```
