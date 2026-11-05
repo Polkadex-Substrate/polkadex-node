@@ -522,3 +522,30 @@ fn a_transfer_without_terms_refunds_by_the_route() {
 		assert_eq!(Balances::free_balance(&sender), 1_000 * PDEX);
 	});
 }
+
+// A send is weighed for its path and its call_data length, an update for the chains it adds and
+// the chains it removes.
+#[test]
+fn hft_calls_are_weighed_by_path_length_and_chains() {
+	type Weights = <Runtime as pallet_hyper_fungible_token::Config>::WeightInfo;
+	use pallet_hyper_fungible_token::{Call, WeightInfo};
+	let declared = |call: Call<Runtime>| call.get_dispatch_info().call_weight;
+	let send = |asset_id: u128| {
+		let params = SendParams {
+			asset_id,
+			destination: EVM,
+			recipient: vec![7u8; 20].try_into().unwrap(),
+			amount: 1,
+			timeout: 0,
+			relayer_fee: 0,
+			call_data: Some(vec![0; 100]),
+		};
+		Call::send { params }
+	};
+	assert_eq!(declared(send(POLKADEX_NATIVE_ASSET_ID)), Weights::send_native(100));
+	assert_eq!(declared(send(1_987)), Weights::send_asset(100));
+	let chain = ChainConfig { token_contract: [0xaa; 20].into(), decimals: 18 };
+	let remove_chains = vec![StateMachine::Evm(2), StateMachine::Evm(3)];
+	let update = TokenUpdate { asset_id: 1_987, add_chains: [(EVM, chain)].into(), remove_chains };
+	assert_eq!(declared(Call::update_token { update }), Weights::update_token(3));
+}

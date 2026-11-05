@@ -284,7 +284,7 @@ pub mod pallet {
 	{
 		/// Sends tokens cross-chain to a HyperFungibleToken or WrappedHyperFungibleToken contract
 		#[pallet::call_index(0)]
-		#[pallet::weight(T::WeightInfo::send())]
+		#[pallet::weight(Pallet::<T>::send_weight(params))]
 		pub fn send(
 			origin: OriginFor<T>,
 			params: SendParams<
@@ -422,7 +422,10 @@ pub mod pallet {
 
 		/// Updates chain configuration for an existing token
 		#[pallet::call_index(2)]
-		#[pallet::weight(T::WeightInfo::update_token(update.add_chains.len() as u32))]
+		// Polkadex: removed chains are weighed like added ones, which do more work per chain
+		#[pallet::weight(T::WeightInfo::update_token(
+			(update.add_chains.len() + update.remove_chains.len()) as u32
+		))]
 		pub fn update_token(
 			origin: OriginFor<T>,
 			update: TokenUpdate<AssetId<T>>,
@@ -468,6 +471,21 @@ pub mod pallet {
 		/// Polkadex: records the refund route of a (chain, contract); never removed
 		fn route(chain: StateMachine, contract: &[u8], asset: &AssetId<T>, decimals: u8) {
 			RefundRoutes::<T>::insert(chain, contract, (asset.clone(), decimals));
+		}
+
+		/// Polkadex: the weight of a send, by its path and the length of its `call_data`
+		pub fn send_weight(
+			params: &SendParams<
+				AssetId<T>,
+				<<T as Config>::NativeCurrency as Currency<T::AccountId>>::Balance,
+			>,
+		) -> Weight {
+			let d = params.call_data.as_ref().map_or(0, |data| data.len() as u32);
+			if params.asset_id == T::NativeAssetId::get() {
+				T::WeightInfo::send_native(d)
+			} else {
+				T::WeightInfo::send_asset(d)
+			}
 		}
 	}
 
