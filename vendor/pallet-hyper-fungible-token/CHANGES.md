@@ -41,5 +41,14 @@ say so in their headers, and the new code is marked "Polkadex".
   `send()`, chosen by the asset sent with `d` the `call_data` length, so the runtime can weigh
   each path from its own benchmark; `update_token` counts removed chains as well as added ones.
   Files: `src/lib.rs`, `src/weights.rs`.
+- Recipient length: `send` refuses, with `InvalidRecipient` and before anything moves, a recipient
+  the destination cannot credit: exactly 20 bytes to an EVM chain, exactly 32 to any other.
+  `recipient` takes up to 32 bytes and the EVM contracts revert unless `to` is 20, so such a
+  transfer could never arrive. File: `src/lib.rs`.
+- Refund terms only with a timeout: `send` keeps `RefundTerms` only when `timeout` is above 0,
+  since a timeout of 0 never expires and its terms would never be taken. File: `src/lib.rs`.
+
+Sends use timeout 0: a transfer then never expires and arrives whenever the relayer can deliver
+it, so it never needs a refund, which is why a recipient the destination cannot credit is refused.
 
 The new event and errors are appended, so existing indices and `TokenSent` do not change.

@@ -17,7 +17,9 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 //! Paid bridge transfers: `HyperFungibleToken::send` pays the fee that `IsmpParams` holds for its
-//! (asset, destination) to the fee collector, on top of the amount, before the lock or burn.
+//! (asset, destination) to the fee collector, on top of the amount, before the lock or burn. It
+//! refuses a recipient the destination cannot credit and keeps refund terms only for a send that
+//! can time out.
 
 use super::*;
 use frame_support::{
@@ -26,7 +28,7 @@ use frame_support::{
 };
 use pallet_hyper_fungible_token::{
 	types::{ChainConfig, SendParams, TokenRegistration},
-	Error as HftError, Event as HftEvent,
+	Error as HftError, Event as HftEvent, RefundTerms,
 };
 use pallet_ismp::offchain::{leaf_default_key, Leaf};
 use sp_core::H160;
@@ -123,6 +125,16 @@ fn params(asset: u128, dest: StateMachine, amount: Balance) -> SendParams<u128, 
 	}
 }
 
+/// `params` with a recipient of `len` bytes.
+fn with_recipient(params: SendParams<u128, Balance>, len: usize) -> SendParams<u128, Balance> {
+	SendParams { recipient: vec![7u8; len].try_into().unwrap(), ..params }
+}
+
+/// `params` with a timeout of an hour, so the transfer can time out.
+fn with_timeout(params: SendParams<u128, Balance>) -> SendParams<u128, Balance> {
+	SendParams { timeout: 3_600, ..params }
+}
+
 /// `send` through the runtime dispatch, which rolls a failed send back as a block would.
 fn send(who: &AccountId, params: SendParams<u128, Balance>) -> DispatchResult {
 	RuntimeCall::HyperFungibleToken(pallet_hyper_fungible_token::Call::send { params })
@@ -139,6 +151,13 @@ fn hft_events() -> Vec<HftEvent<Runtime>> {
 			_ => None,
 		})
 		.collect()
+}
+
+/// The request commitment of the last send.
+fn last_commitment() -> H256 {
+	let events = hft_events();
+	let Some(HftEvent::TokenSent { commitment, .. }) = events.last() else { panic!("a send") };
+	*commitment
 }
 
 /// The last send paid `fee` to the collector, then sent `amount` alone (TokenSent unchanged).
@@ -229,6 +248,52 @@ fn call_data_longer_than_the_cap_is_refused() {
 	});
 }
 
+// An EVM chain credits a 20-byte address: any other recipient is refused before anything moves,
+// fee included (assert_noop: no storage change), on the escrow (PDEX) and burn (USDT) paths alike.
+#[test]
+fn an_evm_send_takes_only_a_20_byte_recipient() {
+	new_test_ext().execute_with(|| {
+		set_fees();
+		for (asset, amount, fee) in [(PDEX_ID, 100 * PDEX, 30 * PDEX), (USDT, 50 * USD, 3 * USD)] {
+			for len in [0, 19, 21, 32] {
+				let refused = with_recipient(params(asset, ETH, amount), len);
+				assert_noop!(send(&sender(), refused), HftError::<Runtime>::InvalidRecipient);
+			}
+			assert_ok!(send(&sender(), with_recipient(params(asset, ETH, amount), 20)));
+			assert_paid(&sender(), asset, ETH, fee, amount);
+		}
+	});
+}
+
+// Any other chain credits a 32-byte account, so 20 bytes is refused. No token registers to a
+// non-EVM chain, so a 32-byte recipient passes the check and stops at the contract lookup.
+#[test]
+fn a_non_evm_send_takes_only_a_32_byte_recipient() {
+	new_test_ext().execute_with(|| {
+		let dest = StateMachine::Substrate(*b"TEST");
+		let refused = with_recipient(params(PDEX_ID, dest, PDEX), 20);
+		assert_noop!(send(&sender(), refused), HftError::<Runtime>::InvalidRecipient);
+		let fits = with_recipient(params(PDEX_ID, dest, PDEX), 32);
+		assert_noop!(send(&sender(), fits), HftError::<Runtime>::TokenContractNotFound);
+	});
+}
+
+// Timeout 0 never expires, so its send keeps no refund terms; a send that can time out keeps
+// what it debited, under its commitment.
+#[test]
+fn only_a_send_that_can_time_out_keeps_refund_terms() {
+	new_test_ext().execute_with(|| {
+		set_fees();
+		for (asset, dest, amount) in [(PDEX_ID, ETH, 10 * PDEX), (USDT, BSC, 5 * USD)] {
+			assert_ok!(send(&sender(), params(asset, dest, amount)));
+			assert_eq!(RefundTerms::<Runtime>::get(last_commitment()), None);
+			assert_ok!(send(&sender(), with_timeout(params(asset, dest, amount))));
+			assert_eq!(RefundTerms::<Runtime>::get(last_commitment()), Some((asset, amount)));
+		}
+		assert_eq!(RefundTerms::<Runtime>::iter().count(), 2);
+	});
+}
+
 // Fees and MaxCallData: Root or more than half of the council. The collector: Root only, and an
 // existing account. Each setter emits its event.
 #[test]
@@ -292,8 +357,8 @@ fn timeout_refund_keeps_the_fee() {
 	let mut ext = new_test_ext();
 	let commitments = ext.execute_with(|| {
 		set_fees();
-		assert_ok!(send(&sender(), params(PDEX_ID, ETH, 100 * PDEX)));
-		assert_ok!(send(&sender(), params(USDT, ETH, 50 * USD)));
+		assert_ok!(send(&sender(), with_timeout(params(PDEX_ID, ETH, 100 * PDEX))));
+		assert_ok!(send(&sender(), with_timeout(params(USDT, ETH, 50 * USD))));
 		let sent = hft_events().into_iter().filter_map(|event| match event {
 			HftEvent::TokenSent { commitment, .. } => Some(commitment),
 			_ => None,

@@ -230,7 +230,8 @@ fn free_bridge(asset: u128, collector: &AccountId) {
 	assert_ok!(IsmpParams::set_fee_collector(RuntimeOrigin::root(), collector.clone()));
 }
 
-/// `send` through the runtime dispatch, which rolls a failed send back as a block would.
+/// A `send` that can time out (an hour), through the runtime dispatch, which rolls a failed send
+/// back as a block would.
 fn send(who: &AccountId, asset: u128, amount: Balance) -> DispatchResult {
 	let recipient = vec![7u8; 20].try_into().unwrap();
 	let params = SendParams {
@@ -238,7 +239,7 @@ fn send(who: &AccountId, asset: u128, amount: Balance) -> DispatchResult {
 		destination: EVM,
 		recipient,
 		amount,
-		timeout: 0,
+		timeout: 3_600,
 		relayer_fee: 0,
 		call_data: None,
 	};
