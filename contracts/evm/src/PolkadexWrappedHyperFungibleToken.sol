@@ -361,6 +361,8 @@ contract PolkadexWrappedHyperFungibleToken is
         IERC20(_underlying).safeTransferFrom(msg.sender, address(this), params.amount);
 
         DispatchPost memory request = _buildDispatchPost(params);
+        // Polkadex: a `to` the peer can credit, 20 bytes for an EVM contract and 32 for a pallet, or the send reverts
+        if (params.to.length != (request.to.length == 20 ? 20 : 32)) revert InvalidAddress(params.to.length);
         bytes32 commitment;
         if (msg.value > 0) {
             commitment = IDispatcher(_host).dispatch{value: msg.value}(request);
