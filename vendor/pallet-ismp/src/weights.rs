@@ -62,8 +62,10 @@ impl WeightProvider for () {
 pub trait MessageWeightInfo {
 	/// A consensus update whose proof carries `k` signatures
 	fn handle_consensus(k: u32) -> Weight;
-	/// A batch of `n` requests with a `b`-byte proof, a benchmarked module callback each
-	fn handle_requests(n: u32, b: u32) -> Weight;
+	/// A batch of `n` requests with a minimal proof, a benchmarked module callback each
+	fn handle_requests(n: u32) -> Weight;
+	/// One request with `b` bytes of proof on top; only its growth with `b` is charged
+	fn handle_proof(b: u32) -> Weight;
 }
 
 /// Upstream's flat weight per call, for runtimes without benchmarks
@@ -71,8 +73,11 @@ impl MessageWeightInfo for () {
 	fn handle_consensus(_k: u32) -> Weight {
 		Weight::from_parts(300_000_000, 0)
 	}
-	fn handle_requests(_n: u32, _b: u32) -> Weight {
+	fn handle_requests(_n: u32) -> Weight {
 		Weight::from_parts(300_000_000, 0)
+	}
+	fn handle_proof(_b: u32) -> Weight {
+		Weight::zero()
 	}
 }
 

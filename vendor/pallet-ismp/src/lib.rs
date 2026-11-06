@@ -1020,8 +1020,15 @@ pub mod pallet {
 			let consensus = |bytes: usize| {
 				T::MessageWeightInfo::handle_consensus((bytes / PRECOMMIT_BYTES + 1) as u32)
 			};
+			// Per request from the sweep at a minimal proof, per proof byte from the sweep at one
+			// request, so neither slope is fitted under the other's cost.
+			let proof_bytes = |proof: &[u8]| {
+				T::MessageWeightInfo::handle_proof(proof.len() as u32)
+					.saturating_sub(T::MessageWeightInfo::handle_proof(0))
+			};
 			let batch = |n: usize, proof: &[u8], callbacks: Weight| {
-				T::MessageWeightInfo::handle_requests(n as u32, proof.len() as u32)
+				T::MessageWeightInfo::handle_requests(n as u32)
+					.saturating_add(proof_bytes(proof))
 					.saturating_add(callbacks)
 			};
 			match message {
