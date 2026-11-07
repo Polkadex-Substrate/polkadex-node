@@ -35,7 +35,7 @@ ExecStart=/usr/bin/polkadex-node \
     --no-mdns \
     --sync=warp \
     --enable-offchain-indexing=true \
-    --bootnodes=/dns/boot.polkadex.ee/tcp/30333/p2p/12D3KooWPBimEphuSb48WuwEm44WoACtgnRnDPiGf8ekhurWyc95 \
+    --bootnodes=/dns/boot.polkadex.ee/tcp/30333/ws/p2p/12D3KooWJx52mHnCUc9xQ1QcuLjz2k27ANHPJj5j7BYoB3jc6Uvn \
     --db-cache=512 \
     --prometheus-port=9615 \
     --telemetry-url="wss://telemetry.polkadot.io/submit/ 0" \
