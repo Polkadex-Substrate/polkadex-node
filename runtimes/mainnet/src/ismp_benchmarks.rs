@@ -18,12 +18,13 @@
 
 //! Benchmarks of unsigned ISMP messages through `Ismp::handle_unsigned`, which give
 //! `weights::ismp_messages`: a GRANDPA update finalised by `k` authorities (one signature per 136
-//! bytes of proof), and a batch of `n` transfers into the HFT pallet with `b` bytes of unrelated
-//! proof nodes on top of the batch's own proof.
+//! bytes of proof); a batch of `n` transfers into the HFT pallet at a minimal proof; and one
+//! transfer with `b` bytes of unrelated proof nodes on top of its own proof.
 
 use crate::{ismp_fixtures::*, Ismp, Runtime, RuntimeOrigin};
 use frame_benchmarking::v2::*;
 use frame_support::assert_ok;
+use ismp::messaging::Message;
 use sp_core::{crypto::KeyTypeId, ecdsa, ed25519};
 use sp_std::{vec, vec::Vec};
 
@@ -44,24 +45,40 @@ fn authorities(k: u32) -> Vec<ed25519::Public> {
 	keys
 }
 
+/// `n` transfers in with `b` bytes of unrelated proof nodes, set up to deliver. Each carries signed
+/// call_data from its own keystore key, so on_accept runs its ECDSA verify and dispatch, the
+/// heaviest path.
+fn signed_batch(n: u32, b: u32) -> Message {
+	let keys: Vec<ecdsa::Public> =
+		(0..n).map(|_| sp_io::crypto::ecdsa_generate(ECDSA_KEYS, None)).collect();
+	let sign = |i: u32, msg: &[u8; 32]| {
+		sp_io::crypto::ecdsa_sign_prehashed(ECDSA_KEYS, &keys[i as usize], msg)
+			.expect("a keystore key")
+	};
+	let (message, commitment) = transfers_in(n, b, Some(&sign));
+	setup_transfers_in(n, commitment);
+	message
+}
+
 #[benchmarks]
 mod benchmarks {
 	use super::*;
 
-	// Runs first: its signed-call_data setup is quick, so a fixture error fails in a minute
-	// rather than after the long consensus run.
+	// The per-request cost at a minimal proof. Runs first: its setup is quick, so a fixture error
+	// fails in a minute rather than after the long consensus run.
 	#[benchmark]
-	fn handle_requests(n: Linear<1, 64>, b: Linear<0, 262_144>) {
-		// Signed call_data, one keystore key per transfer: on_accept runs its ECDSA verify and
-		// dispatch, the heaviest path.
-		let keys: Vec<ecdsa::Public> =
-			(0..n).map(|_| sp_io::crypto::ecdsa_generate(ECDSA_KEYS, None)).collect();
-		let sign = |i: u32, msg: &[u8; 32]| {
-			sp_io::crypto::ecdsa_sign_prehashed(ECDSA_KEYS, &keys[i as usize], msg)
-				.expect("a keystore key")
-		};
-		let (message, commitment) = transfers_in(n, b, Some(&sign));
-		setup_transfers_in(n, commitment);
+	fn handle_requests(n: Linear<1, 64>) {
+		let message = signed_batch(n, 0);
+		#[block]
+		{
+			assert_ok!(Ismp::handle_unsigned(RuntimeOrigin::none(), vec![message]));
+		}
+	}
+
+	// The per-proof-byte cost at one request.
+	#[benchmark]
+	fn handle_proof(b: Linear<0, 262_144>) {
+		let message = signed_batch(1, b);
 		#[block]
 		{
 			assert_ok!(Ismp::handle_unsigned(RuntimeOrigin::none(), vec![message]));

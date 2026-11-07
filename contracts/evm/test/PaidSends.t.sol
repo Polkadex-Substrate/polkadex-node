@@ -204,6 +204,41 @@ abstract contract PaidSendsTest is Test {
         assertEq(sent().balanceOf(collector), 2 * FEE);
     }
 
+    // To the Polkadex pallet `to` must be a 32-byte account: 20 bytes reverts, 33 hits the cap first.
+    function test_RevertWhen_RecipientIsNotAPolkadexAccount() public {
+        setFees();
+        fund(user, 1e6 + FEE);
+        HFT.SendParams memory p = params(1e6);
+        p.to = new bytes(20);
+        vm.expectRevert(abi.encodeWithSelector(HFT.InvalidAddress.selector, 20));
+        send(user, p);
+        p.to = new bytes(33);
+        expectRevertedSend(BridgeFees.RecipientTooLong.selector, p);
+        p.to = new bytes(32);
+        send(user, p);
+        assertEq(sent().balanceOf(user), 0);
+        assertEq(sent().balanceOf(collector), FEE);
+    }
+
+    // To an EVM peer (a 20-byte module id) `to` must be a 20-byte address: 32 bytes reverts.
+    function test_RevertWhen_RecipientIsNotAnEvmAddress() public {
+        bytes memory bsc = StateMachine.evm(56);
+        vm.startPrank(owner);
+        token.addChain(bsc, abi.encodePacked(makeAddr("peer")));
+        token.setFee(bsc, FEE, 1);
+        token.setFeeCollector(collector);
+        vm.stopPrank();
+        fund(user, 1e6 + FEE);
+        HFT.SendParams memory p = params(1e6);
+        p.dest = bsc;
+        vm.expectRevert(abi.encodeWithSelector(HFT.InvalidAddress.selector, 32));
+        send(user, p);
+        p.to = abi.encodePacked(makeAddr("recipient"));
+        send(user, p);
+        assertEq(sent().balanceOf(user), 0);
+        assertEq(sent().balanceOf(collector), FEE);
+    }
+
     // An amount that is not a multiple of the destination's unit cannot arrive exactly, so the send reverts; a
     // unit of 0 refuses every amount.
     function test_RevertWhen_AmountIsNotAMultipleOfTheUnit() public {

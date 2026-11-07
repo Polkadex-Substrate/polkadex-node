@@ -137,7 +137,11 @@ fn unsigned_ismp_weight_follows_the_messages() {
 		assert_eq!(declared(vec![consensus(bytes)]), Weights::handle_consensus(signatures));
 		let small = declared(vec![consensus(1)]).ref_time();
 		assert!(small < declared(vec![consensus(bytes)]).ref_time());
-		assert_eq!(declared(vec![requests_with_proof(2, 100)]), Weights::handle_requests(2, 100));
+		// Only the proof's growth over an empty one is charged on top of the requests.
+		let proof = Weights::handle_proof(100).saturating_sub(Weights::handle_proof(0));
+		assert!(proof.any_gt(Weight::zero()));
+		let expected = Weights::handle_requests(2).saturating_add(proof);
+		assert_eq!(declared(vec![requests_with_proof(2, 100)]), expected);
 
 		let remark = RuntimeCall::System(frame_system::Call::remark { remark: vec![0; 64] });
 		let data = pallet_hyper_fungible_token::types::SubstrateCalldata {
@@ -150,7 +154,7 @@ fn unsigned_ismp_weight_follows_the_messages() {
 		carried.requests[0].body = body;
 		let call_weight = remark.get_dispatch_info().call_weight;
 		assert!(call_weight.any_gt(Weight::zero()));
-		let expected = Weights::handle_requests(2, 0).saturating_add(call_weight);
+		let expected = Weights::handle_requests(2).saturating_add(call_weight);
 		assert_eq!(declared(vec![Message::Request(carried)]), expected);
 
 		let normal = RuntimeBlockWeights::get().get(DispatchClass::Normal).max_extrinsic.unwrap();
@@ -160,8 +164,8 @@ fn unsigned_ismp_weight_follows_the_messages() {
 	});
 }
 
-// The benchmarks' two scenarios succeed here as they must there: a GRANDPA update finalised by five
-// authorities, and a batch of three transfers in with unrelated proof nodes on top.
+// The ismp benchmarks' scenarios succeed here as they must there: a GRANDPA update finalised by
+// five authorities, and a batch of three transfers in with unrelated proof nodes on top.
 #[test]
 fn ismp_benchmark_scenarios_succeed() {
 	use crate::ismp_fixtures::*;
@@ -226,7 +230,8 @@ fn free_bridge(asset: u128, collector: &AccountId) {
 	assert_ok!(IsmpParams::set_fee_collector(RuntimeOrigin::root(), collector.clone()));
 }
 
-/// `send` through the runtime dispatch, which rolls a failed send back as a block would.
+/// A `send` that can time out (an hour), through the runtime dispatch, which rolls a failed send
+/// back as a block would.
 fn send(who: &AccountId, asset: u128, amount: Balance) -> DispatchResult {
 	let recipient = vec![7u8; 20].try_into().unwrap();
 	let params = SendParams {
@@ -234,7 +239,7 @@ fn send(who: &AccountId, asset: u128, amount: Balance) -> DispatchResult {
 		destination: EVM,
 		recipient,
 		amount,
-		timeout: 0,
+		timeout: 3_600,
 		relayer_fee: 0,
 		call_data: None,
 	};
@@ -516,5 +521,56 @@ fn a_transfer_without_terms_refunds_by_the_route() {
 		pallet_hyper_fungible_token::RefundTerms::<Runtime>::remove(commitment);
 		assert_ok!(HyperFungibleToken::default().on_timeout(requests[0].clone()));
 		assert_eq!(Balances::free_balance(&sender), 1_000 * PDEX);
+	});
+}
+
+// A send is weighed for its path and its call_data length, an update for the chains it adds and
+// the chains it removes.
+#[test]
+fn hft_calls_are_weighed_by_path_length_and_chains() {
+	type Weights = <Runtime as pallet_hyper_fungible_token::Config>::WeightInfo;
+	use pallet_hyper_fungible_token::{Call, WeightInfo};
+	let declared = |call: Call<Runtime>| call.get_dispatch_info().call_weight;
+	let send = |asset_id: u128| {
+		let params = SendParams {
+			asset_id,
+			destination: EVM,
+			recipient: vec![7u8; 20].try_into().unwrap(),
+			amount: 1,
+			timeout: 0,
+			relayer_fee: 0,
+			call_data: Some(vec![0; 100]),
+		};
+		Call::send { params }
+	};
+	assert_eq!(declared(send(POLKADEX_NATIVE_ASSET_ID)), Weights::send_native(100));
+	assert_eq!(declared(send(1_987)), Weights::send_asset(100));
+	let chain = ChainConfig { token_contract: [0xaa; 20].into(), decimals: 18 };
+	let remove_chains = vec![StateMachine::Evm(2), StateMachine::Evm(3)];
+	let update = TokenUpdate { asset_id: 1_987, add_chains: [(EVM, chain)].into(), remove_chains };
+	assert_eq!(declared(Call::update_token { update }), Weights::update_token(3));
+}
+
+// The HFT benchmarks' scenarios succeed here as they must there, at their largest components: a
+// send down each path pays the bridge fee and records its refund terms; an update repoints every
+// chain of a registration over the most chains.
+#[test]
+fn hft_benchmark_scenarios_succeed() {
+	use crate::hft_benchmarks::*;
+	for asset in [POLKADEX_NATIVE_ASSET_ID, TOKEN] {
+		new_test_ext().execute_with(|| {
+			frame_system::Pallet::<Runtime>::set_block_number(1);
+			let sender = account(87);
+			let (collector, params) = priced_send(&sender, asset, MAX_CALL_DATA);
+			assert_ok!(HyperFungibleToken::send(RuntimeOrigin::signed(sender), params));
+			assert_sent(&collector, asset);
+		});
+	}
+	new_test_ext().execute_with(|| {
+		register_chains(TOKEN, false, MAX_CHAINS);
+		assert_contracts(TOKEN, MAX_CHAINS, 0);
+		let update = replace_chains(TOKEN, MAX_CHAINS);
+		assert_ok!(HyperFungibleToken::update_token(RuntimeOrigin::root(), update));
+		assert_contracts(TOKEN, MAX_CHAINS, REPLACED);
 	});
 }
