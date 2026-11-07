@@ -12006,7 +12006,7 @@ dependencies = [
 
 [[package]]
 name = "polkadex-node"
-version = "7.0.1"
+version = "7.0.2"
 dependencies = [
  "array-bytes 6.2.3",
  "bls-primitives",
