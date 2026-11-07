@@ -170,9 +170,9 @@ pub mod pallet {
 		OptionQuery,
 	>;
 
-	/// Polkadex: the asset and local amount each transfer debited, by request commitment, written
-	/// at `send` and taken by its timeout, so the refund ignores later contract, precision or
-	/// metadata changes.
+	/// Polkadex: the asset and local amount each transfer with a timeout debited, by request
+	/// commitment, written at `send` and taken by its timeout, so the refund ignores later
+	/// contract, precision or metadata changes.
 	#[pallet::storage]
 	pub type RefundTerms<T: Config> = StorageMap<
 		_,
@@ -268,6 +268,8 @@ pub mod pallet {
 		BridgeFeeNotSet,
 		/// Polkadex: `call_data` is longer than the governance cap
 		CallDataTooLong,
+		/// Polkadex: the recipient does not fit the destination: 20 bytes on EVM, 32 elsewhere
+		InvalidRecipient,
 	}
 
 	#[pallet::call]
@@ -299,6 +301,9 @@ pub mod pallet {
 				call_data_len <= T::BridgeFee::max_call_data() as usize,
 				Error::<T>::CallDataTooLong
 			);
+			// Polkadex: only a recipient the destination can credit: 20 bytes on EVM, 32 elsewhere
+			let recipient_len = if params.destination.is_evm() { 20 } else { 32 };
+			ensure!(params.recipient.len() == recipient_len, Error::<T>::InvalidRecipient);
 			let dispatcher = <T as Config>::Dispatcher::default();
 
 			let token_contract =
@@ -367,8 +372,10 @@ pub mod pallet {
 			let commitment = dispatcher
 				.dispatch_request(DispatchRequest::Post(dispatch_post), metadata)
 				.map_err(|_| Error::<T>::DispatchError)?;
-			// Polkadex: what this transfer debited, which its timeout refunds as is
-			RefundTerms::<T>::insert(commitment, (params.asset_id.clone(), params.amount));
+			// Polkadex: the terms its timeout refunds, kept only if it can time out (0 never does)
+			if params.timeout > 0 {
+				RefundTerms::<T>::insert(commitment, (params.asset_id.clone(), params.amount));
+			}
 
 			Self::deposit_event(Event::<T>::TokenSent {
 				from: who,

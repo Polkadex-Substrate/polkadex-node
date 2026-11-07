@@ -132,7 +132,8 @@ pub fn priced_send(
 	let params = SendParams {
 		asset_id: asset,
 		destination: DEST,
-		recipient: vec![0x77; 32].try_into().expect("32 bytes fit"),
+		// An EVM chain takes a 20-byte recipient, as send requires.
+		recipient: vec![0x77; 20].try_into().expect("20 bytes fit"),
 		amount,
 		timeout: 3_600,
 		relayer_fee: RELAYER_FEE,

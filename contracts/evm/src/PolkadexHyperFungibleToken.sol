@@ -356,6 +356,8 @@ contract PolkadexHyperFungibleToken is
         if (fee > 0) _transfer(msg.sender, collector, fee);
         _burn(msg.sender, params.amount);
         DispatchPost memory request = _buildDispatchPost(params);
+        // Polkadex: a `to` the peer can credit, 20 bytes for an EVM contract and 32 for a pallet, or the send reverts
+        if (params.to.length != (request.to.length == 20 ? 20 : 32)) revert InvalidAddress(params.to.length);
 
         bytes32 commitment;
         if (msg.value > 0) {

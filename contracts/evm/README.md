@@ -20,12 +20,17 @@ The two copies keep Polytope's Apache-2.0 notice and add one line saying they we
   decimals: a send whose amount is not a multiple of it reverts, since it could not arrive exactly. A unit
   of 0 refuses every send.
 - `to` is capped at 32 bytes and `data` at an owner-set length, which is 0 until set.
+- `send` reverts with `InvalidAddress` unless `to` is an account the peer can credit: 32 bytes for the
+  Polkadex pallet (an 8-byte module id), 20 bytes for an EVM contract peer (a 20-byte module id).
 - The owner can switch the host contract with `setHost`; `onlyHost` reads it on every call.
 - The wrapper pulls the amount plus the fee through the allowance and does not support WETH: `configure`
   refuses it.
 - The new state comes after Polytope's storage, so an existing proxy of their contracts can upgrade in place.
 
 `msg.value` still pays Hyperbridge's own relayer fee, and incoming transfers and timeout refunds are unchanged.
+
+Sends use timeout 0: a transfer then never expires and arrives whenever the relayer can deliver it, so it never
+needs a refund, which is why a `to` the peer cannot credit is refused up front.
 
 ## Build and test
 
