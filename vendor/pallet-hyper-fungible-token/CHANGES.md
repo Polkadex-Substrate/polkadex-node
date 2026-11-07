@@ -37,5 +37,9 @@ say so in their headers, and the new code is marked "Polkadex".
   only. Files: `src/lib.rs`, `src/types.rs`.
 - `call_data` cap: `send` refuses `call_data` longer than `BridgeFee::max_call_data()` with
   `CallDataTooLong`. File: `src/lib.rs`.
+- Weights by path and size: `WeightInfo` has `send_native(d)` and `send_asset(d)` in place of
+  `send()`, chosen by the asset sent with `d` the `call_data` length, so the runtime can weigh
+  each path from its own benchmark; `update_token` counts removed chains as well as added ones.
+  Files: `src/lib.rs`, `src/weights.rs`.
 
 The new event and errors are appended, so existing indices and `TokenSent` do not change.

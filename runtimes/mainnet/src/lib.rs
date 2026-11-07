@@ -617,7 +617,7 @@ impl pallet_hyper_fungible_token::Config for Runtime {
 	type CreateOrigin = EnsureRoot<AccountId>;
 	type Decimals = Decimals;
 	type EvmToSubstrate = ();
-	// No benchmarks yet: the crate's placeholders, plus the refund-terms write and fee hook on `send`.
+	// From `hft_benchmarks`: send per path and call_data length, register and update per chain.
 	type WeightInfo = weights::pallet_hyper_fungible_token::WeightInfo<Runtime>;
 	// Every send pays the fee IsmpParams holds for its (asset, destination); unset fails closed.
 	type BridgeFee = IsmpParams;
@@ -2948,6 +2948,7 @@ mod benches {
 		[pallet_ismp, Ismp]
 		[ismp_grandpa, IsmpGrandpa]
 		[ismp_messages, crate::ismp_benchmarks::Pallet::<Runtime>]
+		[pallet_hyper_fungible_token, crate::hft_benchmarks::Pallet::<Runtime>]
 	);
 }
 
@@ -3579,6 +3580,9 @@ mod ismp_fixtures;
 
 #[cfg(feature = "runtime-benchmarks")]
 mod ismp_benchmarks;
+
+#[cfg(any(test, feature = "runtime-benchmarks"))]
+mod hft_benchmarks;
 
 #[cfg(test)]
 mod tests {

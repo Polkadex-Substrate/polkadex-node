@@ -12,7 +12,9 @@ changed it as follows; the changed files say so in their headers, and the new co
   `pre_dispatch`, which runs at block import. File: `src/lib.rs`.
 - Weights of `handle_unsigned` from its messages, replacing the flat 300M with no proof size:
   `Config::MessageWeightInfo` prices a consensus or fraud proof at one signature per 136 bytes
-  (`PRECOMMIT_BYTES`) and a request, response or timeout batch per request and proof byte, and
+  (`PRECOMMIT_BYTES`) and a request, response or timeout batch per request (`handle_requests`,
+  benchmarked at a minimal proof) and per proof byte (`handle_proof`, benchmarked at one request,
+  charged by its growth over an empty proof), and
   `Config::WeightProvider` (upstream's unused trait) adds each module callback's declared weight.
   Files: `src/lib.rs`, `src/weights.rs`.
 - Sizing of `MaxEncodedSize` (a runtime value, 256 KiB): it fits a Polkadot GRANDPA finality proof
