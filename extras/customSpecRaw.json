@@ -3,6 +3,7 @@
   "id": "polkadex_main_network",
   "chainType": "Live",
   "bootNodes": [
+    "/dns/boot.polkadex.ee/tcp/30333/ws/p2p/12D3KooWJx52mHnCUc9xQ1QcuLjz2k27ANHPJj5j7BYoB3jc6Uvn",
     "/dns/boot.pdexmon.com/tcp/30333/ws/p2p/12D3KooWDG1dWUq2z3moX7yXqo5hKPSwcpyoK55NRrwZG8g5VtRu"
   ],
   "telemetryEndpoints": [],
