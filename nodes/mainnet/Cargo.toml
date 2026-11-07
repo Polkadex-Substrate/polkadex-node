@@ -1,7 +1,7 @@
 [package]
 name = "polkadex-node"
-version = "7.0.1"
-authors = ["Polkadex OÜ <https://polkadex.ee>"]
+version = "7.0.2"
+authors = ["The Polkadex Authors <https://polkadex.ee>"]
 description = "Polkadex Blockchain"
 edition = "2021"
 license = "GNU GPL v3"
@@ -17,8 +17,8 @@ targets = ["x86_64-unknown-linux-gnu"]
 name            = "polkadex-node"
 priority        = "optional"
 section         = "net"
-maintainer      = "Polkadex OÜ <ops@polkadex.ee>"
-copyright       = "2021-2026 Polkadex OÜ"
+maintainer      = "The Polkadex Authors <ops@polkadex.ee>"
+copyright       = "2021-2026 The Polkadex Authors"
 license-file    = ["../../LICENSE", "0"]
 # SECURITY/CORRECTNESS: no libssl dependency — confirmed via `ldd` the binary
 # links no OpenSSL/libcrypto at all (this workspace uses rustls; `openssl`/
