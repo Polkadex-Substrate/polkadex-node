@@ -4,7 +4,7 @@ Plan as of 30 Oct 2026, updated 2 Nov 2026.
 
 ## In short
 
-- Since runtime 392 went live on 29 Oct, staked PDEX cannot be used to vote once it has moved into the new staking compartment (explained below). @LegoMatrix spotted this and reported it in the main Telegram group before 392 went live. Thank you, Lego. We let 392 go ahead and promised a small, separate fix.
+- Since runtime 392 went live on 29 Oct, staked PDEX cannot be used to vote once it has moved into the new staking compartment (explained below). One of the validators spotted this and reported it in the main Telegram group before 392 went live. Thank you, Lego. We let 392 go ahead and promised a small, separate fix.
 - While building that fix, we found a second problem caused by the same change. About 300 staking accounts cannot send any transaction, because the fee check refuses them. Their PDEX is safe: nothing is lost and nothing has left their accounts.
 - Runtime 393 fixes both problems and changes nothing else. A free cleanup call fixes most of the stuck accounts even before 393.
 - We also found 1,541 staked accounts with only about 1 PDEX free, too little for any fee. Each of them has now received 0.5 PDEX.
