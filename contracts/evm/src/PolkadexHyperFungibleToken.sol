@@ -358,6 +358,8 @@ contract PolkadexHyperFungibleToken is
         DispatchPost memory request = _buildDispatchPost(params);
         // Polkadex: a `to` the peer can credit, 20 bytes for an EVM contract and 32 for a pallet, or the send reverts
         if (params.to.length != (request.to.length == 20 ? 20 : 32)) revert InvalidAddress(params.to.length);
+        // Polkadex: never the all-zero address: an EVM token cannot mint to it, and on Polkadex it is nobody's
+        if (keccak256(params.to) == keccak256(new bytes(params.to.length))) revert InvalidAddress(params.to.length);
 
         bytes32 commitment;
         if (msg.value > 0) {
