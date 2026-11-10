@@ -37,7 +37,7 @@ From our testnet soak of 96 hours and Polytope's figures for their mainnet:
 
 A bridge message can carry an expiry. For a plain token transfer an expiry adds nothing: if the message is not delivered in time, it has to be reversed with a second proof that someone must send, and the tokens are back where they started. So the Polkadex apps send transfers without an expiry, and a transfer stays valid until a relayer delivers it. A slow relayer means a slow transfer. The chain itself still accepts an expiry; a sender who sets one keeps the right to a refund once it passes.
 
-Because a transfer without an expiry cannot be reversed, the chain refuses a transfer that could never be credited before any token moves: a recipient on Ethereum must be a 20-byte address, and a recipient on Polkadex must be a 32-byte account. The contracts on the other side make the same check.
+Because a transfer without an expiry cannot be reversed, the chain refuses a transfer that could never be credited before any token moves: a recipient on Ethereum must be a 20-byte address, and a recipient on Polkadex must be a 32-byte account, and never the all-zero address. The contracts on the other side make the same check.
 
 ## What governance controls
 
@@ -62,9 +62,9 @@ BSC follows later by the same steps, once the bridge has run on Ethereum for a w
 
 The release page on GitHub lists the compressed wasm with its sha256 and blake2 hashes, and the hash of the `set_code` call the referendum carries. The referendum page on the explorer shows the same `set_code` hash. To recompute from the downloaded file: `sha256sum <file>` and `b2sum -l 256 <file>` for the wasm, or `subwasm info <file>` for both the blake2 hash and the proposal hash.
 
-- Wasm (1,465,316 bytes) blake2: `0xa3a3856adeb50aa7c148771c437ea2bd011ed663a521486b8cfdf2ed85bb30f8`
-- Wasm sha256: `1a35874ae8d93ca27279062206bff8faee03a4099071c5bc6d362c5a7c0a59bb`
-- `set_code` hash: `0x0b85e150ee8d6348542bb0e9decbd347dabac2ed53dc52c2175164e35850dc6c`
+- Wasm (1,463,893 bytes) blake2: `0x10eda81162251e928f52560e1a4779d59f043b5b8d31170dc7b3e354b5266097`
+- Wasm sha256: `4812394858bf2a6343c5daa74e16a3eeeaca6396c64ab65529e8ca00898dc621`
+- `set_code` hash: `0x783a5b869b9a366076a7d17ca9a3dd67e82f37f68e6803d2a4a07a236e8a8fb0`
 
 ## How to vote
 
