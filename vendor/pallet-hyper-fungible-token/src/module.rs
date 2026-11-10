@@ -1,5 +1,6 @@
 // Copyright (C) Polytope Labs Ltd.
 // SPDX-License-Identifier: Apache-2.0
+// Modified by The Polkadex Authors in 2026; see CHANGES.md.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,14 +22,16 @@ use crate::{
 };
 use alloc::{format, vec};
 use alloy_sol_types::SolValue;
-use codec::{Decode, Encode};
+use codec::{Decode, DecodeLimit, Encode};
 use frame_support::traits::{
 	fungibles::{self, Mutate},
 	tokens::Preservation,
 	Contains, Currency, ExistenceRequirement,
 };
+use frame_support::dispatch::GetDispatchInfo;
 use frame_system::RawOrigin;
 use ismp::{
+	messaging::hash_request,
 	module::IsmpModule,
 	router::{GetResponse, PostRequest, Request},
 };
@@ -37,6 +40,26 @@ use sp_core::{Get, H160, U256};
 use sp_runtime::{MultiSignature, Weight};
 
 use crate::types::EvmToSubstrate;
+
+impl<T: Config> Pallet<T> {
+	/// Polkadex: the declared weight of the runtime call an arriving transfer carries, which
+	/// `on_accept` dispatches unmetered; zero for a transfer without one.
+	pub fn runtime_call_weight(body: &[u8]) -> Weight {
+		let call = Message::abi_decode(body)
+			.ok()
+			.filter(|message| !message.data.is_empty())
+			.and_then(|message| SubstrateCalldata::decode(&mut &message.data[..]).ok())
+			// Polkadex: depth-limited like extrinsic decoding, so a nested call cannot blow the stack
+			.and_then(|data| {
+				T::RuntimeCall::decode_with_depth_limit(
+					frame_support::MAX_EXTRINSIC_DEPTH,
+					&mut &*data.runtime_call,
+				)
+				.ok()
+			});
+		call.map_or(Weight::zero(), |call| call.get_dispatch_info().call_weight)
+	}
+}
 
 impl<T: Config> IsmpModule for Pallet<T>
 where
@@ -72,13 +95,7 @@ where
 		let beneficiary: T::AccountId = beneficiary_bytes.into();
 
 		// Convert amount from ERC20 denomination to local
-		let decimals = if local_asset_id == T::NativeAssetId::get() {
-			T::Decimals::get()
-		} else {
-			<T::Assets as fungibles::metadata::Inspect<T::AccountId>>::decimals(
-				local_asset_id.clone(),
-			)
-		};
+		let decimals = Pallet::<T>::local_decimals(&local_asset_id);
 		let erc_decimals = Precisions::<T>::get(local_asset_id.clone(), source)
 			.ok_or(HftError::DecimalsNotConfigured(source))?;
 		let amount = convert_to_balance::<
@@ -186,8 +203,12 @@ where
 				}
 			};
 
-			let runtime_call = T::RuntimeCall::decode(&mut &*substrate_data.runtime_call)
-				.map_err(HftError::RuntimeCallDecodeError)?;
+			// Polkadex: depth-limited like extrinsic decoding, so a nested call cannot blow the stack
+			let runtime_call = T::RuntimeCall::decode_with_depth_limit(
+				frame_support::MAX_EXTRINSIC_DEPTH,
+				&mut &*substrate_data.runtime_call,
+			)
+			.map_err(HftError::RuntimeCallDecodeError)?;
 			// Apply the runtime's base call filter so that cross-chain calls cannot
 			// reach dispatchables that the runtime has otherwise filtered out (e.g.
 			// during a maintenance mode or a SafeMode period).
@@ -217,7 +238,10 @@ where
 
 	fn on_timeout(&self, request: Request) -> Result<Weight, anyhow::Error> {
 		match request {
-			Request::Post(PostRequest { body, to, dest, .. }) => {
+			Request::Post(post) => {
+				// Polkadex: the commitment `send` got from the dispatcher, which keys the terms
+				let commitment = hash_request::<pallet_ismp::Pallet<T>>(&Request::Post(post.clone()));
+				let PostRequest { body, to, dest, .. } = post;
 				let message = Message::abi_decode(&body).map_err(HftError::DecodeError)?;
 
 				// Refund the original sender
@@ -232,27 +256,25 @@ where
 				}
 				let beneficiary: T::AccountId = sender_bytes.into();
 
-				// Look up the asset from the destination contract address
-				let local_asset_id = ContractToAsset::<T>::get(dest, &to)
-					.ok_or(HftError::UnknownContractOnTimeout)?;
-
-				let decimals = if local_asset_id == T::NativeAssetId::get() {
-					T::Decimals::get()
-				} else {
-					<T::Assets as fungibles::metadata::Inspect<T::AccountId>>::decimals(
-						local_asset_id.clone(),
-					)
+				// Polkadex: the terms recorded at send; a transfer sent before them refunds by the route
+				// recorded at registration
+				let (local_asset_id, amount) = match RefundTerms::<T>::take(commitment) {
+					Some(terms) => terms,
+					None => {
+						let (asset, erc_decimals) = RefundRoutes::<T>::get(dest, &to)
+							.ok_or(HftError::UnknownContractOnTimeout)?;
+						let decimals = Pallet::<T>::local_decimals(&asset);
+						let amount = convert_to_balance::<
+							<<T as Config>::NativeCurrency as Currency<T::AccountId>>::Balance,
+						>(
+							U256::from_big_endian(&message.amount.to_be_bytes::<32>()),
+							erc_decimals,
+							decimals,
+						)
+						.map_err(|e| HftError::InvalidAmountConversion(format!("{e:?}")))?;
+						(asset, amount)
+					},
 				};
-				let erc_decimals = Precisions::<T>::get(local_asset_id.clone(), dest)
-					.ok_or(HftError::DecimalsNotConfigured(dest))?;
-				let amount = convert_to_balance::<
-					<<T as Config>::NativeCurrency as Currency<T::AccountId>>::Balance,
-				>(
-					U256::from_big_endian(&message.amount.to_be_bytes::<32>()),
-					erc_decimals,
-					decimals,
-				)
-				.map_err(|e| HftError::InvalidAmountConversion(format!("{e:?}")))?;
 
 				// Refund: release escrowed tokens back to the original sender
 				if local_asset_id == T::NativeAssetId::get() {
@@ -289,7 +311,8 @@ where
 					amount: amount.into(),
 					dest,
 				});
-				Ok(T::DbWeight::get().reads_writes(5, 2))
+				// Polkadex: plus the refund terms, read and removed
+				Ok(T::DbWeight::get().reads_writes(6, 3))
 			},
 			Request::Get(_) => Err(HftError::UnsupportedTimeoutType)?,
 		}
