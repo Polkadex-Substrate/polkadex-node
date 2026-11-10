@@ -191,7 +191,7 @@ abstract contract PaidSendsTest is Test {
         HFT.SendParams memory p = params(1e6);
         p.to = new bytes(33);
         expectRevertedSend(BridgeFees.RecipientTooLong.selector, p);
-        p.to = new bytes(32);
+        p.to = abi.encodePacked(bytes32(uint256(7)));
         send(user, p);
         p.data = hex"01";
         expectRevertedSend(BridgeFees.DataTooLong.selector, p);
@@ -214,7 +214,7 @@ abstract contract PaidSendsTest is Test {
         send(user, p);
         p.to = new bytes(33);
         expectRevertedSend(BridgeFees.RecipientTooLong.selector, p);
-        p.to = new bytes(32);
+        p.to = abi.encodePacked(bytes32(uint256(7)));
         send(user, p);
         assertEq(sent().balanceOf(user), 0);
         assertEq(sent().balanceOf(collector), FEE);
@@ -237,6 +237,28 @@ abstract contract PaidSendsTest is Test {
         send(user, p);
         assertEq(sent().balanceOf(user), 0);
         assertEq(sent().balanceOf(collector), FEE);
+    }
+
+    // The all-zero `to` can never be credited (nobody's account on Polkadex, no mint to address(0) on EVM): it
+    // reverts for both peers before any token moves.
+    function test_RevertWhen_RecipientIsAllZero() public {
+        setFees();
+        fund(user, 1e6 + FEE);
+        HFT.SendParams memory p = params(1e6);
+        p.to = new bytes(32);
+        vm.expectRevert(abi.encodeWithSelector(HFT.InvalidAddress.selector, 32));
+        send(user, p);
+        bytes memory bsc = StateMachine.evm(56);
+        vm.startPrank(owner);
+        token.addChain(bsc, abi.encodePacked(makeAddr("peer")));
+        token.setFee(bsc, FEE, 1);
+        vm.stopPrank();
+        p.dest = bsc;
+        p.to = new bytes(20);
+        vm.expectRevert(abi.encodeWithSelector(HFT.InvalidAddress.selector, 20));
+        send(user, p);
+        assertEq(sent().balanceOf(user), 1e6 + FEE);
+        assertEq(sent().balanceOf(collector), 0);
     }
 
     // An amount that is not a multiple of the destination's unit cannot arrive exactly, so the send reverts; a

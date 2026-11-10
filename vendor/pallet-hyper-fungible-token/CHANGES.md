@@ -42,7 +42,8 @@ say so in their headers, and the new code is marked "Polkadex".
   each path from its own benchmark; `update_token` counts removed chains as well as added ones.
   Files: `src/lib.rs`, `src/weights.rs`.
 - Recipient length: `send` refuses, with `InvalidRecipient` and before anything moves, a recipient
-  the destination cannot credit: exactly 20 bytes to an EVM chain, exactly 32 to any other.
+  the destination cannot credit: exactly 20 bytes to an EVM chain, exactly 32 to any other, and never all
+  zero (an EVM token cannot mint to address(0); elsewhere the zero account is nobody's).
   `recipient` takes up to 32 bytes and the EVM contracts revert unless `to` is 20, so such a
   transfer could never arrive. File: `src/lib.rs`.
 - Refund terms only with a timeout: `send` keeps `RefundTerms` only when `timeout` is above 0,

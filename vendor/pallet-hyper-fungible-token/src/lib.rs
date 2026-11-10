@@ -268,7 +268,7 @@ pub mod pallet {
 		BridgeFeeNotSet,
 		/// Polkadex: `call_data` is longer than the governance cap
 		CallDataTooLong,
-		/// Polkadex: the recipient does not fit the destination: 20 bytes on EVM, 32 elsewhere
+		/// Polkadex: the recipient does not fit the destination: 20 bytes on EVM, 32 elsewhere, never all zero
 		InvalidRecipient,
 	}
 
@@ -304,6 +304,8 @@ pub mod pallet {
 			// Polkadex: only a recipient the destination can credit: 20 bytes on EVM, 32 elsewhere
 			let recipient_len = if params.destination.is_evm() { 20 } else { 32 };
 			ensure!(params.recipient.len() == recipient_len, Error::<T>::InvalidRecipient);
+			// Polkadex: never the all-zero address: an EVM token cannot mint to it, elsewhere it is nobody's
+			ensure!(params.recipient.iter().any(|b| *b != 0), Error::<T>::InvalidRecipient);
 			let dispatcher = <T as Config>::Dispatcher::default();
 
 			let token_contract =

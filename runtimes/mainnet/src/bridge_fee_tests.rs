@@ -278,6 +278,45 @@ fn a_non_evm_send_takes_only_a_32_byte_recipient() {
 	});
 }
 
+// The all-zero address can never be credited: an EVM token cannot mint to address(0), and on any
+// other chain it is nobody's account. It is refused before anything moves, timeout 0 included:
+// sender, escrow and collector keep their balances and no request goes out. One non-zero byte passes.
+#[test]
+fn the_all_zero_recipient_is_refused() {
+	new_test_ext().execute_with(|| {
+		set_fees();
+		let escrow = HyperFungibleToken::pallet_account();
+		let state = || {
+			(
+				Balances::free_balance(sender()),
+				Balances::free_balance(&escrow),
+				Balances::free_balance(collector()),
+				Assets::balance(USDT, sender()),
+				hft_events().len(),
+			)
+		};
+		let before = state();
+		let zero = |p: SendParams<u128, Balance>, len: usize| SendParams {
+			recipient: vec![0u8; len].try_into().unwrap(),
+			..p
+		};
+		for (asset, amount) in [(PDEX_ID, 100 * PDEX), (USDT, 50 * USD)] {
+			let refused = zero(params(asset, ETH, amount), 20);
+			assert_noop!(send(&sender(), refused), HftError::<Runtime>::InvalidRecipient);
+		}
+		let other = StateMachine::Substrate(*b"TEST");
+		let refused = zero(params(PDEX_ID, other, PDEX), 32);
+		assert_noop!(send(&sender(), refused), HftError::<Runtime>::InvalidRecipient);
+		assert_eq!(state(), before);
+
+		let mut one = vec![0u8; 20];
+		one[19] = 1;
+		let fits = SendParams { recipient: one.try_into().unwrap(), ..params(PDEX_ID, ETH, 100 * PDEX) };
+		assert_ok!(send(&sender(), fits));
+		assert_paid(&sender(), PDEX_ID, ETH, 30 * PDEX, 100 * PDEX);
+	});
+}
+
 // Timeout 0 never expires, so its send keeps no refund terms; a send that can time out keeps
 // what it debited, under its commitment.
 #[test]
